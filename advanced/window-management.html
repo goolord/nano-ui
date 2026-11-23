@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-7ff48ffa.js";
+            window.path_to_searchindex_js = "../searchindex-3e092b89.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -219,7 +219,7 @@ editor docName = column $ do
 <p>SDL applies a command during the view, and the new window state comes back as an SDL event. <code>askWindow</code> in the same frame still returns the old size; a later frame returns the new one. <code>moveWindowUi</code> takes desktop coordinates on SDL and pixels on RGFW.</p>
 <p><code>quitUi</code> closes the window after the current frame is painted, and <code>runSdlApp</code> returns. Inside a <code>nativeWindow</code> body it closes only that window.</p>
 <p>Window calls read the window from the <code>NanoUI</code> context, which exists only while the backend evaluates the view. To change the window from a worker thread, write a <code>Var</code> that the view passes to a setter with <code>writeVarIO</code>, then run the action <code>askWake</code> returns so a frame runs (<a href="../state/index.html">State &amp; <code>Var</code></a>).</p>
-<p><code>askWindow :: NanoUI WindowState</code> returns the record the backend fills before the view runs: size, scale, focus, maximized and fullscreen flags, and <code>winCloseRequested</code>. The first call marks the window as read. From then on, every change to the record (focus, a move, maximizing) runs a frame that repaints the whole window instead of the differing rectangles. A view that never calls <code>askWindow</code> pays nothing.</p>
+<p><code>askWindow :: NanoUI WindowState</code> returns the record the backend fills before the view runs: size, scale, focus, maximized and fullscreen flags, and <code>winCloseRequested</code>. The first call marks the window as read. From then on, every change to the record (focus, a move, maximizing) runs a frame. A view that never calls <code>askWindow</code> pays nothing.</p>
 <h2 id="confirming-before-close"><a class="header" href="#confirming-before-close">Confirming before close</a></h2>
 <p>Set <code>wsExitOnCloseRequest = False</code>. On a close request the backend leaves the window open, sets <code>winCloseRequested</code>, runs one frame, and clears the flag after it. The confirmation has to outlive that frame, so the view copies the flag into a <code>Var</code>:</p>
 <pre><code class="language-haskell">confirmMain :: IO ()

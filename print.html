@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "searchindex-7ff48ffa.js";
+            window.path_to_searchindex_js = "searchindex-3e092b89.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9b0acd6d.js"></script>
@@ -1152,7 +1152,7 @@ settingsView settings = do
 <p>A freshly computed <code>NaN</code> is never unchanged (<code>NaN /= NaN</code>), so writing one every pass redraws forever. Guard the write.</p>
 <blockquote class="blockquote-tag blockquote-tag-tip">
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"></path></svg>Tip</p>
-<p>When an input widget is bound to a <code>Var</code> and nothing in the view calls <code>readVar</code> on it, only that widget repaints on change. A <code>readVar</code> promotes the write to a full-window repaint.</p>
+<p>A change to a <code>Var</code> repaints only the widgets whose text, value or style it altered, whether they are bound to the <code>Var</code> or show what a <code>readVar</code> returned.</p>
 </blockquote>
 <p><code>peekVar</code> reads without recording a dependency. <code>readVarIO</code>, <code>writeVarIO</code>, and <code>modifyVarIO</code> are the thread-safe versions; after a background write, call the callback from <code>askWake</code> to schedule a frame. Never touch the UI <code>Context</code> from a worker thread.</p>
 <h2 id="lifetime-and-resources"><a class="header" href="#lifetime-and-resources">Lifetime and resources</a></h2>
@@ -2670,7 +2670,7 @@ textAnchors =
           drawTextWith defaultTextFont {textFontSize = 24, textFontWeight = WeightBold} (centre r) AlignCenter AlignMiddle "42" amber)
        ]
 </code></pre>
-<p>Measure text with <code>lineWidth</code> and <code>uiFontMetrics</code>. Measure a whole run with <code>lineWidth</code> rather than adding per-glyph advances, because a shaping backend lays runs out by unrounded advances.</p>
+<p>Measure text in the view with <code>lineWidthUi</code> and <code>uiFontMetrics</code>, cut it to a width with <code>truncateTextUi</code>, and pass the results to the drawing. Both load the glyphs the text needs first. The pure <code>lineWidth</code> is exact only for text the metrics have already measured or drawn; for other text it adds per-glyph advances. Measure a whole run rather than adding per-glyph advances yourself, because a shaping backend lays runs out by unrounded advances.</p>
 <h3 id="borders-inset-or-centred"><a class="header" href="#borders-inset-or-centred">Borders: inset or centred</a></h3>
 <p><code>drawStrokeRoundedRect</code> keeps its border inside the rectangle. A path stroke is centred on the path, so half its width falls outside. The thin outline is the rectangle both cells were given.</p>
 <img src="images/canvas/borders.svg" alt="Two blue rounded borders over a thin guide rectangle: drawStrokeRoundedRect sits entirely inside it, drawStrokePath straddles it.">
@@ -2811,7 +2811,7 @@ fontOptions =
     , sdlAppFontSize = 14
     }
 </code></pre>
-<p><code>setSdlUiFont</code> changes fonts mid-session. <code>sdlAppUiScale = 0</code> follows the desktop scale on Windows. Measure text with <code>lineWidth</code>, <code>fmLineHeight</code>, and <code>fmSnapScale</code>, not by summing per-glyph advances.</p>
+<p><code>setSdlUiFont</code> changes fonts mid-session. <code>sdlAppUiScale = 0</code> follows the desktop scale on Windows. Measure text with <code>lineWidthUi</code>, <code>fmLineHeight</code>, and <code>fmSnapScale</code>, not by summing per-glyph advances.</p>
 <p>The font modifiers side by side:</p>
 <p><nano-ui-typo-lab></nano-ui-typo-lab></p>
 <div style="break-before: page; page-break-before: always;"></div>
@@ -3070,7 +3070,7 @@ refreshInBackground queryResult = do
     writeVarIO queryResult result
     wake -- schedule one frame
 </code></pre>
-<p><code>readVarIO</code>, <code>writeVarIO</code>, and <code>modifyVarIO</code> are the thread-safe <code>Var</code> operations. The wake repaints the whole window, because it carries no record of which widget changed. Use a <code>Stream</code> for frequent updates.</p>
+<p><code>readVarIO</code>, <code>writeVarIO</code>, and <code>modifyVarIO</code> are the thread-safe <code>Var</code> operations. The frame the wake runs repaints the widgets whose text, value or style the change altered. Use a <code>Stream</code> for frequent updates.</p>
 <h2 id="animation"><a class="header" href="#animation">Animation</a></h2>
 <p><code>animateTo</code> moves a value toward a target:</p>
 <pre><code class="language-haskell">sidebar :: Float -&gt; NanoUI ()
@@ -3176,7 +3176,7 @@ editor docName = column $ do
 <p>SDL applies a command during the view, and the new window state comes back as an SDL event. <code>askWindow</code> in the same frame still returns the old size; a later frame returns the new one. <code>moveWindowUi</code> takes desktop coordinates on SDL and pixels on RGFW.</p>
 <p><code>quitUi</code> closes the window after the current frame is painted, and <code>runSdlApp</code> returns. Inside a <code>nativeWindow</code> body it closes only that window.</p>
 <p>Window calls read the window from the <code>NanoUI</code> context, which exists only while the backend evaluates the view. To change the window from a worker thread, write a <code>Var</code> that the view passes to a setter with <code>writeVarIO</code>, then run the action <code>askWake</code> returns so a frame runs (<a href="#state--var">State &amp; <code>Var</code></a>).</p>
-<p><code>askWindow :: NanoUI WindowState</code> returns the record the backend fills before the view runs: size, scale, focus, maximized and fullscreen flags, and <code>winCloseRequested</code>. The first call marks the window as read. From then on, every change to the record (focus, a move, maximizing) runs a frame that repaints the whole window instead of the differing rectangles. A view that never calls <code>askWindow</code> pays nothing.</p>
+<p><code>askWindow :: NanoUI WindowState</code> returns the record the backend fills before the view runs: size, scale, focus, maximized and fullscreen flags, and <code>winCloseRequested</code>. The first call marks the window as read. From then on, every change to the record (focus, a move, maximizing) runs a frame. A view that never calls <code>askWindow</code> pays nothing.</p>
 <h2 id="confirming-before-close"><a class="header" href="#confirming-before-close">Confirming before close</a></h2>
 <p>Set <code>wsExitOnCloseRequest = False</code>. On a close request the backend leaves the window open, sets <code>winCloseRequested</code>, runs one frame, and clears the flag after it. The confirmation has to outlive that frame, so the view copies the flag into a <code>Var</code>:</p>
 <pre><code class="language-haskell">confirmMain :: IO ()
@@ -3543,7 +3543,8 @@ nameLine f = rowWith (fillW . tight) . labelWith (fillW . f)
 <pre><code class="language-haskell">diskSelect :: [Text] -&gt; Var Int -&gt; NanoUI ()
 diskSelect options selectedVar = do
   fm &lt;- uiFontMetrics
-  let w = maximum (0 : map (lineWidth fm) options) + 56
+  widths &lt;- mapM (lineWidthUi fm) options
+  let w = maximum (0 : widths) + 56
   selectWith (fixedW w) options selectedVar
 </code></pre>
 <h3 id="content-derived-geometry-recomputes-and-jitters"><a class="header" href="#content-derived-geometry-recomputes-and-jitters">Content-derived geometry recomputes and jitters</a></h3>
@@ -3583,11 +3584,11 @@ flatList = styled (inputStyle (background colorTransparent . borderWidth 0))</p>
 
 `fmAdvance` per glyph multiplied by the character count is not the shaped width of a run. A shaping backend lays a run out by unrounded advances (8 vs 8.25 px at size 15), so per-glyph arithmetic drifts a cell every ~32 characters and long runs overdraw what follows.
 
-**Fix:** measure the whole run:
+**Fix:** measure the whole run in the view, where the metrics can load its glyphs first:
 
 ```haskell
-runWidth :: FontMetrics -&gt; Text -&gt; Float
-runWidth fm run = lineWidth fm run
+runWidth :: FontMetrics -&gt; Text -&gt; NanoUI Float
+runWidth fm run = lineWidthUi fm run
 </code></pre>
 <p>(<code>ned</code>: “text stays on the cell grid along a long run”.)</p>
 <h3 id="text-shimmers-at-fractional-dpi-scales"><a class="header" href="#text-shimmers-at-fractional-dpi-scales">Text shimmers at fractional DPI scales</a></h3>
@@ -3683,7 +3684,7 @@ composition wid caretRect = do
 <li><input disabled="" type="checkbox"> Focus queries at the top of the view: the arena was reset; read them at the end.</li>
 <li><input disabled="" type="checkbox"> Escape behind the same guard as Ctrl+A/Delete: text inputs do not claim Escape.</li>
 <li><input disabled="" type="checkbox"> A focused widget reading <code>inputChars</code> without <code>useInputMethod</code>: typed text never arrives.</li>
-<li><input disabled="" type="checkbox"> Per-glyph advance × count for a long run: use <code>lineWidth</code>.</li>
+<li><input disabled="" type="checkbox"> Per-glyph advance × count for a long run: use <code>lineWidthUi</code>.</li>
 <li><input disabled="" type="checkbox"> Parsing or rebuilding documents per frame: parse once and keep the result outside the view.</li>
 <li><input disabled="" type="checkbox"> <code>readVar</code> above the widget that edits the <code>Var</code>: an extra pass per change.</li>
 <li><input disabled="" type="checkbox"> Missing <code>-threaded</code>.</li>
@@ -3794,7 +3795,7 @@ python scripts/profile/summarize_prof.py profile-json.prof
 <h2 id="consequences"><a class="header" href="#consequences">Consequences</a></h2>
 <ul>
 <li>The view can run more than once per frame. A write to a <code>Var</code> read earlier in the pass triggers a second pass with one-shot events cleared. Guard side effects with an event (<code>whenM (button ...)</code>), and never allocate frame-lived resources inside the view.</li>
-<li><code>readVar</code> placement is a performance decision. Reading below the input that edits a value keeps a change to one pass; reading above costs a second pass. A <code>Var</code> bound to a widget with no <code>readVar</code> repaints only that widget; a <code>readVar</code> promotes the change to a full-window repaint.</li>
+<li><code>readVar</code> placement is a performance decision. Reading below the input that edits a value keeps a change to one pass; reading above costs a second pass. Either way a change repaints only the widgets whose text, value or style it altered.</li>
 <li>Geometry lags one frame. <code>respRect</code> is empty on a widget’s first appearance. Tests warm up before targeting rectangles.</li>
 <li>Widget ids are positional. Conditional widgets, reordered lists, and conditional overlays change the count and therefore later ids. <code>scope</code> and <code>withKey</code> keep the counts stable; see <a href="#widget-identity--keys">Widget Identity &amp; Keys</a>.</li>
 <li>An idle window costs nothing. With no animation, timed wake, task, or input, the loop blocks on the OS event queue. Do not dirty the context every frame to force redraws.</li>

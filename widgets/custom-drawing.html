@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-7ff48ffa.js";
+            window.path_to_searchindex_js = "../searchindex-3e092b89.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -448,7 +448,7 @@ textAnchors =
           drawTextWith defaultTextFont {textFontSize = 24, textFontWeight = WeightBold} (centre r) AlignCenter AlignMiddle "42" amber)
        ]
 </code></pre>
-<p>Measure text with <code>lineWidth</code> and <code>uiFontMetrics</code>. Measure a whole run with <code>lineWidth</code> rather than adding per-glyph advances, because a shaping backend lays runs out by unrounded advances.</p>
+<p>Measure text in the view with <code>lineWidthUi</code> and <code>uiFontMetrics</code>, cut it to a width with <code>truncateTextUi</code>, and pass the results to the drawing. Both load the glyphs the text needs first. The pure <code>lineWidth</code> is exact only for text the metrics have already measured or drawn; for other text it adds per-glyph advances. Measure a whole run rather than adding per-glyph advances yourself, because a shaping backend lays runs out by unrounded advances.</p>
 <h3 id="borders-inset-or-centred"><a class="header" href="#borders-inset-or-centred">Borders: inset or centred</a></h3>
 <p><code>drawStrokeRoundedRect</code> keeps its border inside the rectangle. A path stroke is centred on the path, so half its width falls outside. The thin outline is the rectangle both cells were given.</p>
 <img src="../images/canvas/borders.svg" alt="Two blue rounded borders over a thin guide rectangle: drawStrokeRoundedRect sits entirely inside it, drawStrokePath straddles it.">

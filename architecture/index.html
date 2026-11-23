@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-7ff48ffa.js";
+            window.path_to_searchindex_js = "../searchindex-3e092b89.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -195,7 +195,7 @@
 <h2 id="consequences"><a class="header" href="#consequences">Consequences</a></h2>
 <ul>
 <li>The view can run more than once per frame. A write to a <code>Var</code> read earlier in the pass triggers a second pass with one-shot events cleared. Guard side effects with an event (<code>whenM (button ...)</code>), and never allocate frame-lived resources inside the view.</li>
-<li><code>readVar</code> placement is a performance decision. Reading below the input that edits a value keeps a change to one pass; reading above costs a second pass. A <code>Var</code> bound to a widget with no <code>readVar</code> repaints only that widget; a <code>readVar</code> promotes the change to a full-window repaint.</li>
+<li><code>readVar</code> placement is a performance decision. Reading below the input that edits a value keeps a change to one pass; reading above costs a second pass. Either way a change repaints only the widgets whose text, value or style it altered.</li>
 <li>Geometry lags one frame. <code>respRect</code> is empty on a widget’s first appearance. Tests warm up before targeting rectangles.</li>
 <li>Widget ids are positional. Conditional widgets, reordered lists, and conditional overlays change the count and therefore later ids. <code>scope</code> and <code>withKey</code> keep the counts stable; see <a href="../state/identity.html">Widget Identity &amp; Keys</a>.</li>
 <li>An idle window costs nothing. With no animation, timed wake, task, or input, the loop blocks on the OS event queue. Do not dirty the context every frame to force redraws.</li>

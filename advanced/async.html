@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-7ff48ffa.js";
+            window.path_to_searchindex_js = "../searchindex-3e092b89.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-9b0acd6d.js"></script>
@@ -241,7 +241,7 @@ refreshInBackground queryResult = do
     writeVarIO queryResult result
     wake -- schedule one frame
 </code></pre>
-<p><code>readVarIO</code>, <code>writeVarIO</code>, and <code>modifyVarIO</code> are the thread-safe <code>Var</code> operations. The wake repaints the whole window, because it carries no record of which widget changed. Use a <code>Stream</code> for frequent updates.</p>
+<p><code>readVarIO</code>, <code>writeVarIO</code>, and <code>modifyVarIO</code> are the thread-safe <code>Var</code> operations. The frame the wake runs repaints the widgets whose text, value or style the change altered. Use a <code>Stream</code> for frequent updates.</p>
 <h2 id="animation"><a class="header" href="#animation">Animation</a></h2>
 <p><code>animateTo</code> moves a value toward a target:</p>
 <pre><code class="language-haskell">sidebar :: Float -&gt; NanoUI ()
