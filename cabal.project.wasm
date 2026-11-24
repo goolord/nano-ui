@@ -1,4 +1,4 @@
--- The browser build: nano-ui, the web backend and the browser cookbook for
+-- The browser build: nano-ui, the web backend and the browser sampler for
 -- wasm32-wasi, with GHC's wasm backend (ghc-wasm-meta). Build with
 -- packages/nano-ui-sdl-web/scripts/build-web.sh, which passes this file as
 -- --project-file. SDL3 and SDL3_ttf come from build-wasi-deps.sh through
@@ -30,7 +30,7 @@ package nano-ui-ttf
 package nano-ui-sdl-web
   flags: +sdl
 
--- Only the browser cookbook: the SDL demos and their libraries need
+-- Only the browser sampler: the SDL demos and their libraries need
 -- nano-ui-sdl, which has no browser build.
 package nano-ui-demo
   flags: -sdl +web

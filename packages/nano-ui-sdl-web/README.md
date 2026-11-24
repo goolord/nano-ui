@@ -41,7 +41,7 @@ Because browsers do not expose local filesystem paths, web file dialogs work dir
 - `openWebFolder` reads every file in a selected directory, preserving relative paths inside that folder.
 - `saveWebFile opts name bytes` opens a native Save dialog in Chromium browsers (via `showSaveFilePicker`) and falls back to a standard browser download in Firefox and Safari, returning the saved filename. (Firefox prompts for a destination if its "Always ask you where to save files" setting is enabled, and otherwise saves straight to Downloads.)
 
-Browsers require file pickers to launch inside a user gesture, so trigger them from a `useTask` kicked off by a button click (see the cookbook's File Dialogs section). Note that opening reads entire selected files into memory.
+Browsers require file pickers to launch inside a user gesture, so trigger them from a `useTask` kicked off by a button click (see the sampler's File Dialogs section). Note that opening reads entire selected files into memory.
 
 ## Debugging
 
@@ -81,7 +81,7 @@ python3 -m http.server -d dist-web 8000
 
 `build-wasi-deps.sh` cross-compiles FreeType, HarfBuzz, SDL3, and SDL3_ttf into `~/.nano-ui-wasi` with `-fPIC` (required for ghc-wasm-meta's shared Template Haskell linking) and Wasm exception handling (`-mllvm -wasm-enable-sjlj`, needed by FreeType's `setjmp`). Because SDL3 does not yet have a dedicated WASI target, the script patches three spots in SDL to build it cleanly as a single-threaded console Unix build.
 
-`build-web.sh [out-dir [cabal-target]]` compiles the target with `cabal.project.wasm` (defaulting to `nano-ui-sdl-web-demo`; pass `nano-ui-demo:exe:nano-ui-web-cookbook` for the full cookbook), optimizes the Wasm binary with `wasm-opt -O2` (override via `WASM_OPT_FLAGS`), and writes the HTML page, JS runtime, `main.wasm`, JSFFI glue, and [browser_wasi_shim](https://github.com/bjorn3/browser_wasi_shim) into `out-dir` (`dist-web/` by default). `cabal.project.wasm` enables `split-sections` so unused code strips cleanly; in the landing demo, roughly 2 MB of the binary is C libraries (FreeType, HarfBuzz, SDL, SDL_ttf, RTS, libc) and the rest is Haskell. Make sure `node` is on `PATH`, since Template Haskell embeds the bundled Inter font via Node.js.
+`build-web.sh [out-dir [cabal-target]]` compiles the target with `cabal.project.wasm` (defaulting to `nano-ui-sdl-web-demo`; pass `nano-ui-demo:exe:nano-ui-web-sampler` for the full sampler), optimizes the Wasm binary with `wasm-opt -O2` (override via `WASM_OPT_FLAGS`), and writes the HTML page, JS runtime, `main.wasm`, JSFFI glue, and [browser_wasi_shim](https://github.com/bjorn3/browser_wasi_shim) into `out-dir` (`dist-web/` by default). `cabal.project.wasm` enables `split-sections` so unused code strips cleanly; in the landing demo, roughly 2 MB of the binary is C libraries (FreeType, HarfBuzz, SDL, SDL_ttf, RTS, libc) and the rest is Haskell. Make sure `node` is on `PATH`, since Template Haskell embeds the bundled Inter font via Node.js.
 
 Verify a built directory in headless Chromium with `scripts/smoke-test.cjs <dir> <x> <y>`, which checks that the app updates the document title, renders text, and redraws cleanly after a click with zero console errors. CI runs this pipeline in `.github/workflows/web.yml` and publishes the output to GitHub Pages.
 
@@ -91,7 +91,7 @@ With native SDL3 and SDL3_ttf installed, `nano-ui-sdl-web` compiles alongside th
 
 ## Current status and desktop differences
 
-Tested end to end in headless Chromium (WebGL2/SwiftShader) on GHC 9.14 Wasm and natively on GHC 9.10 and 9.14: the cookbook's Diagnostics tab reports live stats, the font picker switches across both installed and Fontsource families (including fallback to Fontsource alone when Local Font Access is absent, as in Firefox and Safari), and Playwright verifies file/folder open and both save-picker and fallback download paths. Pixel-exact diffing against `nano-ui-sdl`, real IME input testing, and cross-browser QA outside Chromium remain on the roadmap.
+Tested end to end in headless Chromium (WebGL2/SwiftShader) on GHC 9.14 Wasm and natively on GHC 9.10 and 9.14: the sampler's Diagnostics tab reports live stats, the font picker switches across both installed and Fontsource families (including fallback to Fontsource alone when Local Font Access is absent, as in Firefox and Safari), and Playwright verifies file/folder open and both save-picker and fallback download paths. Pixel-exact diffing against `nano-ui-sdl`, real IME input testing, and cross-browser QA outside Chromium remain on the roadmap.
 
 Key differences from `nano-ui-sdl`:
 

@@ -1,4 +1,4 @@
--- | What the widget cookbook ("Demo") takes from the browser backend. The
+-- | What the widget sampler ("Demo") takes from the browser backend. The
 -- page has no font directories or file system: the font list is the bundled
 -- Inter, the installed families once the user lets the browser list them,
 -- and the font service's; the data files are compiled into the module; and
@@ -48,7 +48,7 @@ import Text.Printf (printf)
 
 import DemoFiles (dataFiles)
 
--- | The backend's name, shown in the cookbook's title bar.
+-- | The backend's name, shown in the sampler's title bar.
 backendLabel :: Text
 backendLabel = "Web"
 
@@ -138,8 +138,8 @@ fileDialogSection st opened = do
     runDialog (_, action) = case action of
       OpenFiles -> maybe Cancelled Opened <$> openWebFiles defaultFileDialogOptions {dialogAllowMany = True}
       OpenFolder -> maybe Cancelled Opened <$> openWebFolder
-      SaveFile -> maybe Cancelled Saved <$> saveWebFile defaultFileDialogOptions "nano-ui-cookbook.txt" saved
-    saved = "Saved from the nano-ui widget cookbook in the browser.\n"
+      SaveFile -> maybe Cancelled Saved <$> saveWebFile defaultFileDialogOptions "nano-ui-sampler.txt" saved
+    saved = "Saved from the nano-ui widget sampler in the browser.\n"
 
 -- | The web backend's frame statistics, which it samples four times a second
 -- while something asks for them, as the Debug window's sections.

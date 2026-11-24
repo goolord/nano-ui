@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 
--- | The package's @data@ directory, compiled into the browser cookbook. It
--- is a library of its own (@cookbook-files@) because GHC's wasm backend runs
+-- | The package's @data@ directory, compiled into the browser sampler. It
+-- is a library of its own (@sampler-files@) because GHC's wasm backend runs
 -- a splice with every C library of its component loaded, and it cannot load
 -- the web backend's: FreeType's setjmp imports an exception tag.
 module DemoFiles (dataFiles) where

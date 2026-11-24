@@ -3,7 +3,7 @@ name: Web
 # Builds the browser demos with GHC's wasm backend (ghc-wasm-meta) and the
 # WASI builds of FreeType, HarfBuzz, SDL3 and SDL3_ttf, loads each page in
 # headless Chrome, and uploads the site as the web-demo artifact: the
-# cookbook at its root, the web backend's own demo under minimal/, and the
+# sampler at its root, the web backend's own demo under minimal/, and the
 # landing page's demo under landing/. The Pages workflow (deploy-book.yml)
 # calls this one and publishes the artifact as the site's demo/ directory,
 # where the landing page (site/index.html) loads demo/landing/.
@@ -106,7 +106,7 @@ jobs:
         run: |
           wasm32-wasi-cabal update
           wasm32-wasi-cabal build --project-file=cabal.project.wasm --dry-run \
-            nano-ui-sdl-web:exe:nano-ui-sdl-web-demo nano-ui-demo:exe:nano-ui-web-cookbook \
+            nano-ui-sdl-web:exe:nano-ui-sdl-web-demo nano-ui-demo:exe:nano-ui-web-sampler \
             nano-ui-demo:exe:nano-ui-web-landing
 
       - name: Restore the wasm Cabal store
@@ -119,8 +119,8 @@ jobs:
           key: wasm-store-${{ runner.os }}-${{ env.GHC_WASM_META_REV }}-${{ hashFiles('dist-newstyle/cache/plan.json') }}
           restore-keys: wasm-store-${{ runner.os }}-${{ env.GHC_WASM_META_REV }}-
 
-      - name: Build the cookbook
-        run: packages/nano-ui-sdl-web/scripts/build-web.sh dist-web nano-ui-demo:exe:nano-ui-web-cookbook
+      - name: Build the sampler
+        run: packages/nano-ui-sdl-web/scripts/build-web.sh dist-web nano-ui-demo:exe:nano-ui-web-sampler
 
       - name: Build the web backend's demo
         run: packages/nano-ui-sdl-web/scripts/build-web.sh dist-web/minimal
@@ -147,12 +147,12 @@ jobs:
 
       # Loads each page in the runner's Chrome with Playwright (from
       # ghc-wasm-meta's Node.js packages): the first frame must draw, a click
-      # must redraw it (the cookbook's About button, the counter's +), and
+      # must redraw it (the sampler's About button, the counter's +), and
       # the page must log no errors. The landing page's demo opens on a tab
       # that spins, so its frame must change with no click.
       - name: Load the pages in headless Chrome
         run: |
-          node packages/nano-ui-sdl-web/scripts/smoke-test.cjs dist-web 1144 35 smoke-cookbook.png
+          node packages/nano-ui-sdl-web/scripts/smoke-test.cjs dist-web 1144 35 smoke-sampler.png
           node packages/nano-ui-sdl-web/scripts/smoke-test.cjs dist-web/minimal 80 104 smoke-minimal.png
           node packages/nano-ui-sdl-web/scripts/smoke-test.cjs smoke-landing - - smoke-landing.png
         env:

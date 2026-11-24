@@ -1,4 +1,4 @@
--- | The widget cookbook ("Demo") in an SDL window. Run
+-- | The widget sampler ("Demo") in an SDL window. Run
 -- @cabal run nano-ui-sdl-demo -- --help@ for the options. @--record DIR@
 -- records the README video's frames instead (see "SdlRecord").
 module Main (main) where

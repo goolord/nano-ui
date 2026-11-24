@@ -1,6 +1,6 @@
 {-# LANGUAGE CPP #-}
 
--- | The widget cookbook ("Demo") in a browser canvas, with the web backend.
+-- | The widget sampler ("Demo") in a browser canvas, with the web backend.
 -- Built with @wasm32-wasi-ghc@ it is a reactor module whose @nanoMain@
 -- export the page calls (see nano-ui-sdl-web's README); a native build only
 -- checks that it compiles, and running it says it needs a browser.
@@ -25,6 +25,6 @@ webOptions :: SdlWebOptions
 webOptions =
   defaultSdlWebOptions
     { webTheme = Just defaultTheme
-    , webWindowSettings = defaultWindowSettings {wsTitle = "nano-ui widget cookbook"}
+    , webWindowSettings = defaultWindowSettings {wsTitle = "nano-ui widget sampler"}
     , webFontService = Just Fontsource
     }

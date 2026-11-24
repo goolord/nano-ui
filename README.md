@@ -39,14 +39,14 @@ counter = row $ do
 
 ## Live demos and examples
 
-Try the full widget cookbook in your browser at **[goolord.github.io/nano-ui/demo](https://goolord.github.io/nano-ui/demo/)**, or explore the interactive landing page demo at **[goolord.github.io/nano-ui](https://goolord.github.io/nano-ui/)**. Both compile the desktop Haskell views to WebAssembly using [`nano-ui-sdl-web`](packages/nano-ui-sdl-web/README.md).
+Try the full widget sampler in your browser at **[goolord.github.io/nano-ui/demo](https://goolord.github.io/nano-ui/demo/)**, or explore the interactive landing page demo at **[goolord.github.io/nano-ui](https://goolord.github.io/nano-ui/)**. Both compile the desktop Haskell views to WebAssembly using [`nano-ui-sdl-web`](packages/nano-ui-sdl-web/README.md).
 
 Browse [`nano-ui-demo`](packages/nano-ui-demo/README.md) for all full apps and focused single-topic examples.
 
 Building locally requires GHC 9.10 through 9.14 (development uses 9.14) and Cabal. The SDL backend also requires SDL3, SDL3_ttf 3.2+, and `pkg-config`, all included in the `nix develop` shell.
 
 ```sh
-cabal run nano-ui-sdl-demo          # full widget and chart cookbook
+cabal run nano-ui-sdl-demo          # full widget and chart sampler
 cabal run nano-ui-sdl-notepad       # text editor with menus and native file dialogs
 cabal run nano-ui-sdl-logs          # streaming log viewer
 cabal run nano-ui-sdl-terminal      # PTY terminal emulator (Linux and macOS)

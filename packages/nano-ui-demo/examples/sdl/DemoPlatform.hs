@@ -1,6 +1,6 @@
--- | What the widget cookbook ("Demo") takes from the SDL backend: installed
+-- | What the widget sampler ("Demo") takes from the SDL backend: installed
 -- font families, data files read from disk, native file dialogs, and the
--- backend's frame statistics. The browser build of the cookbook has a
+-- backend's frame statistics. The browser build of the sampler has a
 -- module of the same name in @examples/web@ with the same exports.
 module DemoPlatform
   ( backendLabel
@@ -26,7 +26,7 @@ import NanoUI.Backend.Sdl
 import Paths_nano_ui_demo (getDataFileName)
 import Text.Printf (printf)
 
--- | The backend's name, shown in the cookbook's title bar.
+-- | The backend's name, shown in the sampler's title bar.
 backendLabel :: Text
 backendLabel = "SDL3"
 

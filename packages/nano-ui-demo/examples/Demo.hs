@@ -1,6 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 
--- | Interactive widget cookbook with one tab per widget family. Each tab
+-- | Interactive widget sampler with one tab per widget family. Each tab
 -- keeps its state right beside the controls that use it. For smaller
 -- single-topic programs (state, layout, forms, shortcuts, background tasks,
 -- and so on), look in this package's @examples/@ directory.
@@ -166,7 +166,7 @@ demoUi st = do
       panelWith (padXY 16 12 . fillW) $
         rowWith (tight . gap 12 . alignMid . fillW) $ do
           labelWith (tight . alignMid . fontMedium . fontSize 22) "nano-ui"
-          labelWith (tight . alignMid . fontMuted) (backendLabel <> " / Widget cookbook")
+          labelWith (tight . alignMid . fontMuted) (backendLabel <> " / Widget sampler")
           flex
           -- F1 and F12 do what the buttons do.
           about <- button "About"

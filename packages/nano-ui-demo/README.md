@@ -4,15 +4,15 @@ Example applications and single-topic tutorials for [nano-ui](https://github.com
 
 The package is organized into two parts:
 
-1. **Full applications** combining multiple features into complete programs: a widget and chart cookbook, a text editor, a streaming log viewer, and a terminal emulator.
+1. **Full applications** combining multiple features into complete programs: a widget and chart sampler, a text editor, a streaming log viewer, and a terminal emulator.
 2. **Single-topic examples** in [`examples/`](examples/): short, self-contained programs focused on one concept each (`Var` state, layout modifiers, forms, shortcuts, overlays, theming, animations, background tasks, and more).
 
 ## Full applications
 
 | Executable | Source | Description |
 | --- | --- | --- |
-| `nano-ui-sdl-demo` | [`examples/Demo.hs`](examples/Demo.hs), [`examples/sdl/`](examples/sdl/), [`lib/DemoData.hs`](lib/DemoData.hs) | Multi-tab cookbook covering built-in widgets, layouts, custom 2D vector graphics, animated GIFs, rich text, trees, sortable tables, closable tabs, dockable split panes, and `nano-ui-diagrams` charts. Includes a live State sidebar, an About dialog (`F1`), and a Debug window (`F12`) with frame timings, damage counters, and an interactive layout inspector. |
-| `nano-ui-web-cookbook` | [`examples/Demo.hs`](examples/Demo.hs), [`examples/web/`](examples/web/) | The same cookbook compiled to WebAssembly with `nano-ui-sdl-web` and [published online](https://goolord.github.io/nano-ui/demo/). Platform-specific adapters live in `DemoPlatform` under `examples/sdl` and `examples/web`: the web build embeds assets, loads Fontsource and Chromium local fonts, and opens/saves files by contents. Build it with `packages/nano-ui-sdl-web/scripts/build-web.sh dist-web nano-ui-demo:exe:nano-ui-web-cookbook`. |
+| `nano-ui-sdl-demo` | [`examples/Demo.hs`](examples/Demo.hs), [`examples/sdl/`](examples/sdl/), [`lib/DemoData.hs`](lib/DemoData.hs) | Multi-tab sampler covering built-in widgets, layouts, custom 2D vector graphics, animated GIFs, rich text, trees, sortable tables, closable tabs, dockable split panes, and `nano-ui-diagrams` charts. Includes a live State sidebar, an About dialog (`F1`), and a Debug window (`F12`) with frame timings, damage counters, and an interactive layout inspector. |
+| `nano-ui-web-sampler` | [`examples/Demo.hs`](examples/Demo.hs), [`examples/web/`](examples/web/) | The same sampler compiled to WebAssembly with `nano-ui-sdl-web` and [published online](https://goolord.github.io/nano-ui/demo/). Platform-specific adapters live in `DemoPlatform` under `examples/sdl` and `examples/web`: the web build embeds assets, loads Fontsource and Chromium local fonts, and opens/saves files by contents. Build it with `packages/nano-ui-sdl-web/scripts/build-web.sh dist-web nano-ui-demo:exe:nano-ui-web-sampler`. |
 | `nano-ui-sdl-landing` | [`examples/Landing.hs`](examples/Landing.hs), [`examples/Bloom.hs`](examples/Bloom.hs), [`examples/sdl/LandingMain.hs`](examples/sdl/LandingMain.hs) | Desktop SDL3 build of the four-tab [landing page](https://goolord.github.io/nano-ui/) demo, sized to fit mobile viewports without scrolling. Includes the animated Bloom canvas plus Controls, Text, and Data tabs. |
 | `nano-ui-web-landing` | Same sources with [`examples/web/LandingMain.hs`](examples/web/LandingMain.hs) | Browser build loaded by [`site/index.html`](../../site/index.html), depending only on `nano-ui` and `nano-ui-sdl-web`. Build it with `packages/nano-ui-sdl-web/scripts/build-web.sh dist-web/landing nano-ui-demo:exe:nano-ui-web-landing`. |
 | `nano-ui-sdl-notepad` | [`examples/Notepad.hs`](examples/Notepad.hs) | Plain-text editor with a `popup`-based menu bar, keyboard shortcuts, unsaved-change indicator in the window title, and non-blocking native open/save file dialogs. |
@@ -81,7 +81,7 @@ Building requires GHC 9.10 through 9.14 (development uses 9.14), Cabal, SDL3, SD
 Two test suites exercise the demo apps:
 
 ```sh
-cabal test nano-ui-demo-test      # drives the cookbook, notepad, log viewer, and IME checks in hidden SDL windows
+cabal test nano-ui-demo-test      # drives the sampler, notepad, log viewer, and IME checks in hidden SDL windows
 cabal test nano-ui-terminal-test  # tests the terminal emulator's ANSI parser and PTY integration (Linux and macOS)
 ```
 
