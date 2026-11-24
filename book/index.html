@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "searchindex-b875eeac.js";
+            window.path_to_searchindex_js = "searchindex-1039415d.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-9b0acd6d.js"></script>
@@ -189,7 +189,7 @@ counter = row $ do
   whenM (button "+") (modifyVar n (+ 1))
 </code></pre>
 <p>The code samples in this book assume <code>import NanoUI</code> and <code>OverloadedStrings</code>. You can find the full runnable source for each tutorial in <a href="https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-demo/examples"><code>packages/nano-ui-demo/examples</code></a>.</p>
-<p>If you want to try the widgets before installing anything, open the <a href="../demo/index.html">interactive cookbook</a> right in your browser. It runs the same <code>examples/Demo.hs</code> view as the desktop app, compiled to WebAssembly with <code>nano-ui-sdl-web</code>. A couple of browser-specific details apply: file dialogs work with file contents rather than disk paths, and the font picker pulls from Fontsource everywhere (plus your installed system fonts in Chromium browsers after you grant permission).</p>
+<p>If you want to try the widgets before installing anything, open the <a href="../demo/index.html">interactive sampler</a> right in your browser. It runs the same <code>examples/Demo.hs</code> view as the desktop app, compiled to WebAssembly with <code>nano-ui-sdl-web</code>. A couple of browser-specific details apply: file dialogs work with file contents rather than disk paths, and the font picker pulls from Fontsource everywhere (plus your installed system fonts in Chromium browsers after you grant permission).</p>
 <h2 id="packages-in-this-repository"><a class="header" href="#packages-in-this-repository">Packages in this repository</a></h2>
 <div class="table-wrapper">
 <table>
@@ -200,7 +200,7 @@ counter = row $ do
 <tr><td><code>packages/nano-ui</code></td><td>Core toolkit: widgets, layout solver, input, theming, draw lists, and text buffers.</td><td><a href="state/index.html">State</a>, <a href="layout/index.html">Layout</a>, <a href="widgets/index.html">Widget Gallery</a></td></tr>
 <tr><td><code>packages/nano-ui-sdl</code></td><td>Desktop SDL3 backend with HarfBuzz TrueType shaping, system font lookup, native file dialogs, and custom title bars.</td><td><a href="packages/index.html">Ecosystem Packages</a>, <a href="advanced/window-management.html">Desktop Windows</a></td></tr>
 <tr><td><code>packages/nano-ui-rgfw</code></td><td>Lightweight RGFW + OpenGL 3.2 backend with a bundled bitmap font and no extra library dependencies.</td><td><a href="packages/index.html">Ecosystem Packages</a></td></tr>
-<tr><td><code>packages/nano-ui-sdl-web</code></td><td>Browser backend for GHC’s WebAssembly target using SDL_ttf and WebGL2.</td><td><a href="../demo/index.html">Interactive Cookbook</a></td></tr>
+<tr><td><code>packages/nano-ui-sdl-web</code></td><td>Browser backend for GHC’s WebAssembly target using SDL_ttf and WebGL2.</td><td><a href="../demo/index.html">Interactive Sampler</a></td></tr>
 <tr><td><code>packages/nano-ui-emit</code></td><td>Elm-style architecture with typed messages and pure update reducers (<code>NanoUIE msg a</code>).</td><td><a href="state/elm.html">Elm-Style State</a></td></tr>
 <tr><td><code>packages/nano-ui-diagrams</code></td><td>Line, bar, scatter, and area charts (<code>NanoUI.Plot</code>) alongside <code>diagrams-lib</code> support.</td><td><a href="packages/index.html">Ecosystem Packages</a></td></tr>
 <tr><td><code>packages/nano-ui-form</code></td><td>Validated applicative forms built on <code>ditto</code>.</td><td><a href="packages/index.html">Ecosystem Packages</a></td></tr>
