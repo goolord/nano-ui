@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d41be472.js";
+            window.path_to_searchindex_js = "../searchindex-4929b437.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2886a539.js"></script>
@@ -222,13 +222,13 @@ heroBanner =
 <p>With <code>OverloadedRecordDot</code>, both uniform fields (<code>u.ppColor</code>) and GLSL-style vector swizzles (<code>u.ppColor.rgb</code>, <code>ctx.uv.xy</code>) resolve at compile time with no Template Haskell:</p>
 <pre><code class="language-haskell">pulseRing :: Shader 'Surface PulseParams
 pulseRing = surfaceShader $ \u ctx -&gt;
-  let centered = ctx.uv *^ floatE 2.0 - vec2 (floatE 1.0) (floatE 1.0)
+  let centered = ctx.uv *^ 2.0 - vec2 1.0 1.0
       dist = vLength centered
-      wave = floatE 0.5 + floatE 0.5 * sin (dist * u.ppRings - u.ppPhase)
-      half = ctx.size *^ floatE 0.5
+      wave = 0.5 + 0.5 * sin (dist * u.ppRings - u.ppPhase)
+      half = ctx.size *^ 0.5
       edge = sdRoundedBox (ctx.pos - half) half ctx.cornerRadius
-      aa = floatE 0.75 / maxE ctx.scale (floatE 1.0)
-      mask = floatE 1.0 - smoothstep (negate aa) aa edge
+      aa = 0.75 / maxE ctx.scale 1.0
+      mask = 1.0 - smoothstep (negate aa) aa edge
    in vec4_31 (u.ppColor.rgb *^ wave) (u.ppColor.a * mask)
 </code></pre>
 <p>Every fragment shader receives a <code>FragCtx</code> containing <code>ctx.uv</code> (normalized <code>[0, 1]</code> over the node rect), <code>ctx.pos</code> (logical pixels from the node’s top-left corner), <code>ctx.size</code> (logical width and height), <code>ctx.origin</code> (window-space logical origin), <code>ctx.scale</code> (device pixels per logical unit), <code>ctx.cornerRadius</code>, and <code>ctx.color</code> (vertex tint).</p>
@@ -238,7 +238,7 @@ pulseRing = surfaceShader $ \u ctx -&gt;
 blurredCard sigma body =
   withShader gaussianBlur sigma (panel body)
 </code></pre>
-<p><code>gaussianBlur</code> runs two separable 1D passes (horizontal then vertical) by pinging between pooled offscreen targets. Its bleed margin (<code>3 * sigma</code> pixels on each side) expands the offscreen target, cull test, and partial-damage region automatically so soft halos never clip at the widget edge.</p>
+<p><code>gaussianBlur</code> runs two separable 1D passes (horizontal then vertical) by alternating between pooled offscreen targets. Its bleed margin (<code>3 * sigma</code> pixels on each side) expands the offscreen target, cull test, and partial-damage region automatically so soft halos never clip at the widget edge. Use <code>withShader'</code> when you need both the subtree’s return value and its <code>Response</code>.</p>
 <p>Compatible effects fuse into a single GPU pass with zero extra offscreen targets:</p>
 <ul>
 <li><code>composeColor :: Shader 'ColorEffect u1 -&gt; Shader 'ColorEffect u2 -&gt; Shader 'ColorEffect (u1, u2)</code></li>
@@ -254,20 +254,20 @@ dimmedPanel body =
   withShader disabledTint (0.85, TintParams (colorRGB 30 60 110) 0.25) (panel body)
 </code></pre>
 <h2 id="bounded-loops-in-fragm"><a class="header" href="#bounded-loops-in-fragm">Bounded loops in <code>FragM</code></a></h2>
-<p>Iterative kernels (blurs, shadows, multi-octave noise) use the <code>FragM</code> builder (<code>surfaceShaderM</code>, <code>colorEffectM</code>, <code>distortionEffectM</code>, <code>layerEffectM</code>) with explicit <code>bind</code> and structured <code>forRange</code> loops:</p>
+<p>Iterative kernels (blurs, shadows, multi-octave noise) use the <code>FragM</code> builder (<code>surfaceShaderM</code>, <code>colorEffectM</code>, <code>distortionEffectM</code>, <code>layerEffectM</code>) with explicit <code>bind</code>, branchless selection (<code>selectE</code>), and structured <code>forRange</code> loops:</p>
 <pre><code class="language-haskell">boxAverage5 :: Shader 'LayerEffect Float
 boxAverage5 =
   layerEffectM (\step -&gt; V2 (2 * abs step) (2 * abs step)) $ \u ctx layer -&gt; do
-    step &lt;- bind (maxE (uVal u) (floatE 0.0))
-    zero &lt;- bind (vec4 (floatE 0.0) (floatE 0.0) (floatE 0.0) (floatE 0.0))
+    step &lt;- bind (maxE (uVal u) 0.0)
+    zero &lt;- bind (vec4 0.0 0.0 0.0 0.0)
     acc &lt;- forRange (-2) 3 zero $ \iy rowAcc -&gt;
       forRange (-2) 3 rowAcc $ \ix colAcc -&gt; do
         let offset = vec2 (intToFloat ix * step) (intToFloat iy * step)
             sample = sampleLayer layer (ctx.pos + offset)
         pure (colAcc + sample)
-    pure (acc *^ floatE (1.0 / 25.0))
+    pure (acc *^ (1.0 / 25.0))
 </code></pre>
-<p>The first argument to <code>layerEffectM</code> reports the maximum sample offset in logical pixels (<code>V2 marginX marginY</code>) for the current uniform value.</p>
+<p>The first argument to <code>layerEffectM</code> reports the maximum sample offset in logical pixels (<code>V2 marginX marginY</code>) for the current uniform value. If you want to supply hand-written GLSL, MSL, or SPIR-V sources directly without the EDSL, import <code>NanoUI.Shader.Raw</code> from <code>nano-ui</code>.</p>
 <h2 id="built-in-effects"><a class="header" href="#built-in-effects">Built-in effects</a></h2>
 <p><code>NanoUI.Shader</code> ships 21 ready-to-use shaders:</p>
 <div class="table-wrapper">
@@ -284,7 +284,7 @@ boxAverage5 =
 </table>
 </div>
 <h2 id="capabilities-fallbacks-and-svg-export"><a class="header" href="#capabilities-fallbacks-and-svg-export">Capabilities, fallbacks, and SVG export</a></h2>
-<p>On SDL 3.4+, <code>RenderDriverAuto</code> selects SDL’s <code>"gpu"</code> render driver when available (falling back cleanly to standard drivers or software rendering when unavailable). Inspect live GPU support inside a view with <code>askShaderCapabilities</code>:</p>
+<p>On SDL 3.4+, <code>RenderDriverAuto</code> selects SDL’s <code>"gpu"</code> render driver when available (falling back to standard drivers or software rendering when unavailable). Inspect live GPU support inside a view with <code>askShaderCapabilities</code>:</p>
 <pre><code class="language-haskell">shaderStatus :: NanoUI ()
 shaderStatus = do
   caps &lt;- askShaderCapabilities
@@ -351,7 +351,7 @@ shaderStatus = do
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-banks-28c9304c.js"></script>
         <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 

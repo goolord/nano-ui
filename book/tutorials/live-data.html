@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d41be472.js";
+            window.path_to_searchindex_js = "../searchindex-4929b437.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2886a539.js"></script>
@@ -221,7 +221,7 @@ searchCard app = do
       TaskRunning previous -&gt; (fromMaybe [] previous, True)
       TaskDone found -&gt; (found, False)
       TaskFailed _ previous -&gt; (fromMaybe [] previous, False)
-  rowWith (tight . gap 8 . alignMid) $ do
+  rowWith (tight . gap 8 . alignMiddle) $ do
     -- The spinner comes and goes, so it sits in a scope: the label after it
     -- keeps its widget id either way.
     scope (when running spinner)
@@ -247,7 +247,7 @@ slowSearch q = do
 <li>On the first frame with a new key, it spawns a worker thread for that key.</li>
 <li>On subsequent frames while the worker runs, it returns immediately with <code>TaskRunning previous</code>. Keeping the previous result lets the UI show existing rows instead of flashing empty.</li>
 <li>When the worker completes, it wakes the loop so the next frame receives <code>TaskDone</code>.</li>
-<li>If the key changes before the worker finishes (for instance, the user commits a new search), the old thread is cancelled with an asynchronous exception and a fresh worker starts.</li>
+<li>If the key changes before the worker finishes (for instance, the user commits a new search), the old thread is canceled with an asynchronous exception and a fresh worker starts.</li>
 </ul>
 <p>If you only need the latest available value and do not care about distinguishing loading or error states, <code>useTask</code> is shorter:</p>
 <pre><code class="language-haskell">fileView :: App -&gt; Text -&gt; NanoUI ()
@@ -266,13 +266,13 @@ flakyCard app = do
   status &lt;- useTaskStatus (appFlaky app) attempt (flakyRequest attempt)
   -- Each branch declares different widgets, so the whole case is one scope.
   scope $ case status of
-    TaskRunning _ -&gt; rowWith (tight . gap 8 . alignMid) $ do
+    TaskRunning _ -&gt; rowWith (tight . gap 8 . alignMiddle) $ do
       spinner
       label "Contacting the server..."
-    TaskDone reply -&gt; rowWith (tight . gap 8 . alignMid) $ do
+    TaskDone reply -&gt; rowWith (tight . gap 8 . alignMiddle) $ do
       label reply
       whenM (button "Run again") (modifyVar attemptVar (+ 1))
-    TaskFailed err _ -&gt; rowWith (tight . gap 8 . alignMid) $ do
+    TaskFailed err _ -&gt; rowWith (tight . gap 8 . alignMiddle) $ do
       danger (T.pack (displayException err))
       whenM (button "Retry") (modifyVar attemptVar (+ 1))
 </code></pre>
@@ -286,7 +286,7 @@ flakyCard app = do
 job q = bracket (connect info) disconnect $ \conn -&gt; runQuery conn q
 </code></pre>
 <h2 id="4-streams-many-updates-one-frame"><a class="header" href="#4-streams-many-updates-one-frame">4. Streams: many updates, one frame</a></h2>
-<p>Use a <code>Stream</code> when a background producer pushes values repeatedly, such as progress updates, live telemetry, or streamed LLM tokens. The producer receives an <code>update</code> callback and runs until it returns or is cancelled:</p>
+<p>Use a <code>Stream</code> when a background producer pushes values repeatedly, such as progress updates, live telemetry, or streamed LLM tokens. The producer receives an <code>update</code> callback and runs until it returns or is canceled:</p>
 <pre><code class="language-haskell">progressCard :: App -&gt; NanoUI ()
 progressCard app = do
   running &lt;- useVar False
@@ -345,7 +345,7 @@ view app = columnWith (padAll 16 . gap 12 . grow) $ do
           update advance
         else pure saved
 
-  rowWith (tight . gap 8 . alignMid . fillW) $ do
+  rowWith (tight . gap 8 . alignMiddle . fillW) $ do
     whenM (button (if isRunning then "Pause" else "Resume")) $ do
       when isRunning (writeVar (appSaved app) feed)
       writeVar running (not isRunning)
@@ -361,7 +361,7 @@ view app = columnWith (padAll 16 . gap 12 . grow) $ do
       UiCursorCrosshair
       (plot (appPlots app) (fillW . minH 300) (walkChart points))
 
-  rowWith (tight . gap 16 . alignMid . fillW) $ do
+  rowWith (tight . gap 16 . alignMiddle . fillW) $ do
     let
       ys = fmap snd points
     -- Both parts come and go, so each sits in a scope.
@@ -403,7 +403,7 @@ walkChart points =
 <ul>
 <li>Key a search task directly on the live query text (without debouncing) and observe how cancellation behaves compared to <code>searchInput'</code>.</li>
 <li>Stream Markdown tokens into <code>NanoUI.Markdown</code> with incremental appends (see <a href="../packages/index.html">Ecosystem Packages</a>).</li>
-<li>Virtualize a 100,000-row log view using <code>getScrollMetricsUi</code> (see <a href="../layout/index.html">Layout &amp; Scrolling</a> and <code>Logs.hs</code>).</li>
+<li>Virtualize a 100,000-row log view using <code>getScrollMetrics</code> (see <a href="../layout/index.html">Layout &amp; Scrolling</a> and <code>Logs.hs</code>).</li>
 <li>Swap the streaming chart for a one-shot <code>Task</code> that loads a full dataset from disk.</li>
 </ul>
 <p>For the full lifecycle details of tasks, streams, animations, and timers, see <a href="../advanced/async.html">Async Work &amp; Animation</a>.</p>
@@ -459,7 +459,7 @@ walkChart points =
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-banks-28c9304c.js"></script>
         <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 

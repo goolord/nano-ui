@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d41be472.js";
+            window.path_to_searchindex_js = "../searchindex-4929b437.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2886a539.js"></script>
@@ -244,8 +244,8 @@ menuBar openMenu entries = do
       let
         cfg =
           (defaultPopupConfig (AnchorRect (respRect btn)))
-            { cfgPlacement = PlacementBelow
-            , cfgOffset = 0
+            { popupPlacement = PlacementBelow
+            , popupOffset = 0
             }
       -- The open flag is derived from the open menu's name, so the popup
       -- gets a constant and closing it is written here.
@@ -341,27 +341,27 @@ writeDocument filePath doc = do
 </ul>
 <p><code>fontSizeScale zoomVal</code> adjusts display size without altering the document, so the zoom actions are simple clamped <code>modifyVar</code> updates.</p>
 <h2 id="7-dirty-state-window-title-and-the-close-prompt"><a class="header" href="#7-dirty-state-window-title-and-the-close-prompt">7. Dirty state, window title, and the close prompt</a></h2>
-<p>The window title is computed from the current file name and dirty flag on every frame, then passed to <code>setWindowTitleUi</code>:</p>
+<p>The window title is computed from the current file name and dirty flag on every frame, then passed to <code>setWindowTitle</code>:</p>
 <pre><code class="language-haskell">    path &lt;- readVar docPath
     dirty &lt;- readVar docDirty
     let
       name = (if T.null path then "Untitled" else path) &lt;&gt; (if dirty then " *" else "")
 
 -- ...after the layout, which returns the name as docName:
-  setWindowTitleUi (docName &lt;&gt; " - nano-ui Notepad")
+  setWindowTitle (docName &lt;&gt; " - nano-ui Notepad")
 </code></pre>
-<p><code>setWindowTitleUi</code> caches the last title and skips the OS call when nothing changed, so calling it unconditionally on every frame is safe and free. Imperative window commands like <code>resizeWindowUi</code> or <code>maximizeWindowUi</code> run on every call and must always sit behind an event check.</p>
+<p><code>setWindowTitle</code> caches the last title and skips the OS call when nothing changed, so calling it unconditionally on every frame is safe and free. Imperative window commands like <code>resizeWindow</code> or <code>maximizeWindow</code> run on every call and must always sit behind an event check.</p>
 <p>Here is how <code>exitApp</code> and the confirmation modal connect:</p>
 <pre><code class="language-haskell">    exitApp = do
       dirty &lt;- readVar docDirty
-      if dirty then writeVar aboutOpen False &gt;&gt; writeVar confirmExit True else quitUi
+      if dirty then writeVar aboutOpen False &gt;&gt; writeVar confirmExit True else quit
 
 -- ...inside the view, called unconditionally:
   modal confirmExit "Unsaved changes" $ do
     label "Discard the changes to this document and exit?"
     rowWith fillW $ do
       flex
-      whenM (button "Discard") quitUi
+      whenM (button "Discard") quit
       whenM (button "Cancel") (writeVar confirmExit False)
 </code></pre>
 <p>Opening the exit prompt closes the About modal first so only one modal appears at a time. Like popups, <code>modal</code> is called unconditionally every frame and controlled by its <code>Var Bool</code>.</p>
@@ -410,7 +410,7 @@ statusBar docName docVar statusMsg zoomVal = do
 <h2 id="10-things-to-try-next"><a class="header" href="#10-things-to-try-next">10. Things to try next</a></h2>
 <ul>
 <li>Persist a list of recently opened files across launches.</li>
-<li>Turn the About dialog into a draggable, resizable floating <code>window</code>.</li>
+<li>Turn the About dialog into a draggable, resizable <code>floatingWindow</code>.</li>
 <li>Toggle word wrap through the editor’s configuration.</li>
 <li>Replace the OS title bar with a custom one using <code>windowCaption</code> and <code>windowFrame</code> (see <a href="../advanced/window-management.html">Desktop Windows</a>).</li>
 </ul>
@@ -467,7 +467,7 @@ statusBar docName docVar statusMsg zoomVal = do
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-banks-28c9304c.js"></script>
         <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 

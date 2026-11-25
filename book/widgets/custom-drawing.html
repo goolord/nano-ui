@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d41be472.js";
+            window.path_to_searchindex_js = "../searchindex-4929b437.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2886a539.js"></script>
@@ -200,13 +200,13 @@
 <p>Every control provides a primed form (<code>knob'</code>, <code>toggleSwitch'</code>, and so on) returning a <code>Response</code>, plus a <code>...With</code> variant accepting a layout modifier and custom dimensions:</p>
 <pre><code class="language-haskell">controls :: Var Float -&gt; Float -&gt; [Float] -&gt; NanoUI ()
 controls volume progress samples = do
-  knobWith alignMid 48 0 100 volume
+  knobWith alignMiddle 48 0 100 volume
   progressBarWith fillW 6 progress
   sparklineWith (fixedWH 120 32) 120 32 samples
 </code></pre>
 <p><code>sparkline</code> stretches the minimum value to the bottom of its plot box and the maximum to the top, so series of different scales remain readable in a tight strip. Here is a sparkline at its default size next to a wider <code>sparklineWith</code>:</p>
 <pre><code class="language-haskell">sparklines :: [Float] -&gt; NanoUI ()
-sparklines samples = rowWith (gap 16 . alignMid) $ do
+sparklines samples = rowWith (gap 16 . alignMiddle) $ do
   sparkline samples
   sparklineWith (fixedWH 120 32) 120 32 samples
 </code></pre>
@@ -214,12 +214,12 @@ sparklines samples = rowWith (gap 16 . alignMid) $ do
 <p>If you need axes, legends, or hover readouts, use <code>plot</code> from <code>nano-ui-diagrams</code> instead (see <a href="../packages/index.html#charts-and-diagrams">Charts and diagrams</a>).</p>
 <p>Here is a compact settings row combining a knob and a live readout:</p>
 <pre><code class="language-haskell">settingsRow :: Var Bool -&gt; Var Float -&gt; NanoUI ()
-settingsRow enabled volume = rowWith (gap 12 . alignMid) $ do
+settingsRow enabled volume = rowWith (gap 12 . alignMiddle) $ do
   toggleSwitch enabled
-  labelWith (alignMid . fixedW 64) "Enabled"
+  labelWith (alignMiddle . fixedW 64) "Enabled"
   knob 0 100 volume
   v &lt;- readVar volume
-  labelWith (alignMid . fontMono . fixedW 48) (T.pack (show (round v :: Int)))
+  labelWith (alignMiddle . fontMono . fixedW 48) (T.pack (show (round v :: Int)))
 </code></pre>
 <p>Pinning the numeric label with <code>fixedW</code> prevents the row from jittering as digits change, and reading the <code>Var</code> <em>below</em> the knob keeps drags to a single pass.</p>
 <p><code>spinner</code> paces itself with <code>wakeAfter</code> (60 steps per second) only while it is visible on screen; once scrolled or clipped out of view, it stops requesting frames. Avoid calling a global <code>keepAnimating</code>, which would keep the event loop spinning even when no spinner is on screen.</p>
@@ -246,7 +246,7 @@ badge = void $ canvas (fixedWH 120 40) $ \r@(Rect x y _ h) -&gt; do
 <pre><code class="language-haskell">dot :: Float -&gt; Float -&gt; NanoUI Response
 dot angle volume = do
   (resp, ()) &lt;- customWidget defaultCustomWidgetSpec
-    { widgetLayout = fixedWH 48 48 defaultLayout
+    { widgetLayout = fixedWH 48 48
     , widgetContent = contentKey [angle, volume]
     , widgetDraw = \cdc (Rect x y w h) -&gt; runCanvasFor cdc $ do
         drawCircle (V2 (x + w / 2) (y + h / 2)) 16 (themeAccent (cdcTheme cdc))
@@ -424,17 +424,17 @@ clipped r@(Rect x y _ h) = do
   drawCircle (centre r) 34 rose
   drawText (V2 (x - 6) (y + h / 2)) AlignStart AlignMiddle "text past the edge" ink
 
-clipBox :: Rect -&gt; Rect
-clipBox (Rect x y w h) = Rect (x + 10) (y + 8) (w - 20) (h - 16)
+clipRect :: Rect -&gt; Rect
+clipRect (Rect x y w h) = Rect (x + 10) (y + 8) (w - 20) (h - 16)
 
 clips :: [(Text, Rect -&gt; CanvasM ())]
 clips =
   [ ("no clip", clipped)
-  , ("withClip box", \r -&gt; withClip (clipBox r) (clipped r))
+  , ("withClip box", \r -&gt; withClip (clipRect r) (clipped r))
   ]
 </code></pre>
 <h3 id="text"><a class="header" href="#text">Text</a></h3>
-<p><code>drawText pos alignX alignY txt color</code> places text relative to an anchor point (the red dot below). Alignment specifies which part of the text sits on that point: <code>AlignStart</code> anchors the left edge, <code>AlignTop</code> anchors the top of the line box, and <code>AlignBaseline</code> anchors the text baseline. Use <code>drawTextWith</code> with a <code>TextFont</code> to customize size, variant, weight, or slant.</p>
+<p><code>drawText pos alignX alignY txt color</code> places text relative to an anchor point (the red dot below). Alignment specifies which part of the text sits on that point: <code>AlignStart</code> anchors the left edge, <code>AlignTop</code> anchors the top of the line box, and <code>AlignBaseline</code> anchors the text baseline. Use <code>drawTextWith</code> with a <code>TextFont</code> to customize size, variant, weight, or slant, and <code>drawTextClipped</code> / <code>drawTextClippedWith</code> to clip a single text draw to a sub-rectangle without pushing a separate <code>withClip</code> scope.</p>
 <img src="../images/canvas/text.svg" alt="Eight cells showing the word Anchor placed against a red dot: left, center and right aligned; then top, middle, baseline and bottom aligned; and a large bold amber 42.">
 <pre><code class="language-haskell">textAnchors :: [(Text, Rect -&gt; CanvasM ())]
 textAnchors =
@@ -448,7 +448,7 @@ textAnchors =
           drawTextWith defaultTextFont {textFontSize = 24, textFontWeight = WeightBold} (centre r) AlignCenter AlignMiddle "42" amber)
        ]
 </code></pre>
-<p>Measure strings inside the view using <code>lineWidthUi</code> and <code>uiFontMetrics</code> (or trim them to fit with <code>truncateTextUi</code>) and pass those measurements into your drawing callback. Both helpers ensure the needed glyphs are loaded first. The pure <code>lineWidth</code> is only exact for text that has already been measured or drawn; otherwise it falls back to summing per-glyph advances, which drifts from HarfBuzz’s unrounded shaped runs over long strings.</p>
+<p>Measure strings inside the view using <code>lineWidthUi</code> and <code>uiFontMetrics</code> (or trim them to fit with <code>truncateTextUi</code>) and pass those measurements into your drawing callback. Both helpers load and shape the needed glyphs first. The pure <code>lineWidth</code> is only exact for text that has already been measured or drawn; otherwise it falls back to summing per-glyph advances, which drifts from HarfBuzz’s unrounded shaped runs over long strings.</p>
 <h3 id="borders-inset-vs-centered"><a class="header" href="#borders-inset-vs-centered">Borders: inset vs. centered</a></h3>
 <p><code>drawStrokeRoundedRect</code> draws its entire border inside the given rectangle. By contrast, <code>drawStrokePath</code> centers the stroke on the path edge, pushing half the border width outside the rectangle. The thin guide below shows the exact rectangle passed to each call:</p>
 <img src="../images/canvas/borders.svg" alt="Two blue rounded borders over a thin guide rectangle: drawStrokeRoundedRect sits entirely inside it, drawStrokePath straddles it.">
@@ -464,7 +464,7 @@ borders =
 <pre><code class="language-haskell">gauge :: Float -&gt; Float -&gt; Float -&gt; NanoUI Response
 gauge angle volume scrollY = do
   (resp, ()) &lt;- customWidget defaultCustomWidgetSpec
-    { widgetLayout = fixedWH 48 48 defaultLayout
+    { widgetLayout = fixedWH 48 48
     , widgetContent = contentKey [angle, volume, fromIntegral (round scrollY :: Int)]
     , widgetDraw = \cdc rect -&gt; runCanvasFor cdc (drawGauge rect)
     }
@@ -478,7 +478,7 @@ dragGhost mx my = drawingVersioned (contentKey [mx, my]) (fixedWH 32 32) ghostOp
 </code></pre>
 <p>Without a version key, it stays frozen on the draw ops from its very first frame.</p>
 <h2 id="svg-icons"><a class="header" href="#svg-icons">SVG icons</a></h2>
-<p>Parse inline SVG markup with <code>parseSvg</code> or load a file once at startup with <code>loadSvg</code>. Any stroke or fill using <code>currentColor</code> automatically inherits the active text color (so <code>fontColor</code> and semantic tones tint it cleanly), while hard-coded colors in the SVG stay untouched:</p>
+<p>Parse inline SVG markup with <code>parseSvg</code> or load a file once at startup with <code>loadSvg</code>. Any stroke or fill using <code>currentColor</code> automatically inherits the active text color (so <code>fontColor</code> and semantic tones tint it directly), while hard-coded colors in the SVG stay untouched:</p>
 <pre><code class="language-haskell">icons :: Svg -&gt; Color -&gt; NanoUI ()
 icons star accent = do
   svgIcon 24 star
@@ -546,7 +546,7 @@ starBadge owner star tint = do
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-banks-28c9304c.js"></script>
         <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 

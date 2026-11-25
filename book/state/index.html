@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d41be472.js";
+            window.path_to_searchindex_js = "../searchindex-4929b437.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2886a539.js"></script>
@@ -181,7 +181,7 @@
                         <h1 id="state--var"><a class="header" href="#state--var">State &amp; <code>Var</code></a></h1>
 <p>Because a view runs fresh on every frame, any value that needs to survive from one frame to the next must be stored explicitly. In <code>nano-ui</code>, most mutable state lives in a <code>Var</code>, a typed mutable reference. Input widgets take a <code>Var</code> directly and update it in place, so you do not need to wire up <code>onChange</code> callbacks.</p>
 <pre><code class="language-haskell">counter :: NanoUI ()
-counter = rowWith (gap 8 . alignMid) $ do
+counter = rowWith (gap 8 . alignMiddle) $ do
   n &lt;- useVar (0 :: Int)
   whenM (button "-") (modifyVar n (subtract 1))
   label . T.pack . show =&lt;&lt; readVar n
@@ -276,7 +276,7 @@ settingsView settings = do
 <p>Several helpers cover other shapes:</p>
 <ul>
 <li><code>constVar x</code> builds a read-only <code>Var</code> whose writes are no-ops. Use it when you want to display a derived value inside an input widget and handle changes through the widget’s primed <code>Response</code>.</li>
-<li><code>withValue val widget</code> runs a <code>Var</code>-based widget against a temporary <code>Var</code> and returns both the widget result and the updated value. <code>nano-ui-emit</code> uses this under the hood for <code>emitChanged</code>.</li>
+<li><code>withValue val widget</code> runs a <code>Var</code>-based widget against a temporary <code>Var</code> and returns both the widget result and the updated value. <code>nano-ui-emit</code> builds <code>emitChanged</code> on top of it.</li>
 <li><code>zoomVar getter setter</code> projects a custom slice of a larger <code>Var</code>, and <code>zoomVarL</code> does the same using a lens.</li>
 <li><code>forEachVar key list body</code> gives each item of a <code>Var [a]</code> its own <code>Var a</code> keyed across reorders. Use <code>withElemVars</code> when you need to filter or sort the list yourself before drawing.</li>
 </ul>
@@ -384,7 +384,7 @@ newEditor = Editor &lt;$&gt; newVar emptyDocument &lt;*&gt; newTask
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-banks-28c9304c.js"></script>
         <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 

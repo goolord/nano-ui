@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d41be472.js";
+            window.path_to_searchindex_js = "../searchindex-4929b437.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2886a539.js"></script>
@@ -205,7 +205,7 @@ main = runSdlAppReduce defaultSdlOptions update (Model 0 "Ada") view
 <p>Everything else in the toolkit (widgets, layout modifiers, focus, and keys) works the exact same way. Only state management changes.</p>
 <h2 id="emitting-messages"><a class="header" href="#emitting-messages">Emitting messages</a></h2>
 <p><code>NanoUIE msg a</code> is a UI action that can only emit values of type <code>msg</code>. There is no <code>Typeable</code> constraint and no runtime casting, so emitting the wrong message type is caught at compile time.</p>
-<p>Under the hood, <code>NanoUIE msg a</code> is just a <code>NanoUI a</code> action with a message sink in scope (via the implicit parameter <code>?emit</code>). That means every core widget runs inside it without wrappers, and <code>NanoUI.Emit</code> re-exports all of <code>NanoUI</code> alongside the emission helpers below. Calling <code>emit</code> inside a container, modal, tab body, or menu callback sends messages straight to the enclosing view’s sink.</p>
+<p><code>NanoUIE msg a</code> is a <code>NanoUI a</code> action with a message sink in scope via the implicit parameter <code>?emit</code>. That means every core widget runs inside it without wrappers, and <code>NanoUI.Emit</code> re-exports all of <code>NanoUI</code> alongside the emission helpers below. Calling <code>emit</code> inside a container, modal, tab body, or menu callback sends messages straight to the enclosing view’s sink.</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -343,7 +343,7 @@ main = runSdlAppReduce defaultSdlOptions update initialModel view
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-banks-28c9304c.js"></script>
         <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 

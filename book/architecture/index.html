@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d41be472.js";
+            window.path_to_searchindex_js = "../searchindex-4929b437.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2886a539.js"></script>
@@ -262,7 +262,7 @@ editorView (Editor ref) = do
 <tr><td>Has one central domain state updated by workers or CLI commands</td><td>Pattern A (<code>IORef</code> + <code>askWake</code>)</td></tr>
 <tr><td>Consists of many interactive tool panes and inspectors</td><td>Pattern B (record of <code>Var</code>s)</td></tr>
 <tr><td>Wraps an existing domain model or library</td><td>Pattern C (app-owned <code>IORef</code> + <code>requestFrame</code>)</td></tr>
-<tr><td>Models cleanly as pure <code>Msg -&gt; Model -&gt; Model</code> transitions</td><td>Elm-style (<code>nano-ui-emit</code>)</td></tr>
+<tr><td>Fits pure <code>Msg -&gt; Model -&gt; Model</code> state transitions</td><td>Elm-style (<code>nano-ui-emit</code>)</td></tr>
 <tr><td>Is a small utility or prototype</td><td>Keep it simple: a few <code>useVar</code> calls are plenty</td></tr>
 </tbody>
 </table>
@@ -324,7 +324,7 @@ editorView (Editor ref) = do
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-banks-28c9304c.js"></script>
         <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 

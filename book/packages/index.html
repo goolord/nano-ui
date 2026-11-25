@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d41be472.js";
+            window.path_to_searchindex_js = "../searchindex-4929b437.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2886a539.js"></script>
@@ -188,6 +188,8 @@
 <tbody>
 <tr><td><code>nano-ui-sdl</code></td><td>Desktop SDL3 backend with TrueType fonts, native file dialogs, and custom title bars</td></tr>
 <tr><td><code>nano-ui-rgfw</code></td><td>Lightweight RGFW + OpenGL 3.2 backend with a bundled bitmap font</td></tr>
+<tr><td><code>nano-ui-sdl-web</code></td><td>Browser backend for GHC’s WebAssembly target using SDL_ttf and WebGL2</td></tr>
+<tr><td><code>nano-ui-emit</code></td><td>Statically typed emitting views and Elm-style reducers (<code>NanoUIE</code>)</td></tr>
 <tr><td><code>nano-ui-diagrams</code></td><td>Line, bar, scatter, area, and step charts plus <code>diagrams-lib</code> widgets</td></tr>
 <tr><td><code>nano-ui-form</code></td><td>Validated applicative forms built on <code>ditto</code></td></tr>
 <tr><td><code>nano-ui-markdown</code></td><td>CommonMark rendering with incremental appends for streaming</td></tr>
@@ -357,7 +359,7 @@ signupView owner = do -- owner &lt;- newFormState in setup
     Just (Signup name _) -&gt; label ("Welcome, " &lt;&gt; name)
     Nothing              -&gt; pure ()
 </code></pre>
-<p><code>nanoFormLive</code> returns <code>Just a</code> continuously whenever the form is valid, <code>nanoFormEx</code> accepts a <code>FormConfig</code>, and <code>runNanoForm</code> separates the rendered view from its result. Built-in inputs cover <code>inputText</code>, <code>inputPassword</code>, <code>inputTextArea</code>, <code>inputCheckbox</code>, <code>inputSlider</code>, <code>inputSelect</code>, <code>inputRadio</code>, and <code>inputColor</code>, paired with validators such as <code>notEmpty</code>, <code>minLength</code>, <code>maxLength</code>, <code>inRange</code>, <code>validEmail</code>, <code>matches</code>, and <code>customProof</code>. Wrap any custom <code>Var a -&gt; NanoUI Response</code> widget with <code>inputWidget</code>, choosing when edits publish (<code>OnChange</code>, <code>OnChangeOr</code>, or <code>OnlyWhen</code>).</p>
+<p><code>nanoFormLive</code> returns <code>Just a</code> continuously whenever the form is valid, <code>nanoFormEx</code> accepts a <code>FormConfig</code>, and <code>runNanoForm</code> separates the rendered view from its result. Built-in inputs cover <code>inputText</code>, <code>inputPassword</code>, <code>inputTextArea</code>, <code>inputCheckbox</code>, <code>inputSlider</code>, <code>inputSelect</code>, <code>inputEnumSelect</code>, <code>inputRadio</code>, <code>inputEnumRadio</code>, and <code>inputColor</code>, alongside <code>formLabel</code> and <code>formSeparator</code>, paired with validators such as <code>notEmpty</code>, <code>minLength</code>, <code>maxLength</code>, <code>inRange</code>, <code>validEmail</code>, <code>matches</code>, and <code>customProof</code>. Wrap any custom <code>Var a -&gt; NanoUI Response</code> widget with <code>inputWidget</code>, choosing when edits publish (<code>OnChange</code>, <code>OnChangeOr</code>, or <code>OnlyWhen</code>).</p>
 <h2 id="markdown"><a class="header" href="#markdown">Markdown</a></h2>
 <p><code>nano-ui-markdown</code> parses CommonMark (with GitHub tables, task lists, strikethrough, and autolinks) and renders it as selectable rich text:</p>
 <pre><code class="language-haskell">doc :: MarkdownDoc
@@ -368,7 +370,7 @@ view cache = do -- cache &lt;- newMarkdownCache in setup
   clicked &lt;- markdown cache doc
   for_ clicked $ \url -&gt; liftIO (void (Sdl.openUrl url))
 </code></pre>
-<p>Allocate <code>cache &lt;- newMarkdownCache</code> once during setup. <code>markdown</code> returns the URL of any link clicked on the current frame. For streaming chat replies or live logs, append chunks incrementally without reparsing the whole document:</p>
+<p>Allocate <code>cache &lt;- newMarkdownCache</code> once during setup. <code>markdown</code> returns the URL of any link clicked on the current frame, and <code>markdownWith</code> applies a layout modifier to the document column. For streaming chat replies or live logs, append chunks incrementally without reparsing the whole document:</p>
 <pre><code class="language-haskell">reply :: Stream Int MarkdownDoc -&gt; MarkdownCache -&gt; Int -&gt; NanoUI ()
 reply stream cache replyId = do
   answer &lt;- useStream stream replyId emptyMarkdown $ \update -&gt;
@@ -376,6 +378,8 @@ reply stream cache replyId = do
   void (markdown cache answer)
 </code></pre>
 <p>If tokens arrive on the UI thread, concatenate each frame’s batch into a single <code>appendMarkdown</code> call. The incremental parser only reparses the trailing block (except when a chunk completes an unsplittable block or adds a link-reference definition). To customize rendering for specific elements (such as adding syntax highlighting to fenced code blocks), override <code>MarkdownConfig.mdBlock</code>.</p>
+<h2 id="shaders"><a class="header" href="#shaders">Shaders</a></h2>
+<p><code>nano-ui-shader</code> provides a pure-Haskell typed fragment shader EDSL, algebraic pass fusion (<code>composeColor</code>, <code>composeDistort</code>, <code>distortThenColor</code>, <code>chainLayer</code>), compilers for GLSL 150, GLSL ES 300, SPIR-V, MSL, and a CPU reference evaluator, plus 21 built-in surface fills and subtree effects (<code>meshGradient4</code>, <code>gaussianBlur</code>, <code>dropShadow</code>, <code>groupOpacity</code>, and more). See the <a href="../advanced/shaders.html">Shaders</a> chapter for full examples and backend fallback rules.</p>
 <h2 id="svg-export"><a class="header" href="#svg-export">SVG export</a></h2>
 <p><code>nano-ui-svg</code> exports graphics at two levels:</p>
 <ul>
@@ -443,7 +447,7 @@ exportViewToSvg v = do
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-banks-28c9304c.js"></script>
         <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 

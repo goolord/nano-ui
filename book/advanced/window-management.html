@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d41be472.js";
+            window.path_to_searchindex_js = "../searchindex-4929b437.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2886a539.js"></script>
@@ -204,9 +204,9 @@ editor :: Var Text -&gt; NanoUI ()
 editor docName = column $ do
   textInput docName
   name &lt;- readVar docName
-  setWindowTitleUi (name &lt;&gt; " - My App")         -- setter: every frame
-  whenM (button "Maximize") toggleMaximizedUi    -- command: on click only
-  whenM (button "Quit") quitUi
+  setWindowTitle (name &lt;&gt; " - My App")         -- setter: every frame
+  whenM (button "Maximize") toggleMaximized    -- command: on click only
+  whenM (button "Quit") quit
 </code></pre>
 <p><code>runSdlApp :: SdlOptions -&gt; NanoUI () -&gt; IO ()</code> opens a native window using <code>opts</code> and runs the event loop until the window closes. On each frame, it runs your view on the main display thread, solves layout, diffs the draw commands against the previous frame, and repaints only the changed rectangles. (If your view modifies a <code>Var</code> it already read earlier in the same pass, it runs a second pass before layout.)</p>
 <p>Frames only run when an input event, window event, timer, animation, or background task wakes the loop. When a window sits idle, no frames run at all.</p>
@@ -215,25 +215,25 @@ editor docName = column $ do
 <h2 id="controlling-the-window-from-a-view"><a class="header" href="#controlling-the-window-from-a-view">Controlling the window from a view</a></h2>
 <p>Because the OS window persists across the entire session while your view runs every frame, window actions fall into two groups: <strong>declarative setters</strong> and <strong>imperative commands</strong>.</p>
 <h3 id="declarative-setters"><a class="header" href="#declarative-setters">Declarative setters</a></h3>
-<p>Setters remember the last value they sent to the OS and skip the backend call when nothing changed. You can call them unconditionally on every frame (as <code>editor</code> above does with <code>setWindowTitleUi</code>), and skipping a setter simply leaves the current value in place:</p>
+<p>Setters remember the last value they sent to the OS and skip the backend call when nothing changed. You can call them unconditionally on every frame (as <code>editor</code> above does with <code>setWindowTitle</code>), and skipping a setter simply leaves the current value in place:</p>
 <ul>
-<li><code>setWindowTitleUi</code></li>
-<li><code>setWindowModeUi</code></li>
-<li><code>setWindowMinSizeUi</code> / <code>setWindowMaxSizeUi</code></li>
-<li><code>setWindowOpacityUi</code></li>
-<li><code>setWindowIconUi</code></li>
+<li><code>setWindowTitle</code></li>
+<li><code>setWindowMode</code></li>
+<li><code>setWindowMinSize</code> / <code>setWindowMaxSize</code></li>
+<li><code>setWindowOpacity</code></li>
+<li><code>setWindowIcon</code></li>
 </ul>
-<p>A repeated setter call costs only an <code>Eq</code> check. For <code>setWindowIconUi</code>, build the <code>RgbaPixels</code> once at startup and reuse that same value every frame: <code>ByteString</code> equality returns immediately when both sides share the same buffer, whereas freshly decoded icons compare byte by byte.</p>
+<p>A repeated setter call costs only an <code>Eq</code> check. For <code>setWindowIcon</code>, build the <code>RgbaPixels</code> once at startup and reuse that same value every frame: <code>ByteString</code> equality returns immediately when both sides share the same buffer, whereas freshly decoded icons compare byte by byte.</p>
 <h3 id="imperative-commands"><a class="header" href="#imperative-commands">Imperative commands</a></h3>
 <p>Commands forward directly to the OS on every call, because the user can also move, resize, or maximize the window independently and there is no single desired value to cache. Always guard commands behind one-shot events such as <code>button</code>:</p>
 <ul>
-<li><code>moveWindowUi</code> (takes desktop coordinates on SDL, physical pixels on RGFW)</li>
-<li><code>centerWindowUi</code></li>
-<li><code>resizeWindowUi</code></li>
-<li><code>minimizeWindowUi</code>, <code>maximizeWindowUi</code>, <code>restoreWindowUi</code>, <code>toggleMaximizedUi</code></li>
+<li><code>moveWindow</code> (takes desktop coordinates on SDL, physical pixels on RGFW)</li>
+<li><code>centerWindow</code></li>
+<li><code>resizeWindow</code></li>
+<li><code>minimizeWindow</code>, <code>maximizeWindow</code>, <code>restoreWindow</code>, <code>toggleMaximized</code></li>
 </ul>
 <p>Keep in mind that SDL applies commands asynchronously and reports the updated geometry back through an OS event, so <code>askWindow</code> still sees the old size during the frame the command ran and updates on the following frame.</p>
-<p>Call <code>quitUi</code> to close the window after the current frame finishes painting (<code>runSdlApp</code> then returns). Inside a secondary <code>nativeWindow</code>, <code>quitUi</code> closes only that child window.</p>
+<p>Call <code>quit</code> to close the window after the current frame finishes painting (<code>runSdlApp</code> then returns). Inside a secondary <code>nativeWindow</code>, <code>quit</code> closes only that child window.</p>
 <h3 id="reading-window-state-and-updating-from-worker-threads"><a class="header" href="#reading-window-state-and-updating-from-worker-threads">Reading window state and updating from worker threads</a></h3>
 <p>Window operations read the active session from <code>NanoUI</code>, which is only live on the UI thread during a frame. To update a window from a background thread, write to a <code>Var</code> with <code>writeVarIO</code>, wake the loop with <code>askWake</code>, and let the view apply the setter on the next frame (see <a href="../state/index.html">State &amp; <code>Var</code></a>).</p>
 <p><code>askWindow :: NanoUI WindowState</code> returns the current window metrics captured at the start of the frame: logical size, display scale, focus, maximized/fullscreen flags, and <code>winCloseRequested</code>. Calling <code>askWindow</code> opts your view into redrawing whenever window metadata changes (focus, moves, maximize toggles). Views that never call <code>askWindow</code> skip those redraws completely.</p>
@@ -255,7 +255,7 @@ appView = do
   whenM (winCloseRequested &lt;$&gt; askWindow) (writeVar confirming True)
   modal confirming "Quit?" $ do
     label "Unsaved changes will be lost."
-    whenM (button "Quit") quitUi
+    whenM (button "Quit") quit
     whenM (button "Cancel") (writeVar confirming False)
 </code></pre>
 <p>For a full example that only prompts when the buffer is dirty, see <a href="../tutorials/notepad.html">Tutorial 2: Build a Notepad</a>.</p>
@@ -274,10 +274,10 @@ editorView showInspector = do
 <p>A few important details about secondary windows:</p>
 <ul>
 <li><strong>Independent focus and IDs.</strong> Each native window owns its own keyboard focus, text carets, scroll positions, and hover state. <code>useVar</code> calls inside <code>body</code> count from zero independently of the parent window.</li>
-<li><strong>Initial settings apply once.</strong> <code>nativeWindow</code> reads <code>WindowSettings</code> only when opening the window. To update the title or mode afterward, call setters like <code>setWindowTitleUi</code> inside <code>body</code>.</li>
+<li><strong>Initial settings apply once.</strong> <code>nativeWindow</code> reads <code>WindowSettings</code> only when opening the window. To update the title or mode afterward, call setters like <code>setWindowTitle</code> inside <code>body</code>.</li>
 <li><strong>Closures stay fresh.</strong> Every frame of the parent view also re-evaluates each open child <code>body</code>, so any local values captured from the parent stay up to date.</li>
 <li><strong>Watch parent animation rates.</strong> Because child views re-evaluate when the parent renders, a parent animating at 60 fps also lays out open child windows at 60 fps (though a child only repaints pixels when its draw list actually changes).</li>
-<li><strong>Nesting and shared state.</strong> Child windows can open further windows of their own, and all windows share state cleanly through <code>Var</code>s (a write in one window shows up in the others on their next frame).</li>
+<li><strong>Nesting and shared state.</strong> Child windows can open further windows of their own, and all windows share state directly through <code>Var</code>s (a write in one window shows up in the others on their next frame).</li>
 <li><strong>Elm-style usage.</strong> With <code>NanoUIE</code> (<a href="../state/elm.html">Elm-Style State</a>), child windows emit to the same reducer. To store the open flag in your model, pass <code>constVar model.inspectorOpen</code>, set <code>wsExitOnCloseRequest = False</code>, and emit a close message when <code>winCloseRequested</code> fires.</li>
 <li><strong>Platform notes.</strong> Both SDL and RGFW support <code>nativeWindow</code>, while headless <code>NanoUI.Testing</code> ignores it without running <code>body</code>. On Windows, Win32 blocks the message pump during a window resize drag, so sibling windows pause redrawing until the drag ends.</li>
 </ul>
@@ -296,12 +296,12 @@ framelessView = columnWith (fillW . fillH) $ do
   mainContent
 
 titleBar :: NanoUI ()
-titleBar = rowWith (fixedH 32 . fillW . alignMid) $ do
+titleBar = rowWith (fixedH 32 . fillW . alignMiddle) $ do
   menuResp &lt;- button' "File"          -- interactive: exclude from dragging
   label "My Application"
   spacer (Grow 1) Fit
   closeClicked &lt;- windowCaption [respRect menuResp]
-  when closeClicked quitUi
+  when closeClicked quit
 </code></pre>
 <p>Any remaining strip across the top of the window acts as a native drag handle. Specifically, <code>windowCaption</code> starts with the full width of the caption row, subtracts the caption buttons, any open floating panels (menus or modals), and the interactive exclusion rectangles you pass in (<code>[respRect menuResp]</code> above), and registers the leftover spans with SDL’s hit-test callback. When the user drags one of those spans, the OS moves the window natively without sending a press to the view.</p>
 <p>Pass the <code>respRect</code> of every clickable control sitting in your custom title bar. <code>windowCaption</code> scales those logical rectangles by <code>winScale</code> automatically. Note that because <code>respRect</code> reflects the previous frame’s layout, exclusion zones trail a moving widget by one frame, and any frame that omits <code>windowCaption</code> clears the drag spans.</p>
@@ -310,7 +310,7 @@ titleBar = rowWith (fixedH 32 . fillW . alignMid) $ do
 <li><code>DecorationsFrame</code> hides the title bar while preserving the native OS resize border.</li>
 <li><code>DecorationsNone</code> removes both the title bar and OS border (on resizable windows, the outer edges still act as resize borders).</li>
 </ul>
-<p>Use <code>windowCaptionWith</code> to customize button appearance or resize border thickness. <code>windowFrame</code> wraps your view in a full-window panel with a rounded border <code>frameWidth</code> thick and insets the view by <code>frameWidth</code>:</p>
+<p>Use <code>windowCaptionWith</code> to customize button appearance or resize border thickness. <code>windowFrame</code> (from <code>NanoUI.Chrome</code>) wraps your view in a full-window panel with a rounded border <code>frameWidth</code> thick and insets the view by <code>frameWidth</code>:</p>
 <pre><code class="language-haskell">framedView :: NanoUI ()
 framedView = windowFrame (defaultWindowFrame (colorRGBA 70 70 80 255)) $ do
   mainContent
@@ -349,7 +349,7 @@ view app = do
 </code></pre>
 <p>If you are working directly with <code>SdlEnv</code> (from <code>askSdlEnv</code>), <code>nano-ui-sdl</code> also exposes <code>saveScreenshot env path</code> (writes a BMP file) and <code>captureScreenshot env</code> (returns raw pixels) for the last presented frame. Call both on the display thread, and encode formats like PNG with <code>JuicyPixels</code> on a worker thread.</p>
 <h2 id="testing-views-that-use-window-apis"><a class="header" href="#testing-views-that-use-window-apis">Testing views that use window APIs</a></h2>
-<p>Window setters and commands become no-ops when no OS window is attached, so views that call them still run cleanly under headless <code>NanoUI.Testing</code>. Testing screenshots or custom title bars requires a real SDL window (see the hidden-window tests in <code>nano-ui-demo</code>).</p>
+<p>Window setters and commands become no-ops when no OS window is attached, so views that call them still run under headless <code>NanoUI.Testing</code>. Testing screenshots or custom title bars requires a real SDL window (see the hidden-window tests in <code>nano-ui-demo</code>).</p>
 
                     </main>
 
@@ -402,7 +402,7 @@ view app = do
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-banks-28c9304c.js"></script>
         <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 

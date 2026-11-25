@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d41be472.js";
+            window.path_to_searchindex_js = "../searchindex-4929b437.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2886a539.js"></script>
@@ -254,7 +254,7 @@ diskSelect options selectedVar = do
 <p>flatList :: NanoUI () -&gt; NanoUI ()
 flatList = styled (inputStyle (background colorTransparent . borderWidth 0))</p>
 <pre><code>
-- Match `themeFloatingWindow` and `themePopup` to your panel surface so padded content blends cleanly into the dialog.
+- Match `themeFloatingWindow` and `themePopup` to your panel surface so padded content blends into the dialog.
 - Between adjacent chrome regions, place a single `separator` in the parent instead of drawing touching borders on both sides.
 
 Both `stronghead` and `winget-gui` adopted these patterns to eliminate duplicate popover and dialog borders.
@@ -279,8 +279,8 @@ snap f v = let k = max 1 (fmSnapScale f) in fromIntegral (round (v * k) :: Int) 
 </code></pre>
 <h3 id="geometric-centering-looks-slightly-high"><a class="header" href="#geometric-centering-looks-slightly-high">Geometric centering looks slightly high</a></h3>
 <p>Stacking a large label over a smaller label and centering by line boxes leaves extra empty space beneath the smaller line’s baseline, making the pair look roughly 4 px too high. Either nudge it with <code>padTop</code>, or compute optical centering from the ink bounds and cap/x-height midpoints exposed by <code>FontMetrics</code>.</p>
-<h3 id="alignmid-on-a-row-aligns-the-row-itself-not-its-children"><a class="header" href="#alignmid-on-a-row-aligns-the-row-itself-not-its-children"><code>alignMid</code> on a row aligns the row itself, not its children</a></h3>
-<p>Applying <code>alignMid</code> to a <code>row</code> centers the row inside its parent. To vertically center items <em>inside</em> the row, put <code>alignMid</code> on each child instead.</p>
+<h3 id="alignmiddle-on-a-row-aligns-the-row-itself-not-its-children"><a class="header" href="#alignmiddle-on-a-row-aligns-the-row-itself-not-its-children"><code>alignMiddle</code> on a row aligns the row itself, not its children</a></h3>
+<p>Applying <code>alignMiddle</code> to a <code>row</code> centers the row inside its parent. To vertically center items <em>inside</em> the row, put <code>itemsCenter</code> on the row (or <code>alignMiddle</code> on individual children). The same holds for <code>itemsEnd</code> and <code>itemsBaseline</code>.</p>
 <h2 id="4-stale-cached-drawings"><a class="header" href="#4-stale-cached-drawings">4. Stale cached drawings</a></h2>
 <p>Unkeyed custom widgets rebuild and diff their draw ops every frame. Adding a content key avoids that work on unchanged frames, which means anything missing from the key will never trigger a redraw.</p>
 <h3 id="a-keyed-canvas-freezes-when-an-input-changes"><a class="header" href="#a-keyed-canvas-freezes-when-an-input-changes">A keyed canvas freezes when an input changes</a></h3>
@@ -305,12 +305,11 @@ dragGhost mx my = drawingVersioned (contentKey [mx, my]) (fixedWH 32 32) ghostOp
 <h3 id="mouse-wheel-scrolling-feels-misaligned-with-row-height"><a class="header" href="#mouse-wheel-scrolling-feels-misaligned-with-row-height">Mouse-wheel scrolling feels misaligned with row height</a></h3>
 <p>The default wheel notch scrolls 60 logical pixels, which can feel awkward over 54 px rows or dense lists. Match the step to your row height:</p>
 <pre><code class="language-haskell">oneRowPerNotch :: Float -&gt; NanoUI ()
-oneRowPerNotch rowHeight = do
-  ctx &lt;- askContext
-  liftIO $ setScrollTuning ctx defaultScrollTuning
+oneRowPerNotch rowHeight =
+  setScrollTuning defaultScrollTuning
     {scrollWheelStep = rowHeight, scrollSmoothTime = 0}
 </code></pre>
-<p>You can also override one scroller at a time with <code>setScrollStepUi</code>; pass <code>0</code> to revert to the context default.</p>
+<p>You can also override one scroller at a time with <code>setScrollStep</code>; pass <code>0</code> to revert to the context default.</p>
 <h2 id="6-focus-and-input-ordering"><a class="header" href="#6-focus-and-input-ordering">6. Focus and input ordering</a></h2>
 <h3 id="focus-checks-at-the-top-of-the-view-always-return-false"><a class="header" href="#focus-checks-at-the-top-of-the-view-always-return-false">Focus checks at the top of the view always return <code>False</code></a></h3>
 <p>The layout arena clears before your view runs, so calling <code>isFocused</code> at the top of <code>appView</code> always reports <code>False</code>.</p>
@@ -352,7 +351,7 @@ composition wid caretRect = do
 <li><input disabled="" type="checkbox"> <code>liftIO (newVar ...)</code> inside the view allocates a fresh <code>Var</code> every pass; move it to setup.</li>
 <li><input disabled="" type="checkbox"> Unguarded side effects run every frame; wrap them in <code>whenM (button ...)</code> or an explicit event check.</li>
 <li><input disabled="" type="checkbox"> Conditional widgets or <code>useVar</code> calls need <code>scope</code>; dynamic lists need <code>withKey</code> with stable IDs (never indices).</li>
-<li><input disabled="" type="checkbox"> Call <code>modal</code>, <code>window</code>, and <code>popup</code> unconditionally every frame with a <code>Var Bool</code>.</li>
+<li><input disabled="" type="checkbox"> Call <code>modal</code>, <code>floatingWindow</code>, and <code>popup</code> unconditionally every frame with a <code>Var Bool</code>.</li>
 <li><input disabled="" type="checkbox"> Putting <code>useTask</code> inside a tab or conditional cancels the worker as soon as it is hidden.</li>
 <li><input disabled="" type="checkbox"> Calling <code>keepAnimating</code> unconditionally at the top level creates a busy loop; call it inside the animating widget, and use <code>wakeAfter</code> for timers.</li>
 <li><input disabled="" type="checkbox"> Writing a computed <code>NaN</code> to a <code>Var Float</code> redraws endlessly (<code>NaN /= NaN</code>); guard float math.</li>
@@ -420,7 +419,7 @@ composition wid caretRect = do
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-banks-28c9304c.js"></script>
         <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 

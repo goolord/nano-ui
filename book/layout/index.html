@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d41be472.js";
+            window.path_to_searchindex_js = "../searchindex-4929b437.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2886a539.js"></script>
@@ -235,13 +235,14 @@ settingsPanel =
 <img class="nano-example-shot" src="../images/layout/card.svg" alt="A full-width card showing a build result.">
 </details>
 <details class="nano-example">
-<summary><code>callout</code>: a panel tinted with a semantic color</summary>
+<summary><code>callout</code> / <code>calloutTone</code>: a panel tinted with a semantic color</summary>
 <pre><code class="language-haskell">calloutExample = do
   warnCol &lt;- themeWarning &lt;$&gt; uiTheme
   callout warnCol $ do
     heading "Certificate expiring"
     muted "TLS certificate expires in 3 days."
 </code></pre>
+<p><code>calloutTone Warning body</code> resolves a theme <code>Tone</code> directly instead of taking an explicit <code>Color</code>.</p>
 <img class="nano-example-shot" src="../images/layout/callout.svg" alt="An amber callout warning about an expiring certificate.">
 </details>
 <details class="nano-example">
@@ -260,13 +261,13 @@ settingsPanel =
 <summary><code>center</code>: center content on both axes</summary>
 <pre><code class="language-haskell">centerExample =
   panelWith (fillW . fillH) $
-    center (label "Centred on both axes")
+    center (label "Centered on both axes")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/center.svg" alt="A label centered in a large panel.">
 </details>
 <details class="nano-example">
-<summary><code>responsive</code> / <code>responsiveRowCol</code>: switch layouts at a breakpoint</summary>
-<p><code>responsive breakpoint wide narrow body</code> chooses between two containers based on window width; <code>responsiveRowCol</code> switches between a row and a column.</p>
+<summary><code>responsive</code> / <code>responsiveRowCol</code> / container queries: switch layouts at a breakpoint</summary>
+<p><code>responsive breakpoint wide narrow body</code> chooses between two containers based on window width; <code>responsiveRowCol</code> switches between a row and a column. For layouts inside split panes or sidebars that depend on the enclosing container’s own inner width rather than the window, use <code>responsiveIn</code>, <code>responsiveRowColIn</code>, <code>withContainerQuery</code>, <code>withContainerWidth</code>, or <code>withContainerSize</code>. <code>withContainerQuery</code> projects the inner <code>Size</code> to any <code>Eq</code> value and only schedules a follow-up frame when that projected value changes.</p>
 <pre><code class="language-haskell">responsiveExample =
   responsiveRowCol 640 (tight . gap 8 . fillW) $ do
     panelWith (fillW . padAll 12) (label "Sidebar")
@@ -302,7 +303,7 @@ settingsPanel =
 <details class="nano-example">
 <summary><code>spacer</code>: insert flexible space between siblings</summary>
 <pre><code class="language-haskell">spacerExample =
-  rowWith (fillW . alignMid) $ do
+  rowWith (fillW . alignMiddle) $ do
     label "Left"
     spacer (Grow 1) Fit
     label "Right"
@@ -500,9 +501,10 @@ settingsPanel =
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/tight.svg" alt="Two panels comparing normal padding with tight.">
 </details>
-<h3 id="alignment-and-wrapping"><a class="header" href="#alignment-and-wrapping">Alignment and wrapping</a></h3>
-<p><code>alignStart</code>, <code>alignCenter</code>, and <code>alignEnd</code> position a child horizontally inside a column. <code>alignTop</code>, <code>alignMid</code>, and <code>alignBottom</code> position a child vertically inside a row.</p>
-<p>Every alignment modifier applies to the node it is placed on, not to that node’s children. Putting <code>alignMid</code> on a <code>row</code> centers the row inside its parent; to vertically center the items <em>inside</em> the row, apply <code>alignMid</code> to each child.</p>
+<h3 id="alignment-distribution-and-wrapping"><a class="header" href="#alignment-distribution-and-wrapping">Alignment, distribution, and wrapping</a></h3>
+<p><code>alignStart</code>, <code>alignCenter</code>, and <code>alignEnd</code> position a child horizontally inside a column. <code>alignTop</code>, <code>alignMiddle</code>, <code>alignBottom</code>, and <code>alignBaseline</code> position a child vertically inside a row.</p>
+<p>Every <code>align*</code> modifier applies to the node it is placed on, not to that node’s children. Putting <code>alignMiddle</code> on a <code>row</code> centers the row inside its parent. To align the children <em>inside</em> a container across its cross axis, put <code>itemsStart</code>, <code>itemsCenter</code>, <code>itemsEnd</code>, <code>itemsBaseline</code>, or <code>itemsStretch</code> (or <code>itemsAlign</code>) on the container itself: <code>rowWith (itemsCenter . gap 8)</code> vertically centers every child that does not set its own vertical alignment, <code>columnWith itemsCenter</code> centers fit-width children horizontally without affecting left-aligned text inside <code>fillW</code> labels, and <code>itemsStretch</code> stretches fit-sized children across the cross axis. To distribute leftover space along a container’s main axis, use <code>justifyStart</code>, <code>justifyCenter</code>, <code>justifyEnd</code>, or <code>justifyBetween</code> (or <code>justify</code>). Any explicit <code>align*</code> modifier on a child (including <code>alignTop</code> or <code>alignStart</code>) overrides the container default, and <code>itemsAlign</code> never leaks into nested containers or pinned children.</p>
+<p>Additional sizing and flow helpers include <code>fitW</code> / <code>fitH</code>, <code>growW</code> / <code>growH</code>, <code>percentH</code>, <code>spacerW</code> / <code>spacerH</code>, <code>direction</code>, and <code>clipBox</code> (clips children without painting a panel border or fill).</p>
 <details class="nano-example">
 <summary><code>alignStart</code>: align to the left edge</summary>
 <pre><code class="language-haskell">alignStartExample =
@@ -537,11 +539,11 @@ settingsPanel =
 <img class="nano-example-shot" src="../images/layout/aligntop.svg" alt="A button aligned to the top of a tall row.">
 </details>
 <details class="nano-example">
-<summary><code>alignMid</code>: center vertically</summary>
+<summary><code>alignMiddle</code>: center vertically</summary>
 <pre><code class="language-haskell">alignMidExample =
   panelWith (fixedWH 300 110 . padAll 10) $
     rowWith (fillW . fillH . gap 8) $
-      void (buttonWith (alignMid . fixedW 140) "alignMid")
+      void (buttonWith (alignMiddle . fixedW 140) "alignMiddle")
 </code></pre>
 <img class="nano-example-shot" src="../images/layout/alignmid.svg" alt="A button centered vertically in a tall row.">
 </details>
@@ -635,18 +637,18 @@ itemList items =
 </code></pre>
 <p>If none of the scroller’s ancestors constrain its size, <code>grow</code> leaves it with nothing to measure against.</p>
 <ul>
-<li><code>scrollWith</code> scrolls vertically and returns its body’s result.</li>
-<li><code>scrollArea</code> also returns the scroller’s <code>WidgetId</code> for programmatic scrolling.</li>
-<li><code>scroll2DWith</code> and <code>scrollArea2D</code> scroll both horizontally and vertically.</li>
+<li><code>scrollWith</code> scrolls vertically and returns its body’s result; <code>scrollWith'</code> also returns the scroller’s <code>Response</code> (including <code>respId</code>).</li>
+<li><code>scroll2DWith</code> and <code>scroll2DWith'</code> scroll both horizontally and vertically.</li>
+<li><code>scrollConfigured</code> and <code>scrollConfigured'</code> accept a <code>ScrollConfig</code>: choose per-axis <code>ScrollPolicy</code> (<code>ScrollAuto</code>, <code>ScrollAlways</code>, <code>ScrollNone</code>, <code>ScrollHidden</code>, or <code>ScrollOverlay</code> for a floating thumb without a reserved gutter), set <code>scrollBare = True</code> to omit the well background and border, or set <code>scrollFocusable = True</code> for keyboard-driven list views.</li>
 <li>A full-viewport scroller (<code>scrollWith grow</code>) drops its bordered input well and fills with <code>pageBackground</code> (<code>themeWindow</code> by default). Wrap the view in <code>styled panelPage</code> if you want the page background to match the panel surface instead.</li>
 </ul>
 <h3 id="virtualization"><a class="header" href="#virtualization">Virtualization</a></h3>
-<p>For lists with tens of thousands of rows, build only the rows currently inside the viewport and pad above and below them with spacers. Grab the scroller’s ID first and read its previous-frame layout with <code>getScrollMetricsUi</code>:</p>
+<p>For lists with tens of thousands of rows, build only the rows currently inside the viewport and pad above and below them with spacers. Grab the scroller’s ID first and read its previous-frame layout with <code>getScrollMetrics</code>:</p>
 <pre><code class="language-haskell">virtualizedList :: [Item] -&gt; NanoUI ()
 virtualizedList items = do
   sid &lt;- currentId
   scrollWith (fixedH 500 . fillW) $ do
-    metrics &lt;- getScrollMetricsUi sid
+    metrics &lt;- getScrollMetrics sid
     let rowH = 28
         total = length items
         (offsetY, viewH) = case metrics of
@@ -664,23 +666,23 @@ virtualizedList items = do
           labelWith (fixedH rowH . fillW) (itemTitle item)
       when (bottomH &gt; 0) (spacer Fit (Fixed bottomH))
 </code></pre>
-<p>Use <code>scrollViewport</code> rather than the outer container rectangle for the visible height, since <code>scrollViewport</code> already subtracts padding and the scrollbar lane. <code>scrollOffset</code> gives the current scroll position. Calling <code>getScrollMetricsUi</code> registers a layout dependency, so resizing the window triggers a fresh frame automatically.</p>
+<p>Use <code>scrollViewport</code> rather than the outer container rectangle for the visible height, since <code>scrollViewport</code> already subtracts padding and the scrollbar lane. <code>scrollOffset</code> gives the current scroll position. Calling <code>getScrollMetrics</code> registers a layout dependency, so resizing the window triggers a fresh frame automatically.</p>
 <p>For complete examples, look at <code>packages/nano-ui-demo/examples/LongList.hs</code> (100,000 rows) and <code>Logs.hs</code> (auto-scrolling log tail).</p>
 <h3 id="programmatic-scrolling-and-mouse-wheel-step"><a class="header" href="#programmatic-scrolling-and-mouse-wheel-step">Programmatic scrolling and mouse-wheel step</a></h3>
 <pre><code class="language-haskell">reveal :: WidgetId -&gt; Float -&gt; Int -&gt; Bool -&gt; NanoUI ()
 reveal sid rowH index shouldReveal =
   when shouldReveal $
-    scrollRectIntoViewUi sid (Rect 0 (fromIntegral index * rowH) 1 rowH) ScrollNearest ScrollInstant
+    scrollRectIntoView sid (Rect 0 (fromIntegral index * rowH) 1 rowH) ScrollNearest ScrollInstant
 </code></pre>
-<p>Inside a view, you can drive scrolling with <code>scrollToUi</code>, <code>scrollByUi</code>, <code>scrollPagesUi</code>, <code>scrollRectIntoViewUi</code>, <code>setScrollOffsetUi</code>, and <code>setScrollStepUi</code>. Matching <code>Context</code> variants (<code>scrollTo</code>, <code>getScrollOffset2D</code>, and so on) are available in <code>IO</code>.</p>
-<p>By default, one mouse-wheel notch scrolls 60 logical pixels. For uniform lists, match the wheel step to your row height so one notch advances exactly one row (<code>askContext</code> lives in <code>NanoUI.Monad</code>):</p>
+<p>Inside a view, you can drive scrolling with <code>scrollTo</code>, <code>scrollBy</code>, <code>scrollPages</code>, <code>scrollToStart</code>, <code>scrollToEnd</code>, <code>scrollIntoView</code>, <code>scrollRectIntoView</code>, <code>setScrollOffset</code>, and <code>setScrollStep</code>.</p>
+<p>For custom keyboard-driven lists without a full <code>table</code> or <code>tree</code>, set <code>scrollFocusable = True</code> in <code>ScrollConfig</code> so the scroller joins the Tab order and takes focus when passive content inside it is clicked. Pair its <code>WidgetId</code> with <code>useListNav</code> (uniform row height) or <code>useListNavWith</code> (custom per-row rectangles) and <code>selectableRow</code> to handle Up, Down, PageUp, PageDown, Home, End, Enter, and Space with automatic <code>scrollRectIntoView</code>.</p>
+<p>By default, one mouse-wheel notch scrolls 60 logical pixels. For uniform lists, match the wheel step to your row height so one notch advances exactly one row:</p>
 <pre><code class="language-haskell">oneRowPerNotch :: Float -&gt; NanoUI ()
-oneRowPerNotch rowHeight = do
-  ctx &lt;- askContext
-  liftIO $ setScrollTuning ctx defaultScrollTuning
+oneRowPerNotch rowHeight =
+  setScrollTuning defaultScrollTuning
     {scrollWheelStep = rowHeight, scrollSmoothTime = 0}
 </code></pre>
-<p>You can also override the wheel step for a single scroller with <code>setScrollStepUi sid px</code>; passing <code>0</code> restores the context default.</p>
+<p>You can also override the wheel step for a single scroller with <code>setScrollStep sid px</code>; passing <code>0</code> restores the context default.</p>
 <h2 id="nesting-and-chrome"><a class="header" href="#nesting-and-chrome">Nesting and chrome</a></h2>
 <p><code>scrollArea</code>, <code>panel</code>, and <code>card</code> each paint their own background, border, and corner radius. Nesting one inside a popup or modal produces an awkward box-within-a-box. Keep the frame at one level: either strip the inner surface with <code>styled (inputStyle (background colorTransparent . borderWidth 0))</code>, or set <code>padAll 0</code> on the outer dialog and put the padding on the inner body instead.</p>
 <p>See <a href="../styling/gotchas.html">Styling Gotchas</a> and <a href="../troubleshooting/recurring-bugs.html">Troubleshooting</a> for more examples.</p>
@@ -736,7 +738,7 @@ oneRowPerNotch rowHeight = do
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-banks-28c9304c.js"></script>
         <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 

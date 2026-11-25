@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d41be472.js";
+            window.path_to_searchindex_js = "../searchindex-4929b437.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2886a539.js"></script>
@@ -181,13 +181,13 @@
                         <h1 id="overlays--windows"><a class="header" href="#overlays--windows">Overlays &amp; Windows</a></h1>
 <p>Modals, floating in-app windows, and popups are regular <code>NanoUI</code> actions controlled by a <code>Var Bool</code> that tracks whether they are open.</p>
 <h2 id="always-call-overlays-unconditionally"><a class="header" href="#always-call-overlays-unconditionally">Always call overlays unconditionally</a></h2>
-<pre><code class="language-haskell">modal  :: Var Bool -&gt; Text -&gt; NanoUI () -&gt; NanoUI ()
-window :: Var Bool -&gt; Text -&gt; NanoUI () -&gt; NanoUI ()
-popup  :: Var Bool -&gt; PopupConfig -&gt; NanoUI () -&gt; NanoUI ()
+<pre><code class="language-haskell">modal          :: Var Bool -&gt; Text -&gt; NanoUI () -&gt; NanoUI ()
+floatingWindow :: Var Bool -&gt; Text -&gt; NanoUI () -&gt; NanoUI ()
+popup          :: Var Bool -&gt; PopupConfig -&gt; NanoUI () -&gt; NanoUI ()
 </code></pre>
 <blockquote class="blockquote-tag blockquote-tag-caution">
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .389.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.389.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Caution</p>
-<p>Call every overlay on every frame, even when it is closed. Wrapping <code>modal</code>, <code>window</code>, or <code>popup</code> inside <code>when isShown</code> shifts the widget IDs of every sibling after it whenever it opens or closes, breaking focus, carets, and per-row state. Closed overlays draw nothing.</p>
+<p>Call every overlay on every frame, even when it is closed. Wrapping <code>modal</code>, <code>floatingWindow</code>, or <code>popup</code> inside <code>when isShown</code> shifts the widget IDs of every sibling after it whenever it opens or closes, breaking focus, carets, and per-row state. Closed overlays draw nothing.</p>
 </blockquote>
 <pre><code class="language-haskell">confirmDelete = do
   showConfirm &lt;- useVar False
@@ -221,13 +221,13 @@ popup  :: Var Bool -&gt; PopupConfig -&gt; NanoUI () -&gt; NanoUI ()
 </code></pre>
 <p>If you want a modal backdrop and panel without a title bar or close button, use <code>modalPanel</code> or <code>modalPanel'</code>. Pressing Escape or clicking outside still closes it.</p>
 <h2 id="floating-windows"><a class="header" href="#floating-windows">Floating windows</a></h2>
-<p><code>window</code> creates a draggable, resizable floating panel with a scrollable body. Unlike a modal, the main UI and any other open floating windows remain interactive around it:</p>
+<p><code>floatingWindow</code> creates a draggable, resizable floating panel with a scrollable body. Unlike a modal, the main UI and any other open floating windows remain interactive around it:</p>
 <pre><code class="language-haskell">inspector = do
   inspectorOpen &lt;- useVar False
-  window inspectorOpen "Inspector" $ do
+  floatingWindow inspectorOpen "Inspector" $ do
     inspectorBody
 </code></pre>
-<p><code>window'</code> returns both the body’s result and a <code>Response</code>. Use <code>window</code> for inspectors, palettes, and tool panels that sit alongside the main view; use <code>modal</code> when the user needs to finish an interaction before returning to the page.</p>
+<p><code>floatingWindow'</code> returns both the body’s result and a <code>Response</code>. Use <code>floatingWindow</code> for inspectors, palettes, and tool panels that sit alongside the main view; use <code>modal</code> when the user needs to finish an interaction before returning to the page.</p>
 <h2 id="popups"><a class="header" href="#popups">Popups</a></h2>
 <p><code>popup</code> draws a floating panel positioned by a <code>PopupConfig</code>:</p>
 <pre><code class="language-haskell">filterPopup = do
@@ -245,9 +245,9 @@ popup  :: Var Bool -&gt; PopupConfig -&gt; NanoUI () -&gt; NanoUI ()
 <p>Key placement options:</p>
 <ul>
 <li><code>AnchorRect (respRect r)</code> anchors the popup to a widget; <code>AnchorPoint pos</code> anchors it to a specific coordinate.</li>
-<li><code>cfgPlacement</code> chooses where the popup opens (<code>PlacementAuto</code>, <code>PlacementBelow</code>, <code>PlacementAbove</code>, <code>PlacementAtCursor</code>, and others).</li>
-<li><code>cfgOffset</code> sets the pixel gap between the anchor and the popup.</li>
-<li><code>cfgDismissable = False</code> prevents automatic closing on Escape or outside clicks so you can handle dismissal explicitly via <code>popup'</code>.</li>
+<li><code>popupPlacement</code> chooses where the popup opens (<code>PlacementAuto</code>, <code>PlacementBelow</code>, <code>PlacementAbove</code>, <code>PlacementAtCursor</code>, and others).</li>
+<li><code>popupOffset</code> sets the pixel gap between the anchor and the popup.</li>
+<li><code>popupDismissable = False</code> prevents automatic closing on Escape or outside clicks so you can handle dismissal explicitly via <code>popup'</code>.</li>
 </ul>
 <p>Because anchored popups read <code>respRect</code> (which comes from the previous frame), warm up one frame in headless tests before clicking to open them. For tall popup menus, cap the height with <code>popupWith (maxH ...)</code> and place a scroller inside.</p>
 <h2 id="tooltips"><a class="header" href="#tooltips">Tooltips</a></h2>
@@ -260,10 +260,10 @@ popup  :: Var Bool -&gt; PopupConfig -&gt; NanoUI () -&gt; NanoUI ()
   tooltipConfigured defaultTooltipConfig
     {tooltipPlacement = PlacementAtCursor} more "Follows the pointer"
 </code></pre>
-<p>By default, tooltips appear after hovering for 0.5 seconds. Pass a <code>TooltipConfig</code> to <code>tooltipConfigured</code> to change the delay or placement, or use <code>withTooltip</code> to render a custom widget subtree inside the tooltip instead of plain text.</p>
+<p>By default, tooltips appear after hovering for 0.5 seconds. Pass a <code>TooltipConfig</code> to <code>tooltipConfigured</code> to change the delay or placement, or use <code>tooltipWidget</code>, <code>tooltipWidgetConfigured</code>, or <code>withTooltip</code> to render a custom widget subtree inside the tooltip instead of plain text. Tooltips pass pointer events through to widgets underneath and keep their bodies inert so inner controls cannot steal keyboard focus.</p>
 <h2 id="keep-in-mind"><a class="header" href="#keep-in-mind">Keep in mind</a></h2>
 <ul>
-<li><strong>Modals stack cleanly.</strong> Escape dismisses the innermost modal first; sibling modals close in declaration order.</li>
+<li><strong>Modals stack in declaration order.</strong> Escape dismisses the innermost modal first; sibling modals close in declaration order.</li>
 <li><strong>Keep the open <code>Var</code> alive outside conditional branches.</strong> Allocate or read it in a scope that runs even while the overlay is hidden.</li>
 <li><strong>Check focus after overlay calls</strong> so focus queries see widgets declared inside open overlays.</li>
 <li><strong>Avoid nested borders.</strong> Putting a <code>scrollArea</code>, <code>panel</code>, or <code>card</code> inside a modal or popup draws a box inside a box; strip the inner chrome (see <a href="../troubleshooting/recurring-bugs.html#2-double-borders--box-in-a-box">Double borders</a>).</li>
@@ -321,7 +321,7 @@ popup  :: Var Bool -&gt; PopupConfig -&gt; NanoUI () -&gt; NanoUI ()
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-banks-28c9304c.js"></script>
         <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 

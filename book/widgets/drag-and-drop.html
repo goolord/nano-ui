@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d41be472.js";
+            window.path_to_searchindex_js = "../searchindex-4929b437.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2886a539.js"></script>
@@ -211,7 +211,7 @@ fileDrop = do
 </code></pre>
 <p><code>dropHovered</code> is <code>True</code> while an external drag hovers over the zone. If you want drop detection on a custom region without drawing a panel, call <code>useDrop rect</code>. Drop events respect layering, so a drop zone covered by an open modal receives nothing.</p>
 <h2 id="dockable-pane-grids"><a class="header" href="#dockable-pane-grids">Dockable pane grids</a></h2>
-<p><code>paneGrid</code> manages splittable, resizable pane layouts. Its response includes <code>pgrDropTarget</code>, which reports where a dragged pane or tab would dock under the cursor and pairs naturally with <code>useDrag</code>:</p>
+<p><code>paneGrid</code> (imported from <code>NanoUI.Widgets.PaneGrid</code>) manages splittable, resizable, tab-groupable pane layouts. Its response includes <code>pgrDropTarget</code>, which reports where a dragged pane or tab would dock under the cursor and pairs with <code>useDrag</code>:</p>
 <pre><code class="language-haskell">dockPanes :: PaneGridConfig -&gt; Maybe (Drag Word64) -&gt; NanoUI ()
 dockPanes cfg gesture = do
   panes &lt;- paneGrid cfg
@@ -219,7 +219,7 @@ dockPanes cfg gesture = do
     (Just d, Just target) | dragPhase d == DragReleased -&gt; void (commitPaneDrop target)
     _ -&gt; pure ()
 </code></pre>
-<p><code>pgdLocation</code> is either <code>BesidePane paneId edge</code> or <code>OutsideGrid edge</code>, and <code>pgdRect</code> / <code>pgdPane</code> let you validate or highlight the target. Save <code>pgrTree</code> whenever <code>pgrCommitted</code> is <code>True</code>.</p>
+<p><code>pgdLocation</code> is <code>BesidePane paneId edge</code> (on a pane edge), <code>IntoTabs paneId</code> (in a pane center when <code>pgCenterDrop = CenterTab</code>), or <code>OutsideGrid edge</code> (along the outer grid margin). <code>pgdRect</code> and <code>pgdPane</code> let you validate or highlight the target. Save <code>pgrTree</code> whenever <code>pgrCommitted</code> is <code>True</code>.</p>
 
                     </main>
 
@@ -272,7 +272,7 @@ dockPanes cfg gesture = do
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-banks-28c9304c.js"></script>
         <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 

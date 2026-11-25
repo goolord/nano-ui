@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d41be472.js";
+            window.path_to_searchindex_js = "../searchindex-4929b437.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2886a539.js"></script>
@@ -196,7 +196,7 @@
 </tbody>
 </table>
 </div>
-<p>Each <code>Style</code> sets <code>bg</code>, <code>fg</code>, <code>border</code>, <code>borderWidth</code>, <code>cornerRadius</code>, <code>hoverBg</code>, and <code>activeBg</code>. Beyond those five surfaces, a <code>Theme</code> defines shared semantic colors: <code>themeAccent</code>, <code>themeOnAccent</code>, <code>themeMuted</code>, <code>themeSelection</code>, <code>themeFocusRing</code>, <code>themeWindow</code>, <code>themeSeparator</code>, and the success, warning, and danger tones.</p>
+<p>Each <code>Style</code> sets <code>styleBg</code>, <code>styleFg</code>, <code>styleBorder</code>, <code>styleBorderWidth</code>, <code>styleCornerRadius</code>, <code>styleHoverBg</code>, <code>styleActiveBg</code>, and <code>styleBorderSides</code>. Beyond those five surfaces, a <code>Theme</code> defines shared semantic colors: <code>themeAccent</code>, <code>themeOnAccent</code>, <code>themeMuted</code>, <code>themeSelection</code>, <code>themeFocusRing</code>, <code>themeWindow</code>, <code>themeSeparator</code>, and the success, warning, and danger tones. Construct colors with <code>colorRGB</code>, <code>colorRGBA</code>, <code>colorHex "#38bdf8"</code>, or <code>colorHexA "#38bdf8cc"</code>.</p>
 <p>The backdrop behind your view is <code>pageBackground</code>, which defaults to <code>themeWindow</code> unless the theme sets <code>themePage</code> (via <code>pageColor</code>). Calling <code>styled panelPage</code> puts a borderless view directly on the panel surface. The window color itself still peeks through gaps between panels:</p>
 <pre><code class="language-haskell">-- An app with no panel of its own: the panel surface is the page.
 panelPageOptions :: SdlOptions
@@ -207,7 +207,7 @@ body :: NanoUI ()
 body = styled panelPage (columnWith (padAll 12) (label "Body"))
 </code></pre>
 <p>A full-window scroller (<code>scrollWith grow</code>) paints using this page color instead of drawing a bordered well.</p>
-<p>Built-in themes include <code>defaultTheme</code> (dark), <code>defaultLightTheme</code>, the Tomorrow variants, and Base16 generators (<code>themeFromBase16</code>, <code>themeFromBase16Dark</code>, <code>themeFromBase16Light</code>). Set a theme at startup with <code>sdlAppTheme = Just appTheme</code>, change it dynamically per frame with <code>setUiTheme</code>, or match the OS appearance automatically with <code>followSystemTheme</code> or <code>lightDark</code>.</p>
+<p><code>defaultTheme</code> (dark) and <code>defaultLightTheme</code> live in <code>NanoUI</code>; extra presets (Tomorrow variants) and Base16 generators (<code>themeFromBase16</code>, <code>themeFromBase16Dark</code>, <code>themeFromBase16Light</code>) live in <code>NanoUI.Themes</code>. Set a theme at startup with <code>sdlAppTheme = Just appTheme</code>, change it dynamically per frame with <code>setTheme</code>, or match the OS appearance automatically with <code>followSystemTheme</code> or <code>lightDark</code>.</p>
 <h2 id="scoped-styling"><a class="header" href="#scoped-styling">Scoped styling</a></h2>
 <pre><code class="language-haskell">themedViews = do
   -- Replace the base theme for a subtree.
@@ -220,7 +220,7 @@ body = styled panelPage (columnWith (padAll 12) (label "Body"))
 <ul>
 <li><strong>Style modifiers</strong> (<code>Style -&gt; Style</code>): <code>background</code>, <code>foreground</code>, <code>borderColor</code>, <code>borderWidth</code>, <code>borderSides</code>, <code>cornerRadius</code>, <code>hoverBackground</code>, <code>pressBackground</code>, and <code>fillColor</code>.</li>
 <li><strong>Theme modifiers</strong> (<code>Theme -&gt; Theme</code>): <code>buttonStyle</code>, <code>inputStyle</code>, <code>panelStyle</code>, <code>everyStyle</code>, <code>accentColor</code>, <code>textColor</code>, <code>rounded</code>, <code>subtle</code>, <code>tinted</code>, and <code>readableOn</code>.</li>
-<li><strong>Semantic shortcuts</strong>: <code>primary</code>, <code>destructive</code>, <code>success</code>, <code>warning</code>, <code>tone Danger</code>, and <code>toneColor Warning</code>.</li>
+<li><strong>Semantic shortcuts</strong>: <code>primary</code>, <code>destructive</code>, <code>success</code>, <code>warning</code>, <code>tone Danger</code>, <code>calloutTone Warning</code>, and <code>toneColor Warning</code>.</li>
 </ul>
 <p>For example, here is a quiet, borderless button helper:</p>
 <pre><code class="language-haskell">quiet :: Theme -&gt; Theme
@@ -256,10 +256,12 @@ quietSkip = whenM (styled quiet (button "Skip")) skip
 <p>Compare all four states across dark and light themes:</p>
 <p><nano-ui-state-lab></nano-ui-state-lab></p>
 <h2 id="typography-and-fonts"><a class="header" href="#typography-and-fonts">Typography and fonts</a></h2>
-<p>Font modifiers compose right alongside layout modifiers on any text widget (<code>labelWith</code>, <code>headingWith</code>, <code>textInputWith</code>, <code>buttonWith</code>, and so on):</p>
+<p>Font modifiers compose right alongside layout modifiers on text and labeled widgets (<code>labelWith</code>, <code>buttonWith</code>, <code>selectWith</code>, <code>textAreaWith</code>, and <code>ticLayout</code> inside <code>textInputConfigured</code>):</p>
 <ul>
-<li><code>fontSize px</code>, <code>fontMono</code>, <code>fontBold</code> (or <code>fontWeight</code>), <code>fontItalic</code>, <code>fontUnderline</code>, <code>fontStrike</code></li>
-<li><code>fontTone Warning</code>, <code>fontColor color</code></li>
+<li><strong>Size and face:</strong> <code>fontSize px</code>, <code>fontSizeScale factor</code>, <code>fontRegular</code>, <code>fontProportional</code>, <code>fontMono</code>, <code>fontTabular</code> (tabular lining digits so numeric columns align without jumping)</li>
+<li><strong>Weight, slant, decoration:</strong> <code>fontBold</code> (or <code>fontWeight</code>), <code>fontItalic</code>, <code>fontUnderline</code>, <code>fontStrike</code></li>
+<li><strong>Color and tone:</strong> <code>fontTone Warning</code>, <code>fontColor color</code></li>
+<li><strong>Single-line truncation:</strong> <code>singleLine</code> keeps a label on one line even inside a column and truncates overflow with an ellipsis; <code>ellipsisEnd</code> (default), <code>ellipsisMiddle</code> (for file paths), or <code>ellipsisStart</code> chooses where the ellipsis sits (<code>textEllipsis</code>).</li>
 </ul>
 <pre><code class="language-haskell">warningLabel = labelWith (fontMono . fontSize 15 . fontTone Warning) "warning: low disk"
 </code></pre>
@@ -327,7 +329,7 @@ fontOptions =
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-banks-28c9304c.js"></script>
         <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 

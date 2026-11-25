@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d41be472.js";
+            window.path_to_searchindex_js = "../searchindex-4929b437.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2886a539.js"></script>
@@ -251,7 +251,7 @@ python scripts/profile/summarize_prof.py profile-json.prof
 <h3 id="continuous-frame-rate-on-linux"><a class="header" href="#continuous-frame-rate-on-linux">Continuous frame rate on Linux</a></h3>
 <p><code>continuous-meter.c</code> is an <code>LD_PRELOAD</code> helper for timing <code>SDL_RenderPresent</code> calls in the SDL demo’s <code>--continuous</code> mode. It skips 1,000 warm-up frames, times the next 10,000, prints wall time, CPU time, FPS, and p50/p95/p99 frame times to stderr, and exits. Build and run commands are documented at the top of the C file. For fair comparisons, alternate runs using the same renderer, window size, DPI, and RTS flags.</p>
 <h3 id="source-line-budget"><a class="header" href="#source-line-budget">Source line budget</a></h3>
-<p><code>source-budget.py &lt;git-rev&gt;</code> reports the net lines of library code changed since a given commit (<code>packages/*/lib</code> and <code>cbits</code>, excluding <code>nano-ui-demo</code>). It counts both raw lines and lines after formatting each modified Haskell file through <code>fourmolu</code> on stdin, ensuring pure reformatting does not masquerade as code reduction. It requires <code>fourmolu</code> on <code>PATH</code> and never modifies files on disk.</p>
+<p><code>source-budget.py &lt;git-rev&gt;</code> reports the net lines of library code changed since a given commit (<code>packages/*/lib</code> and <code>cbits</code>, excluding <code>nano-ui-demo</code>). It counts both raw lines and lines after formatting each modified Haskell file through <code>fourmolu</code> on stdin, so pure reformatting does not masquerade as code reduction. It requires <code>fourmolu</code> on <code>PATH</code> and never modifies files on disk.</p>
 <h2 id="haddocks-and-hoogle"><a class="header" href="#haddocks-and-hoogle">Haddocks and Hoogle</a></h2>
 <p>Released packages have Haddock documentation on Hackage. To generate docs for the whole checkout locally:</p>
 <pre><code class="language-sh">cabal haddock-project --output=haddocks --hoogle
@@ -263,7 +263,7 @@ python scripts/profile/summarize_prof.py profile-json.prof
 <h2 id="book-code"><a class="header" href="#book-code">Book code</a></h2>
 <p>Every Haskell snippet in this book comes from an anchored region of a compiled module: either <code>packages/nano-ui-demo/book/Book/*.hs</code> for regular chapters, or <code>packages/nano-ui-svg/app/*Examples.hs</code> for snippets paired with rendered diagrams. Include them with an anchored <code>#include</code> directive; <code>nano-ui-book-test</code> fails if any Haskell is written inline in a Markdown file.</p>
 <h2 id="module-conventions"><a class="header" href="#module-conventions">Module conventions</a></h2>
-<p>See <a href="../packages/index.html">Ecosystem Packages</a> for the companion packages. In <code>packages/nano-ui/lib</code>, the public API consists of <code>NanoUI</code> (with <code>packages/nano-ui/lib/NanoUI.hs</code> holding the full export list) and <code>NanoUI.Widgets.*</code>. Modules under <code>NanoUI.Internal.*</code> are exposed for backends and tests and may change without notice between minor releases.</p>
+<p>See <a href="../packages/index.html">Ecosystem Packages</a> for the companion packages. In <code>packages/nano-ui/lib</code>, <code>NanoUI</code> (<code>packages/nano-ui/lib/NanoUI.hs</code>) re-exports the core view API, while specialized public modules cover focused subsystems: <code>NanoUI.Themes</code>, <code>NanoUI.Chrome</code>, <code>NanoUI.Path</code>, <code>NanoUI.Shortcut</code>, <code>NanoUI.Svg</code>, <code>NanoUI.Shader.Raw</code>, <code>NanoUI.Effectful</code>, <code>NanoUI.Widgets.PaneGrid</code>, <code>NanoUI.Widgets.TextDocument</code>, <code>NanoUI.Widgets.Custom</code>, <code>NanoUI.Testing</code> / <code>NanoUI.Testing.Sim</code>, and <code>NanoUI.Backend</code> / <code>NanoUI.Runner</code>. Modules under <code>NanoUI.Internal.*</code> are exposed for companion packages and tests and may change without notice between minor releases.</p>
 
                     </main>
 
@@ -316,7 +316,7 @@ python scripts/profile/summarize_prof.py profile-json.prof
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-banks-28c9304c.js"></script>
         <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 

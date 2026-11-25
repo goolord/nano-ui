@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d41be472.js";
+            window.path_to_searchindex_js = "../searchindex-4929b437.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2886a539.js"></script>
@@ -245,7 +245,7 @@ todoApp app = do
 <h2 id="3-adding-an-item"><a class="header" href="#3-adding-an-item">3. Adding an item</a></h2>
 <p>The input row displays a text field next to an Add button and inserts a new item when the user presses Enter or clicks the button.</p>
 <pre><code class="language-haskell">newItemRow :: Var Todos -&gt; Var Text -&gt; NanoUI ()
-newItemRow todosVar draft = rowWith (tight . gap 8 . alignMid . fillW) $ do
+newItemRow todosVar draft = rowWith (tight . gap 8 . alignMiddle . fillW) $ do
   inputR &lt;-
     textInputConfigured'
       defaultTextInputConfig {ticPlaceholder = "What needs doing?"}
@@ -261,7 +261,7 @@ newItemRow todosVar draft = rowWith (tight . gap 8 . alignMid . fillW) $ do
 <ul>
 <li><code>textInputConfigured'</code> (the primed form) returns a <code>Response</code> containing the widget’s ID, bounds, hover/click flags, and <code>respSubmitted</code> (which turns <code>True</code> when the user presses Enter). By contrast, <code>button</code> returns just the <code>Bool</code> we need.</li>
 <li><code>readVar draft</code> runs <em>below</em> the text input that edits it, so the read immediately sees the new text in the same pass. Reading above an editing widget forces a second pass of the view.</li>
-<li><code>modifyVar</code> applies a pure function to the latest stored value, so multiple updates in one frame compose cleanly instead of overwriting each other.</li>
+<li><code>modifyVar</code> applies a pure function to the latest stored value, so multiple updates in one frame compose without overwriting each other.</li>
 <li>After inserting the item, we clear <code>draft</code> and call <code>requestFocus</code> so the user can keep typing the next task right away. Focus requests take effect at the end of the frame.</li>
 </ul>
 <blockquote class="blockquote-tag blockquote-tag-note">
@@ -279,9 +279,9 @@ matches Active t = not (todoDone t)
 matches Done t = todoDone t
 
 filterRow :: Var [Todo] -&gt; Var Filter -&gt; NanoUI ()
-filterRow items filt = rowWith (tight . gap 12 . alignMid . fillW) $ do
+filterRow items filt = rowWith (tight . gap 12 . alignMiddle . fillW) $ do
   -- A header for every filter, as a segmented control.
-  boundedTabBarConfigured
+  enumTabBarByConfigured
     defaultTabsConfig {tabsStyle = TabSegmented}
     (T.pack . show)
     filt
@@ -290,12 +290,12 @@ filterRow items filt = rowWith (tight . gap 12 . alignMid . fillW) $ do
   let
     left = length (filter (not . todoDone) todos)
   labelWith
-    (tight . alignMid . fontMuted)
+    (tight . alignMiddle . fontMuted)
     (T.pack (show left) &lt;&gt; if left == 1 then " item left" else " items left")
   disabledWhen (left == length todos) $
     whenM (button "Clear completed") (modifyVar items (filter (not . todoDone)))
 </code></pre>
-<p><code>boundedTabBarConfigured</code> creates a segmented tab bar with one segment per constructor of <code>Filter</code>, using <code>show</code> for the labels. The active item count is <em>derived</em> on the fly from the current list rather than copied into a separate <code>Var</code> that could fall out of sync. Wrapping the clear button in <code>disabledWhen</code> dims it and ignores clicks without removing it from the layout.</p>
+<p><code>enumTabBarByConfigured</code> creates a segmented tab bar with one segment per constructor of <code>Filter</code>, using <code>show</code> for the labels. The active item count is <em>derived</em> on the fly from the current list rather than copied into a separate <code>Var</code> that could fall out of sync. Wrapping the clear button in <code>disabledWhen</code> dims it and ignores clicks without removing it from the layout.</p>
 <h2 id="5-rows-own-their-state"><a class="header" href="#5-rows-own-their-state">5. Rows own their state</a></h2>
 <p>Each row tracks two pieces of local UI state: whether it is currently being edited, and the text currently in its edit box. Because the list can be filtered or reordered at any time, that state has to stay attached to the item’s ID rather than its row position on screen.</p>
 <pre><code class="language-haskell">todoList :: Var [Todo] -&gt; Var Filter -&gt; NanoUI ()
@@ -331,8 +331,8 @@ todoRow items todo above below = do
       writeVar todo.todoText =&lt;&lt; readVar draft
       writeVar editing False
   when isEditing (whenM takeEscape (writeVar editing False))
-  rowWith (tight . gap 8 . alignMid . fillW) $ do
-    checkboxWith alignMid "" todo.todoDone
+  rowWith (tight . gap 8 . alignMiddle . fillW) $ do
+    checkboxWith alignMiddle "" todo.todoDone
     -- The label and the field swap places, so they share a scope.
     scope $
       if isEditing
@@ -347,7 +347,7 @@ todoRow items todo above below = do
           when (respSubmitted fieldR) save
         else
           labelWith
-            (fillW . alignMid . (if todoDone t then fontStrike . fontMuted else id))
+            (fillW . alignMiddle . (if todoDone t then fontStrike . fontMuted else id))
             (todoText t)
     whenM (button (if isEditing then "Save" else "Edit")) $
       if isEditing
@@ -371,7 +371,7 @@ todoRow items todo above below = do
 <li><strong>Field projections update items in place.</strong> <code>todo.todoDone</code> is a <code>Var Bool</code> for that item’s completion flag, which lets <code>checkbox</code> toggle it directly. Saving writes the draft into <code>todo.todoText</code> and leaves edit mode.</li>
 </ol>
 <h2 id="6-reordering-by-id"><a class="header" href="#6-reordering-by-id">6. Reordering by ID</a></h2>
-<p>The Up and Down buttons need to swap two items in the full list, even when a filter hides rows between them. Looking up items by ID handles both filtered and unfiltered views cleanly:</p>
+<p>The Up and Down buttons need to swap two items in the full list, even when a filter hides rows between them. Looking up items by ID handles both filtered and unfiltered views:</p>
 <pre><code class="language-haskell">-- | Swap the places of two items, by id.
 swapIds :: Int -&gt; Int -&gt; [Todo] -&gt; [Todo]
 swapIds a b xs = map pick xs
@@ -449,7 +449,7 @@ swapIds a b xs = map pick xs
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-banks-28c9304c.js"></script>
         <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 

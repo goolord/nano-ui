@@ -1257,7 +1257,7 @@ when (dragActive drag) (modifyVar angle (+ turned (respRect resp) drag))</code><
         </div>
         <div class="spec-item">
           <dt>Drawing</dt>
-          <dd>2D vector canvas with paths, strokes, gradients, images, SVG icons, eased tweens, and spring physics.</dd>
+          <dd>2D vector canvas with paths, strokes, gradients, images, SVG icons, typed GPU fragment shaders (<code>nano-ui-shader</code>), eased tweens, and spring physics.</dd>
         </div>
         <div class="spec-item">
           <dt>Themes</dt>
@@ -1304,7 +1304,7 @@ cabal run nano-ui-sdl-demo</code></pre>
 
         <div class="start-info">
           <p>
-            <code>nix develop</code> supplies GHC, Cabal, SDL3, and SDL3_ttf and launches the full desktop widget sampler.
+            <code>nix develop</code> supplies GHC, Cabal, SDL3, and SDL3_ttf so <code>cabal run nano-ui-sdl-demo</code> can launch the desktop widget sampler.
           </p>
           <p>
             See the <a href="book/getting-started/quickstart.html">quick start</a> for Windows MSYS2 and non-Nix setups,

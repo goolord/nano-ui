@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d41be472.js";
+            window.path_to_searchindex_js = "../searchindex-4929b437.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2886a539.js"></script>
@@ -243,7 +243,7 @@ visibleTodos items =
       withKey (todoId todo) (todoRow (at todo))
 </code></pre>
 <h2 id="rule-4-call-overlays-unconditionally"><a class="header" href="#rule-4-call-overlays-unconditionally">Rule 4: call overlays unconditionally</a></h2>
-<p><code>modal</code>, <code>window</code>, and <code>popup</code> each take a <code>Var Bool</code> controlling whether they are open, and they render nothing when that flag is <code>False</code>. Call them on every frame:</p>
+<p><code>modal</code>, <code>floatingWindow</code>, and <code>popup</code> each take a <code>Var Bool</code> controlling whether they are open, and they render nothing when that flag is <code>False</code>. Call them on every frame:</p>
 <pre><code class="language-haskell">deleteDialog :: NanoUI ()
 deleteDialog = do
   confirm &lt;- useVar False
@@ -252,7 +252,7 @@ deleteDialog = do
   modal confirm "Delete the file?" $
     whenM (button "Delete") (deleteFile &gt;&gt; writeVar confirm False)
 </code></pre>
-<p>Putting a modal or popup inside <code>when isOpen</code> shifts the IDs of following siblings whenever it opens or closes. If your open state is derived from other data instead of a <code>Var Bool</code>, pass <code>constVar</code> and handle close events through the primed variants (<code>modal'</code>, <code>window'</code>, <code>popup'</code>).</p>
+<p>Putting a modal or popup inside <code>when isOpen</code> shifts the IDs of following siblings whenever it opens or closes. If your open state is derived from other data instead of a <code>Var Bool</code>, pass <code>constVar</code> and handle close events through the primed variants (<code>modal'</code>, <code>floatingWindow'</code>, <code>popup'</code>).</p>
 <h2 id="rule-5-prune-state-for-unbounded-collections"><a class="header" href="#rule-5-prune-state-for-unbounded-collections">Rule 5: prune state for unbounded collections</a></h2>
 <p>Keyed widget state and <code>useVar</code> slots stay in memory even while their key is not drawn. That is handy when a user filters a list and clears the filter: any half-typed draft in a hidden row is still there when the row returns.</p>
 <p>However, that state is never garbage-collected on its own. For collections that grow indefinitely (chat logs, streaming tables, open tabs over long sessions), store per-row state in a <code>VarMap</code> and prune deleted keys with <code>retainVars</code>:</p>
@@ -328,7 +328,7 @@ pruneRows rowVars liveIds = retainVars (`elem` liveIds) rowVars
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-banks-28c9304c.js"></script>
         <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 

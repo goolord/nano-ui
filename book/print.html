@@ -37,7 +37,7 @@
             const path_to_root = "";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "searchindex-d41be472.js";
+            window.path_to_searchindex_js = "searchindex-4929b437.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-2886a539.js"></script>
@@ -206,6 +206,7 @@ counter = row $ do
 <tr><td><code>packages/nano-ui-diagrams</code></td><td>Line, bar, scatter, and area charts (<code>NanoUI.Plot</code>) alongside <code>diagrams-lib</code> support.</td><td><a href="#ecosystem-packages">Ecosystem Packages</a></td></tr>
 <tr><td><code>packages/nano-ui-form</code></td><td>Validated applicative forms built on <code>ditto</code>.</td><td><a href="#ecosystem-packages">Ecosystem Packages</a></td></tr>
 <tr><td><code>packages/nano-ui-markdown</code></td><td>CommonMark rendering with incremental appends for streamed text.</td><td><a href="#ecosystem-packages">Ecosystem Packages</a></td></tr>
+<tr><td><code>packages/nano-ui-shader</code></td><td>Pure-Haskell typed fragment shader EDSL, multi-target GPU compiler, pass fusion, and built-in effects.</td><td><a href="#shaders">Shaders</a></td></tr>
 <tr><td><code>packages/nano-ui-svg</code></td><td>Headless <code>DrawOp</code> and full-frame SVG export for documentation and visual tests.</td><td><a href="#ecosystem-packages">Ecosystem Packages</a></td></tr>
 <tr><td><code>packages/nano-ui-demo</code></td><td>Full example applications and focused single-topic demos.</td><td><a href="#tutorials">Tutorials</a></td></tr>
 </tbody>
@@ -241,6 +242,8 @@ counter = row $ do
   location: https://github.com/goolord/nano-ui
   subdir:
     packages/nano-ui
+    packages/nano-ui-emit
+    packages/nano-ui-ttf
     packages/nano-ui-sdl
 
 package nano-ui-sdl
@@ -292,7 +295,7 @@ appView = columnWith (gap 12 . padAll 20 . alignCenter) $ do
   -- State at this call site; allocated on the first frame only.
   n &lt;- useVar (0 :: Int)
 
-  rowWith (gap 8 . alignMid) $ do
+  rowWith (gap 8 . alignMiddle) $ do
     whenM (button "-") (modifyVar n (subtract 1))
 
     value &lt;- readVar n
@@ -409,7 +412,7 @@ todoApp app = do
 <h2 id="3-adding-an-item"><a class="header" href="#3-adding-an-item">3. Adding an item</a></h2>
 <p>The input row displays a text field next to an Add button and inserts a new item when the user presses Enter or clicks the button.</p>
 <pre><code class="language-haskell">newItemRow :: Var Todos -&gt; Var Text -&gt; NanoUI ()
-newItemRow todosVar draft = rowWith (tight . gap 8 . alignMid . fillW) $ do
+newItemRow todosVar draft = rowWith (tight . gap 8 . alignMiddle . fillW) $ do
   inputR &lt;-
     textInputConfigured'
       defaultTextInputConfig {ticPlaceholder = "What needs doing?"}
@@ -425,7 +428,7 @@ newItemRow todosVar draft = rowWith (tight . gap 8 . alignMid . fillW) $ do
 <ul>
 <li><code>textInputConfigured'</code> (the primed form) returns a <code>Response</code> containing the widget’s ID, bounds, hover/click flags, and <code>respSubmitted</code> (which turns <code>True</code> when the user presses Enter). By contrast, <code>button</code> returns just the <code>Bool</code> we need.</li>
 <li><code>readVar draft</code> runs <em>below</em> the text input that edits it, so the read immediately sees the new text in the same pass. Reading above an editing widget forces a second pass of the view.</li>
-<li><code>modifyVar</code> applies a pure function to the latest stored value, so multiple updates in one frame compose cleanly instead of overwriting each other.</li>
+<li><code>modifyVar</code> applies a pure function to the latest stored value, so multiple updates in one frame compose without overwriting each other.</li>
 <li>After inserting the item, we clear <code>draft</code> and call <code>requestFocus</code> so the user can keep typing the next task right away. Focus requests take effect at the end of the frame.</li>
 </ul>
 <blockquote class="blockquote-tag blockquote-tag-note">
@@ -443,9 +446,9 @@ matches Active t = not (todoDone t)
 matches Done t = todoDone t
 
 filterRow :: Var [Todo] -&gt; Var Filter -&gt; NanoUI ()
-filterRow items filt = rowWith (tight . gap 12 . alignMid . fillW) $ do
+filterRow items filt = rowWith (tight . gap 12 . alignMiddle . fillW) $ do
   -- A header for every filter, as a segmented control.
-  boundedTabBarConfigured
+  enumTabBarByConfigured
     defaultTabsConfig {tabsStyle = TabSegmented}
     (T.pack . show)
     filt
@@ -454,12 +457,12 @@ filterRow items filt = rowWith (tight . gap 12 . alignMid . fillW) $ do
   let
     left = length (filter (not . todoDone) todos)
   labelWith
-    (tight . alignMid . fontMuted)
+    (tight . alignMiddle . fontMuted)
     (T.pack (show left) &lt;&gt; if left == 1 then " item left" else " items left")
   disabledWhen (left == length todos) $
     whenM (button "Clear completed") (modifyVar items (filter (not . todoDone)))
 </code></pre>
-<p><code>boundedTabBarConfigured</code> creates a segmented tab bar with one segment per constructor of <code>Filter</code>, using <code>show</code> for the labels. The active item count is <em>derived</em> on the fly from the current list rather than copied into a separate <code>Var</code> that could fall out of sync. Wrapping the clear button in <code>disabledWhen</code> dims it and ignores clicks without removing it from the layout.</p>
+<p><code>enumTabBarByConfigured</code> creates a segmented tab bar with one segment per constructor of <code>Filter</code>, using <code>show</code> for the labels. The active item count is <em>derived</em> on the fly from the current list rather than copied into a separate <code>Var</code> that could fall out of sync. Wrapping the clear button in <code>disabledWhen</code> dims it and ignores clicks without removing it from the layout.</p>
 <h2 id="5-rows-own-their-state"><a class="header" href="#5-rows-own-their-state">5. Rows own their state</a></h2>
 <p>Each row tracks two pieces of local UI state: whether it is currently being edited, and the text currently in its edit box. Because the list can be filtered or reordered at any time, that state has to stay attached to the item’s ID rather than its row position on screen.</p>
 <pre><code class="language-haskell">todoList :: Var [Todo] -&gt; Var Filter -&gt; NanoUI ()
@@ -495,8 +498,8 @@ todoRow items todo above below = do
       writeVar todo.todoText =&lt;&lt; readVar draft
       writeVar editing False
   when isEditing (whenM takeEscape (writeVar editing False))
-  rowWith (tight . gap 8 . alignMid . fillW) $ do
-    checkboxWith alignMid "" todo.todoDone
+  rowWith (tight . gap 8 . alignMiddle . fillW) $ do
+    checkboxWith alignMiddle "" todo.todoDone
     -- The label and the field swap places, so they share a scope.
     scope $
       if isEditing
@@ -511,7 +514,7 @@ todoRow items todo above below = do
           when (respSubmitted fieldR) save
         else
           labelWith
-            (fillW . alignMid . (if todoDone t then fontStrike . fontMuted else id))
+            (fillW . alignMiddle . (if todoDone t then fontStrike . fontMuted else id))
             (todoText t)
     whenM (button (if isEditing then "Save" else "Edit")) $
       if isEditing
@@ -535,7 +538,7 @@ todoRow items todo above below = do
 <li><strong>Field projections update items in place.</strong> <code>todo.todoDone</code> is a <code>Var Bool</code> for that item’s completion flag, which lets <code>checkbox</code> toggle it directly. Saving writes the draft into <code>todo.todoText</code> and leaves edit mode.</li>
 </ol>
 <h2 id="6-reordering-by-id"><a class="header" href="#6-reordering-by-id">6. Reordering by ID</a></h2>
-<p>The Up and Down buttons need to swap two items in the full list, even when a filter hides rows between them. Looking up items by ID handles both filtered and unfiltered views cleanly:</p>
+<p>The Up and Down buttons need to swap two items in the full list, even when a filter hides rows between them. Looking up items by ID handles both filtered and unfiltered views:</p>
 <pre><code class="language-haskell">-- | Swap the places of two items, by id.
 swapIds :: Int -&gt; Int -&gt; [Todo] -&gt; [Todo]
 swapIds a b xs = map pick xs
@@ -628,8 +631,8 @@ menuBar openMenu entries = do
       let
         cfg =
           (defaultPopupConfig (AnchorRect (respRect btn)))
-            { cfgPlacement = PlacementBelow
-            , cfgOffset = 0
+            { popupPlacement = PlacementBelow
+            , popupOffset = 0
             }
       -- The open flag is derived from the open menu's name, so the popup
       -- gets a constant and closing it is written here.
@@ -725,27 +728,27 @@ writeDocument filePath doc = do
 </ul>
 <p><code>fontSizeScale zoomVal</code> adjusts display size without altering the document, so the zoom actions are simple clamped <code>modifyVar</code> updates.</p>
 <h2 id="7-dirty-state-window-title-and-the-close-prompt"><a class="header" href="#7-dirty-state-window-title-and-the-close-prompt">7. Dirty state, window title, and the close prompt</a></h2>
-<p>The window title is computed from the current file name and dirty flag on every frame, then passed to <code>setWindowTitleUi</code>:</p>
+<p>The window title is computed from the current file name and dirty flag on every frame, then passed to <code>setWindowTitle</code>:</p>
 <pre><code class="language-haskell">    path &lt;- readVar docPath
     dirty &lt;- readVar docDirty
     let
       name = (if T.null path then "Untitled" else path) &lt;&gt; (if dirty then " *" else "")
 
 -- ...after the layout, which returns the name as docName:
-  setWindowTitleUi (docName &lt;&gt; " - nano-ui Notepad")
+  setWindowTitle (docName &lt;&gt; " - nano-ui Notepad")
 </code></pre>
-<p><code>setWindowTitleUi</code> caches the last title and skips the OS call when nothing changed, so calling it unconditionally on every frame is safe and free. Imperative window commands like <code>resizeWindowUi</code> or <code>maximizeWindowUi</code> run on every call and must always sit behind an event check.</p>
+<p><code>setWindowTitle</code> caches the last title and skips the OS call when nothing changed, so calling it unconditionally on every frame is safe and free. Imperative window commands like <code>resizeWindow</code> or <code>maximizeWindow</code> run on every call and must always sit behind an event check.</p>
 <p>Here is how <code>exitApp</code> and the confirmation modal connect:</p>
 <pre><code class="language-haskell">    exitApp = do
       dirty &lt;- readVar docDirty
-      if dirty then writeVar aboutOpen False &gt;&gt; writeVar confirmExit True else quitUi
+      if dirty then writeVar aboutOpen False &gt;&gt; writeVar confirmExit True else quit
 
 -- ...inside the view, called unconditionally:
   modal confirmExit "Unsaved changes" $ do
     label "Discard the changes to this document and exit?"
     rowWith fillW $ do
       flex
-      whenM (button "Discard") quitUi
+      whenM (button "Discard") quit
       whenM (button "Cancel") (writeVar confirmExit False)
 </code></pre>
 <p>Opening the exit prompt closes the About modal first so only one modal appears at a time. Like popups, <code>modal</code> is called unconditionally every frame and controlled by its <code>Var Bool</code>.</p>
@@ -794,7 +797,7 @@ statusBar docName docVar statusMsg zoomVal = do
 <h2 id="10-things-to-try-next"><a class="header" href="#10-things-to-try-next">10. Things to try next</a></h2>
 <ul>
 <li>Persist a list of recently opened files across launches.</li>
-<li>Turn the About dialog into a draggable, resizable floating <code>window</code>.</li>
+<li>Turn the About dialog into a draggable, resizable <code>floatingWindow</code>.</li>
 <li>Toggle word wrap through the editor’s configuration.</li>
 <li>Replace the OS title bar with a custom one using <code>windowCaption</code> and <code>windowFrame</code> (see <a href="#desktop-windows">Desktop Windows</a>).</li>
 </ul>
@@ -843,7 +846,7 @@ searchCard app = do
       TaskRunning previous -&gt; (fromMaybe [] previous, True)
       TaskDone found -&gt; (found, False)
       TaskFailed _ previous -&gt; (fromMaybe [] previous, False)
-  rowWith (tight . gap 8 . alignMid) $ do
+  rowWith (tight . gap 8 . alignMiddle) $ do
     -- The spinner comes and goes, so it sits in a scope: the label after it
     -- keeps its widget id either way.
     scope (when running spinner)
@@ -869,7 +872,7 @@ slowSearch q = do
 <li>On the first frame with a new key, it spawns a worker thread for that key.</li>
 <li>On subsequent frames while the worker runs, it returns immediately with <code>TaskRunning previous</code>. Keeping the previous result lets the UI show existing rows instead of flashing empty.</li>
 <li>When the worker completes, it wakes the loop so the next frame receives <code>TaskDone</code>.</li>
-<li>If the key changes before the worker finishes (for instance, the user commits a new search), the old thread is cancelled with an asynchronous exception and a fresh worker starts.</li>
+<li>If the key changes before the worker finishes (for instance, the user commits a new search), the old thread is canceled with an asynchronous exception and a fresh worker starts.</li>
 </ul>
 <p>If you only need the latest available value and do not care about distinguishing loading or error states, <code>useTask</code> is shorter:</p>
 <pre><code class="language-haskell">fileView :: App -&gt; Text -&gt; NanoUI ()
@@ -888,13 +891,13 @@ flakyCard app = do
   status &lt;- useTaskStatus (appFlaky app) attempt (flakyRequest attempt)
   -- Each branch declares different widgets, so the whole case is one scope.
   scope $ case status of
-    TaskRunning _ -&gt; rowWith (tight . gap 8 . alignMid) $ do
+    TaskRunning _ -&gt; rowWith (tight . gap 8 . alignMiddle) $ do
       spinner
       label "Contacting the server..."
-    TaskDone reply -&gt; rowWith (tight . gap 8 . alignMid) $ do
+    TaskDone reply -&gt; rowWith (tight . gap 8 . alignMiddle) $ do
       label reply
       whenM (button "Run again") (modifyVar attemptVar (+ 1))
-    TaskFailed err _ -&gt; rowWith (tight . gap 8 . alignMid) $ do
+    TaskFailed err _ -&gt; rowWith (tight . gap 8 . alignMiddle) $ do
       danger (T.pack (displayException err))
       whenM (button "Retry") (modifyVar attemptVar (+ 1))
 </code></pre>
@@ -908,7 +911,7 @@ flakyCard app = do
 job q = bracket (connect info) disconnect $ \conn -&gt; runQuery conn q
 </code></pre>
 <h2 id="4-streams-many-updates-one-frame"><a class="header" href="#4-streams-many-updates-one-frame">4. Streams: many updates, one frame</a></h2>
-<p>Use a <code>Stream</code> when a background producer pushes values repeatedly, such as progress updates, live telemetry, or streamed LLM tokens. The producer receives an <code>update</code> callback and runs until it returns or is cancelled:</p>
+<p>Use a <code>Stream</code> when a background producer pushes values repeatedly, such as progress updates, live telemetry, or streamed LLM tokens. The producer receives an <code>update</code> callback and runs until it returns or is canceled:</p>
 <pre><code class="language-haskell">progressCard :: App -&gt; NanoUI ()
 progressCard app = do
   running &lt;- useVar False
@@ -967,7 +970,7 @@ view app = columnWith (padAll 16 . gap 12 . grow) $ do
           update advance
         else pure saved
 
-  rowWith (tight . gap 8 . alignMid . fillW) $ do
+  rowWith (tight . gap 8 . alignMiddle . fillW) $ do
     whenM (button (if isRunning then "Pause" else "Resume")) $ do
       when isRunning (writeVar (appSaved app) feed)
       writeVar running (not isRunning)
@@ -983,7 +986,7 @@ view app = columnWith (padAll 16 . gap 12 . grow) $ do
       UiCursorCrosshair
       (plot (appPlots app) (fillW . minH 300) (walkChart points))
 
-  rowWith (tight . gap 16 . alignMid . fillW) $ do
+  rowWith (tight . gap 16 . alignMiddle . fillW) $ do
     let
       ys = fmap snd points
     -- Both parts come and go, so each sits in a scope.
@@ -1025,7 +1028,7 @@ walkChart points =
 <ul>
 <li>Key a search task directly on the live query text (without debouncing) and observe how cancellation behaves compared to <code>searchInput'</code>.</li>
 <li>Stream Markdown tokens into <code>NanoUI.Markdown</code> with incremental appends (see <a href="#ecosystem-packages">Ecosystem Packages</a>).</li>
-<li>Virtualize a 100,000-row log view using <code>getScrollMetricsUi</code> (see <a href="#layout--scrolling">Layout &amp; Scrolling</a> and <code>Logs.hs</code>).</li>
+<li>Virtualize a 100,000-row log view using <code>getScrollMetrics</code> (see <a href="#layout--scrolling">Layout &amp; Scrolling</a> and <code>Logs.hs</code>).</li>
 <li>Swap the streaming chart for a one-shot <code>Task</code> that loads a full dataset from disk.</li>
 </ul>
 <p>For the full lifecycle details of tasks, streams, animations, and timers, see <a href="#async-work--animation">Async Work &amp; Animation</a>.</p>
@@ -1033,7 +1036,7 @@ walkChart points =
 <h1 id="state--var"><a class="header" href="#state--var">State &amp; <code>Var</code></a></h1>
 <p>Because a view runs fresh on every frame, any value that needs to survive from one frame to the next must be stored explicitly. In <code>nano-ui</code>, most mutable state lives in a <code>Var</code>, a typed mutable reference. Input widgets take a <code>Var</code> directly and update it in place, so you do not need to wire up <code>onChange</code> callbacks.</p>
 <pre><code class="language-haskell">counter :: NanoUI ()
-counter = rowWith (gap 8 . alignMid) $ do
+counter = rowWith (gap 8 . alignMiddle) $ do
   n &lt;- useVar (0 :: Int)
   whenM (button "-") (modifyVar n (subtract 1))
   label . T.pack . show =&lt;&lt; readVar n
@@ -1128,7 +1131,7 @@ settingsView settings = do
 <p>Several helpers cover other shapes:</p>
 <ul>
 <li><code>constVar x</code> builds a read-only <code>Var</code> whose writes are no-ops. Use it when you want to display a derived value inside an input widget and handle changes through the widget’s primed <code>Response</code>.</li>
-<li><code>withValue val widget</code> runs a <code>Var</code>-based widget against a temporary <code>Var</code> and returns both the widget result and the updated value. <code>nano-ui-emit</code> uses this under the hood for <code>emitChanged</code>.</li>
+<li><code>withValue val widget</code> runs a <code>Var</code>-based widget against a temporary <code>Var</code> and returns both the widget result and the updated value. <code>nano-ui-emit</code> builds <code>emitChanged</code> on top of it.</li>
 <li><code>zoomVar getter setter</code> projects a custom slice of a larger <code>Var</code>, and <code>zoomVarL</code> does the same using a lens.</li>
 <li><code>forEachVar key list body</code> gives each item of a <code>Var [a]</code> its own <code>Var a</code> keyed across reorders. Use <code>withElemVars</code> when you need to filter or sort the list yourself before drawing.</li>
 </ul>
@@ -1250,7 +1253,7 @@ visibleTodos items =
       withKey (todoId todo) (todoRow (at todo))
 </code></pre>
 <h2 id="rule-4-call-overlays-unconditionally"><a class="header" href="#rule-4-call-overlays-unconditionally">Rule 4: call overlays unconditionally</a></h2>
-<p><code>modal</code>, <code>window</code>, and <code>popup</code> each take a <code>Var Bool</code> controlling whether they are open, and they render nothing when that flag is <code>False</code>. Call them on every frame:</p>
+<p><code>modal</code>, <code>floatingWindow</code>, and <code>popup</code> each take a <code>Var Bool</code> controlling whether they are open, and they render nothing when that flag is <code>False</code>. Call them on every frame:</p>
 <pre><code class="language-haskell">deleteDialog :: NanoUI ()
 deleteDialog = do
   confirm &lt;- useVar False
@@ -1259,7 +1262,7 @@ deleteDialog = do
   modal confirm "Delete the file?" $
     whenM (button "Delete") (deleteFile &gt;&gt; writeVar confirm False)
 </code></pre>
-<p>Putting a modal or popup inside <code>when isOpen</code> shifts the IDs of following siblings whenever it opens or closes. If your open state is derived from other data instead of a <code>Var Bool</code>, pass <code>constVar</code> and handle close events through the primed variants (<code>modal'</code>, <code>window'</code>, <code>popup'</code>).</p>
+<p>Putting a modal or popup inside <code>when isOpen</code> shifts the IDs of following siblings whenever it opens or closes. If your open state is derived from other data instead of a <code>Var Bool</code>, pass <code>constVar</code> and handle close events through the primed variants (<code>modal'</code>, <code>floatingWindow'</code>, <code>popup'</code>).</p>
 <h2 id="rule-5-prune-state-for-unbounded-collections"><a class="header" href="#rule-5-prune-state-for-unbounded-collections">Rule 5: prune state for unbounded collections</a></h2>
 <p>Keyed widget state and <code>useVar</code> slots stay in memory even while their key is not drawn. That is handy when a user filters a list and clears the filter: any half-typed draft in a hidden row is still there when the row returns.</p>
 <p>However, that state is never garbage-collected on its own. For collections that grow indefinitely (chat logs, streaming tables, open tabs over long sessions), store per-row state in a <code>VarMap</code> and prune deleted keys with <code>retainVars</code>:</p>
@@ -1311,7 +1314,7 @@ main = runSdlAppReduce defaultSdlOptions update (Model 0 "Ada") view
 <p>Everything else in the toolkit (widgets, layout modifiers, focus, and keys) works the exact same way. Only state management changes.</p>
 <h2 id="emitting-messages"><a class="header" href="#emitting-messages">Emitting messages</a></h2>
 <p><code>NanoUIE msg a</code> is a UI action that can only emit values of type <code>msg</code>. There is no <code>Typeable</code> constraint and no runtime casting, so emitting the wrong message type is caught at compile time.</p>
-<p>Under the hood, <code>NanoUIE msg a</code> is just a <code>NanoUI a</code> action with a message sink in scope (via the implicit parameter <code>?emit</code>). That means every core widget runs inside it without wrappers, and <code>NanoUI.Emit</code> re-exports all of <code>NanoUI</code> alongside the emission helpers below. Calling <code>emit</code> inside a container, modal, tab body, or menu callback sends messages straight to the enclosing view’s sink.</p>
+<p><code>NanoUIE msg a</code> is a <code>NanoUI a</code> action with a message sink in scope via the implicit parameter <code>?emit</code>. That means every core widget runs inside it without wrappers, and <code>NanoUI.Emit</code> re-exports all of <code>NanoUI</code> alongside the emission helpers below. Calling <code>emit</code> inside a container, modal, tab body, or menu callback sends messages straight to the enclosing view’s sink.</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -1455,13 +1458,14 @@ settingsPanel =
 <img class="nano-example-shot" src="images/layout/card.svg" alt="A full-width card showing a build result.">
 </details>
 <details class="nano-example">
-<summary><code>callout</code>: a panel tinted with a semantic color</summary>
+<summary><code>callout</code> / <code>calloutTone</code>: a panel tinted with a semantic color</summary>
 <pre><code class="language-haskell">calloutExample = do
   warnCol &lt;- themeWarning &lt;$&gt; uiTheme
   callout warnCol $ do
     heading "Certificate expiring"
     muted "TLS certificate expires in 3 days."
 </code></pre>
+<p><code>calloutTone Warning body</code> resolves a theme <code>Tone</code> directly instead of taking an explicit <code>Color</code>.</p>
 <img class="nano-example-shot" src="images/layout/callout.svg" alt="An amber callout warning about an expiring certificate.">
 </details>
 <details class="nano-example">
@@ -1480,13 +1484,13 @@ settingsPanel =
 <summary><code>center</code>: center content on both axes</summary>
 <pre><code class="language-haskell">centerExample =
   panelWith (fillW . fillH) $
-    center (label "Centred on both axes")
+    center (label "Centered on both axes")
 </code></pre>
 <img class="nano-example-shot" src="images/layout/center.svg" alt="A label centered in a large panel.">
 </details>
 <details class="nano-example">
-<summary><code>responsive</code> / <code>responsiveRowCol</code>: switch layouts at a breakpoint</summary>
-<p><code>responsive breakpoint wide narrow body</code> chooses between two containers based on window width; <code>responsiveRowCol</code> switches between a row and a column.</p>
+<summary><code>responsive</code> / <code>responsiveRowCol</code> / container queries: switch layouts at a breakpoint</summary>
+<p><code>responsive breakpoint wide narrow body</code> chooses between two containers based on window width; <code>responsiveRowCol</code> switches between a row and a column. For layouts inside split panes or sidebars that depend on the enclosing container’s own inner width rather than the window, use <code>responsiveIn</code>, <code>responsiveRowColIn</code>, <code>withContainerQuery</code>, <code>withContainerWidth</code>, or <code>withContainerSize</code>. <code>withContainerQuery</code> projects the inner <code>Size</code> to any <code>Eq</code> value and only schedules a follow-up frame when that projected value changes.</p>
 <pre><code class="language-haskell">responsiveExample =
   responsiveRowCol 640 (tight . gap 8 . fillW) $ do
     panelWith (fillW . padAll 12) (label "Sidebar")
@@ -1522,7 +1526,7 @@ settingsPanel =
 <details class="nano-example">
 <summary><code>spacer</code>: insert flexible space between siblings</summary>
 <pre><code class="language-haskell">spacerExample =
-  rowWith (fillW . alignMid) $ do
+  rowWith (fillW . alignMiddle) $ do
     label "Left"
     spacer (Grow 1) Fit
     label "Right"
@@ -1720,9 +1724,10 @@ settingsPanel =
 </code></pre>
 <img class="nano-example-shot" src="images/layout/tight.svg" alt="Two panels comparing normal padding with tight.">
 </details>
-<h3 id="alignment-and-wrapping"><a class="header" href="#alignment-and-wrapping">Alignment and wrapping</a></h3>
-<p><code>alignStart</code>, <code>alignCenter</code>, and <code>alignEnd</code> position a child horizontally inside a column. <code>alignTop</code>, <code>alignMid</code>, and <code>alignBottom</code> position a child vertically inside a row.</p>
-<p>Every alignment modifier applies to the node it is placed on, not to that node’s children. Putting <code>alignMid</code> on a <code>row</code> centers the row inside its parent; to vertically center the items <em>inside</em> the row, apply <code>alignMid</code> to each child.</p>
+<h3 id="alignment-distribution-and-wrapping"><a class="header" href="#alignment-distribution-and-wrapping">Alignment, distribution, and wrapping</a></h3>
+<p><code>alignStart</code>, <code>alignCenter</code>, and <code>alignEnd</code> position a child horizontally inside a column. <code>alignTop</code>, <code>alignMiddle</code>, <code>alignBottom</code>, and <code>alignBaseline</code> position a child vertically inside a row.</p>
+<p>Every <code>align*</code> modifier applies to the node it is placed on, not to that node’s children. Putting <code>alignMiddle</code> on a <code>row</code> centers the row inside its parent. To align the children <em>inside</em> a container across its cross axis, put <code>itemsStart</code>, <code>itemsCenter</code>, <code>itemsEnd</code>, <code>itemsBaseline</code>, or <code>itemsStretch</code> (or <code>itemsAlign</code>) on the container itself: <code>rowWith (itemsCenter . gap 8)</code> vertically centers every child that does not set its own vertical alignment, <code>columnWith itemsCenter</code> centers fit-width children horizontally without affecting left-aligned text inside <code>fillW</code> labels, and <code>itemsStretch</code> stretches fit-sized children across the cross axis. To distribute leftover space along a container’s main axis, use <code>justifyStart</code>, <code>justifyCenter</code>, <code>justifyEnd</code>, or <code>justifyBetween</code> (or <code>justify</code>). Any explicit <code>align*</code> modifier on a child (including <code>alignTop</code> or <code>alignStart</code>) overrides the container default, and <code>itemsAlign</code> never leaks into nested containers or pinned children.</p>
+<p>Additional sizing and flow helpers include <code>fitW</code> / <code>fitH</code>, <code>growW</code> / <code>growH</code>, <code>percentH</code>, <code>spacerW</code> / <code>spacerH</code>, <code>direction</code>, and <code>clipBox</code> (clips children without painting a panel border or fill).</p>
 <details class="nano-example">
 <summary><code>alignStart</code>: align to the left edge</summary>
 <pre><code class="language-haskell">alignStartExample =
@@ -1757,11 +1762,11 @@ settingsPanel =
 <img class="nano-example-shot" src="images/layout/aligntop.svg" alt="A button aligned to the top of a tall row.">
 </details>
 <details class="nano-example">
-<summary><code>alignMid</code>: center vertically</summary>
+<summary><code>alignMiddle</code>: center vertically</summary>
 <pre><code class="language-haskell">alignMidExample =
   panelWith (fixedWH 300 110 . padAll 10) $
     rowWith (fillW . fillH . gap 8) $
-      void (buttonWith (alignMid . fixedW 140) "alignMid")
+      void (buttonWith (alignMiddle . fixedW 140) "alignMiddle")
 </code></pre>
 <img class="nano-example-shot" src="images/layout/alignmid.svg" alt="A button centered vertically in a tall row.">
 </details>
@@ -1855,18 +1860,18 @@ itemList items =
 </code></pre>
 <p>If none of the scroller’s ancestors constrain its size, <code>grow</code> leaves it with nothing to measure against.</p>
 <ul>
-<li><code>scrollWith</code> scrolls vertically and returns its body’s result.</li>
-<li><code>scrollArea</code> also returns the scroller’s <code>WidgetId</code> for programmatic scrolling.</li>
-<li><code>scroll2DWith</code> and <code>scrollArea2D</code> scroll both horizontally and vertically.</li>
+<li><code>scrollWith</code> scrolls vertically and returns its body’s result; <code>scrollWith'</code> also returns the scroller’s <code>Response</code> (including <code>respId</code>).</li>
+<li><code>scroll2DWith</code> and <code>scroll2DWith'</code> scroll both horizontally and vertically.</li>
+<li><code>scrollConfigured</code> and <code>scrollConfigured'</code> accept a <code>ScrollConfig</code>: choose per-axis <code>ScrollPolicy</code> (<code>ScrollAuto</code>, <code>ScrollAlways</code>, <code>ScrollNone</code>, <code>ScrollHidden</code>, or <code>ScrollOverlay</code> for a floating thumb without a reserved gutter), set <code>scrollBare = True</code> to omit the well background and border, or set <code>scrollFocusable = True</code> for keyboard-driven list views.</li>
 <li>A full-viewport scroller (<code>scrollWith grow</code>) drops its bordered input well and fills with <code>pageBackground</code> (<code>themeWindow</code> by default). Wrap the view in <code>styled panelPage</code> if you want the page background to match the panel surface instead.</li>
 </ul>
 <h3 id="virtualization"><a class="header" href="#virtualization">Virtualization</a></h3>
-<p>For lists with tens of thousands of rows, build only the rows currently inside the viewport and pad above and below them with spacers. Grab the scroller’s ID first and read its previous-frame layout with <code>getScrollMetricsUi</code>:</p>
+<p>For lists with tens of thousands of rows, build only the rows currently inside the viewport and pad above and below them with spacers. Grab the scroller’s ID first and read its previous-frame layout with <code>getScrollMetrics</code>:</p>
 <pre><code class="language-haskell">virtualizedList :: [Item] -&gt; NanoUI ()
 virtualizedList items = do
   sid &lt;- currentId
   scrollWith (fixedH 500 . fillW) $ do
-    metrics &lt;- getScrollMetricsUi sid
+    metrics &lt;- getScrollMetrics sid
     let rowH = 28
         total = length items
         (offsetY, viewH) = case metrics of
@@ -1884,23 +1889,23 @@ virtualizedList items = do
           labelWith (fixedH rowH . fillW) (itemTitle item)
       when (bottomH &gt; 0) (spacer Fit (Fixed bottomH))
 </code></pre>
-<p>Use <code>scrollViewport</code> rather than the outer container rectangle for the visible height, since <code>scrollViewport</code> already subtracts padding and the scrollbar lane. <code>scrollOffset</code> gives the current scroll position. Calling <code>getScrollMetricsUi</code> registers a layout dependency, so resizing the window triggers a fresh frame automatically.</p>
+<p>Use <code>scrollViewport</code> rather than the outer container rectangle for the visible height, since <code>scrollViewport</code> already subtracts padding and the scrollbar lane. <code>scrollOffset</code> gives the current scroll position. Calling <code>getScrollMetrics</code> registers a layout dependency, so resizing the window triggers a fresh frame automatically.</p>
 <p>For complete examples, look at <code>packages/nano-ui-demo/examples/LongList.hs</code> (100,000 rows) and <code>Logs.hs</code> (auto-scrolling log tail).</p>
 <h3 id="programmatic-scrolling-and-mouse-wheel-step"><a class="header" href="#programmatic-scrolling-and-mouse-wheel-step">Programmatic scrolling and mouse-wheel step</a></h3>
 <pre><code class="language-haskell">reveal :: WidgetId -&gt; Float -&gt; Int -&gt; Bool -&gt; NanoUI ()
 reveal sid rowH index shouldReveal =
   when shouldReveal $
-    scrollRectIntoViewUi sid (Rect 0 (fromIntegral index * rowH) 1 rowH) ScrollNearest ScrollInstant
+    scrollRectIntoView sid (Rect 0 (fromIntegral index * rowH) 1 rowH) ScrollNearest ScrollInstant
 </code></pre>
-<p>Inside a view, you can drive scrolling with <code>scrollToUi</code>, <code>scrollByUi</code>, <code>scrollPagesUi</code>, <code>scrollRectIntoViewUi</code>, <code>setScrollOffsetUi</code>, and <code>setScrollStepUi</code>. Matching <code>Context</code> variants (<code>scrollTo</code>, <code>getScrollOffset2D</code>, and so on) are available in <code>IO</code>.</p>
-<p>By default, one mouse-wheel notch scrolls 60 logical pixels. For uniform lists, match the wheel step to your row height so one notch advances exactly one row (<code>askContext</code> lives in <code>NanoUI.Monad</code>):</p>
+<p>Inside a view, you can drive scrolling with <code>scrollTo</code>, <code>scrollBy</code>, <code>scrollPages</code>, <code>scrollToStart</code>, <code>scrollToEnd</code>, <code>scrollIntoView</code>, <code>scrollRectIntoView</code>, <code>setScrollOffset</code>, and <code>setScrollStep</code>.</p>
+<p>For custom keyboard-driven lists without a full <code>table</code> or <code>tree</code>, set <code>scrollFocusable = True</code> in <code>ScrollConfig</code> so the scroller joins the Tab order and takes focus when passive content inside it is clicked. Pair its <code>WidgetId</code> with <code>useListNav</code> (uniform row height) or <code>useListNavWith</code> (custom per-row rectangles) and <code>selectableRow</code> to handle Up, Down, PageUp, PageDown, Home, End, Enter, and Space with automatic <code>scrollRectIntoView</code>.</p>
+<p>By default, one mouse-wheel notch scrolls 60 logical pixels. For uniform lists, match the wheel step to your row height so one notch advances exactly one row:</p>
 <pre><code class="language-haskell">oneRowPerNotch :: Float -&gt; NanoUI ()
-oneRowPerNotch rowHeight = do
-  ctx &lt;- askContext
-  liftIO $ setScrollTuning ctx defaultScrollTuning
+oneRowPerNotch rowHeight =
+  setScrollTuning defaultScrollTuning
     {scrollWheelStep = rowHeight, scrollSmoothTime = 0}
 </code></pre>
-<p>You can also override the wheel step for a single scroller with <code>setScrollStepUi sid px</code>; passing <code>0</code> restores the context default.</p>
+<p>You can also override the wheel step for a single scroller with <code>setScrollStep sid px</code>; passing <code>0</code> restores the context default.</p>
 <h2 id="nesting-and-chrome"><a class="header" href="#nesting-and-chrome">Nesting and chrome</a></h2>
 <p><code>scrollArea</code>, <code>panel</code>, and <code>card</code> each paint their own background, border, and corner radius. Nesting one inside a popup or modal produces an awkward box-within-a-box. Keep the frame at one level: either strip the inner surface with <code>styled (inputStyle (background colorTransparent . borderWidth 0))</code>, or set <code>padAll 0</code> on the outer dialog and put the padding on the inner body instead.</p>
 <p>See <a href="#styling-gotchas">Styling Gotchas</a> and <a href="#recurring-bugs--fixes">Troubleshooting</a> for more examples.</p>
@@ -1987,12 +1992,18 @@ iconButton :: Svg -&gt; Text -&gt; NanoUI Bool
 </code></pre>
 <p><code>buttonContent</code> wraps an arbitrary <code>NanoUI ()</code> view inside a clickable button. The inner widgets are purely visual; clicking anywhere on the button activates it:</p>
 <pre><code class="language-haskell">iconSaveButton =
-  whenM (buttonContent $ rowWith (gap 6 . alignMid) $ do
+  whenM (buttonContent $ rowWith (gap 6 . alignMiddle) $ do
             svgIcon 16 saveIcon
             label "Save") $
     saveDocument
 </code></pre>
 <p><code>iconButton</code> draws an SVG icon next to a label. Passing an empty string <code>""</code> produces a square icon-only button.</p>
+<p>Wrap adjacent buttons (including <code>iconButton</code>, <code>toggleButton</code>, <code>buttonContent</code>, and <code>select</code>) in <code>buttonGroup</code> or <code>buttonGroupWith</code> to join them with zero gap, outer-only corner rounding, and shared 1-pixel internal borders.</p>
+<p>For selectable list items and collapsible sections without a full <code>table</code> or <code>tree</code>:</p>
+<ul>
+<li><code>selectableRow selected body</code> (plus <code>selectableRow'</code>, <code>selectableRowWith</code>, <code>selectableRowWith'</code>) renders a full-width clickable row that tints on hover and highlights when <code>selected</code> is <code>True</code>, returning <code>True</code> when clicked.</li>
+<li><code>collapsing title openVar body</code> (and <code>collapsingWith</code>) renders a toggle header with a disclosure arrow and runs <code>body</code> inside <code>scope</code> while <code>openVar</code> is <code>True</code>.</li>
+</ul>
 <h2 id="menus"><a class="header" href="#menus">Menus</a></h2>
 <p>Menu rows are built from <code>menuItem</code> (returns <code>True</code> when clicked), <code>menuItemShortcut</code> (shows a shortcut label and activates on that chord while the menu is open), <code>menuSeparator</code>, and <code>menuItemDisabled</code>.</p>
 <p>Build a menu bar by pairing <code>menuButton'</code> triggers with <code>popup'</code> overlays anchored to each button’s rectangle:</p>
@@ -2003,13 +2014,13 @@ iconButton :: Svg -&gt; Text -&gt; NanoUI Bool
   when (respClicked btn) (writeVar fileOpen (not isOpen))
 
   let cfg = (defaultPopupConfig (AnchorRect (respRect btn)))
-              {cfgPlacement = PlacementBelow, cfgOffset = 0}
+              {popupPlacement = PlacementBelow, popupOffset = 0}
   (popupResp, _) &lt;- popup' (constVar isOpen) cfg $
     columnWith (tight . gap 0) $ do
       whenM (menuItemShortcut "New" (cmdOrCtrl &lt;&gt; key 'n')) newDocument
       whenM (menuItem "Open...") openDocument
       menuSeparator
-      whenM (menuItem "Exit") (writeVar fileOpen False &gt;&gt; quitUi)
+      whenM (menuItem "Exit") (writeVar fileOpen False &gt;&gt; quit)
   when (respClicked popupResp) (writeVar fileOpen False)
 </code></pre>
 <p>Here <code>constVar</code> passes a read-only open flag derived from <code>openMenu</code>, and clicks on the popup update <code>openMenu</code> directly.</p>
@@ -2042,9 +2053,9 @@ saveBindings = do
 <tr><td><code>checkbox</code></td><td><code>Text -&gt; Var Bool -&gt; NanoUI ()</code></td><td>Checkbox with a label</td></tr>
 <tr><td><code>toggleButton</code></td><td><code>Tone -&gt; Text -&gt; Var Bool -&gt; NanoUI ()</code></td><td>Two-state button filled with its tone color when active</td></tr>
 <tr><td><code>radio</code></td><td><code>Foldable f =&gt; f Text -&gt; Var Int -&gt; NanoUI ()</code></td><td>Radio button group indexed by position</td></tr>
-<tr><td><code>boundedRadio</code></td><td><code>(Bounded a, Enum a) =&gt; (a -&gt; Text) -&gt; Var a -&gt; NanoUI ()</code></td><td>Radio group covering every constructor of an enum</td></tr>
+<tr><td><code>enumRadio</code> / <code>enumRadioBy</code></td><td><code>(Bounded a, Enum a) =&gt; (a -&gt; Text) -&gt; Var a -&gt; NanoUI ()</code></td><td>Radio group covering every constructor of an enum (<code>enumRadio</code> uses <code>Show</code>)</td></tr>
 <tr><td><code>select</code></td><td><code>Foldable f =&gt; f Text -&gt; Var Int -&gt; NanoUI ()</code></td><td>Dropdown selector indexed by position</td></tr>
-<tr><td><code>boundedSelect</code></td><td><code>(Bounded a, Enum a) =&gt; (a -&gt; Text) -&gt; Var a -&gt; NanoUI ()</code></td><td>Dropdown selector over every constructor of an enum</td></tr>
+<tr><td><code>enumSelect</code> / <code>enumSelectBy</code></td><td><code>(Bounded a, Enum a) =&gt; (a -&gt; Text) -&gt; Var a -&gt; NanoUI ()</code></td><td>Dropdown selector over every constructor of an enum (<code>enumSelect</code> uses <code>Show</code>)</td></tr>
 <tr><td><code>comboBox</code></td><td><code>Foldable f =&gt; Text -&gt; f Text -&gt; Var Text -&gt; NanoUI ()</code></td><td>Free-text field with filterable autocomplete suggestions</td></tr>
 <tr><td><code>slider</code></td><td><code>Float -&gt; Float -&gt; Var Float -&gt; NanoUI ()</code></td><td>Continuous horizontal slider between min and max</td></tr>
 <tr><td><code>textInput</code></td><td><code>Var Text -&gt; NanoUI ()</code></td><td>Single-line text input</td></tr>
@@ -2054,7 +2065,7 @@ saveBindings = do
 </tbody>
 </table>
 </div>
-<p>Every widget in this table provides the standard variants: primed (<code>...'</code>) returns a <code>Response</code>, <code>...With</code> accepts a layout modifier, and <code>...Configured</code> accepts a config record:</p>
+<p>Every widget in this table provides a primed form (<code>...'</code>) returning a <code>Response</code>. Simpler controls (<code>checkbox</code>, <code>toggleButton</code>, <code>select</code>, <code>slider</code>) add <code>...With</code> for layout modifiers, while richer fields (<code>textInput</code>, <code>searchInput</code>, <code>numericInput</code>) add <code>...Configured</code> taking a config record (whose <code>*Layout</code> field carries any layout modifier):</p>
 <pre><code class="language-haskell">byteField = do
   byte &lt;- useVar (0 :: Double)
   numericInputConfigured defaultNumericInputConfig
@@ -2181,6 +2192,23 @@ undoState editorId = do
 <p>Overwriting a <code>Var Text</code> or <code>Var TextDocument</code> directly from outside the widget clears its undo stack. If you want a programmatic edit to be undoable, dispatch a <code>TextCommand</code> (<code>InsertText</code>, <code>ReplaceAll</code>, and so on) instead.</p>
 </blockquote>
 <p>When using primed variants (<code>textArea'</code>, <code>textAreaDocument'</code>), <code>respChanged</code> is <code>True</code> after actual text edits and <code>False</code> after cursor movement or selection changes, making it safe to use for dirty-state tracking. Keep <code>respId</code> to target the editor with <code>runTextCommand</code> or <code>requestFocus</code>.</p>
+<h2 id="rich-text-and-hyperlinks"><a class="header" href="#rich-text-and-hyperlinks">Rich text and hyperlinks</a></h2>
+<p>For read-only paragraphs mixing bold, italic, monospaced code runs, highlights, tooltips, and clickable links, use <code>richText</code> (or <code>selectableRichText</code> when users should be able to drag-select and copy):</p>
+<pre><code class="language-haskell">releaseNote :: NanoUI ()
+releaseNote = do
+  clicked &lt;-
+    selectableRichText
+      [ "Build "
+      , strong "v0.2"
+      , " with "
+      , inlineTooltip "Uses -j1 to keep memory modest" (inlineCode "cabal build -j1 all")
+      , " or read the "
+      , hyperlink "https://goolord.github.io/nano-ui/book/" "documentation"
+      , "."
+      ]
+  for_ clicked openLink
+</code></pre>
+<p>Plain string literals produce <code>Inline</code> pieces via <code>OverloadedStrings</code>. Combine them with <code>strong</code>, <code>emphasis</code>, <code>inlineCode</code>, <code>inlineWith</code>, <code>restyle</code>, <code>inlineBackground</code>, <code>inlineTooltip</code>, and <code>hyperlink target label</code>. Both <code>richText</code> and <code>selectableRichText</code> wrap to their container width and return <code>Maybe Text</code> holding the <code>target</code> of any link clicked on that frame. For full CommonMark documents, use <code>nano-ui-markdown</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="tabs-tables--trees"><a class="header" href="#tabs-tables--trees">Tabs, Tables &amp; Trees</a></h1>
 <p>For structured navigation and multi-item data, <code>nano-ui</code> includes tabs, sortable virtualized tables, and collapsible tree views.</p>
@@ -2195,7 +2223,7 @@ undoState editorId = do
 
 pages = do
   page &lt;- useEnumVar Overview
-  boundedTabs (T.pack . show) page $ \case
+  enumTabsBy (T.pack . show) page $ \case
     Overview -&gt; overviewView
     Logs     -&gt; logsView
     Settings -&gt; settingsView
@@ -2235,7 +2263,7 @@ segmented active docTabs =
 </tbody>
 </table>
 </div>
-<p>Set <code>tabsOrientation</code> to <code>TabTop</code>, <code>TabBottom</code>, <code>TabLeft</code>, or <code>TabRight</code>. For enum-backed tabs, <code>boundedTabs</code> and <code>boundedTabBar</code> generate one tab per constructor automatically.</p>
+<p>Set <code>tabsOrientation</code> to <code>TabTop</code>, <code>TabBottom</code>, <code>TabLeft</code>, or <code>TabRight</code>. For enum-backed tabs, <code>enumTabs</code> / <code>enumTabsBy</code> and <code>enumTabBar</code> / <code>enumTabBarBy</code> generate one tab per constructor automatically.</p>
 <h2 id="tables"><a class="header" href="#tables">Tables</a></h2>
 <p><code>table</code> renders structured columns built with <code>Colonnade</code>, with click-to-sort headers backed by a <code>Var SortCol</code>:</p>
 <pre><code class="language-haskell">data Process = Process
@@ -2254,8 +2282,8 @@ processTable procs sortVar =
       , headed "Memory (MB)" (T.pack . show . mem)
       ]
 </code></pre>
-<p><code>SortCol</code> stores the active column index and sort direction. For quick text-only tables, <code>simpleTable headers rows</code> skips the Colonnade boilerplate. The primed <code>table'</code> returns a <code>TableResponse</code> with updated sort state, reordered columns, and hidden column indices; <code>tableConfigured</code> adds frozen rows/columns, fixed widths, and visibility options through <code>TableConfig</code>. Row rendering is virtualized internally.</p>
-<p>When building custom cells, you can use <code>textCell</code>, <code>cellWidget</code>, <code>widgetCell</code>, or construct a <code>Cell</code> with an explicit sort key (<code>cellKey</code>). If a cell renders a custom widget, still populate <code>cellText</code> when you want automatic column width measurement to account for it.</p>
+<p><code>SortCol</code> stores the active column index and sort direction. For quick text-only tables, <code>simpleTable headers rows</code> skips the Colonnade boilerplate. The primed <code>table'</code> returns a <code>TableResponse</code> with updated sort state, reordered columns, and hidden column indices; <code>tableConfigured</code> adds frozen rows/columns, fixed widths, <code>tableSqueeze</code>, <code>tableBare</code> (omit the outer border and well so an embedded table blends onto its pane), and column visibility options through <code>TableConfig</code>. Row rendering is virtualized internally. Users can drag column dividers down to a 40-pixel floor and double-click a divider to auto-fit the column to its content width (double-clicking again restores default fill sizing).</p>
+<p>When building custom cells, use <code>textCell</code>, <code>cellWidget</code>, or attach typed sort keys with <code>cellSort</code> (text), <code>cellSortNum</code> (floating-point <code>SortNum</code>), <code>cellSortInt</code> (64-bit integer <code>SortInt</code>), or <code>cellSortKey</code> (<code>SortKey</code>) so numeric columns sort numerically instead of lexicographically. If a cell renders a custom widget, set <code>cellWidthText</code> (or <code>cellText</code>) so automatic column width measurement accounts for it.</p>
 <h2 id="trees"><a class="header" href="#trees">Trees</a></h2>
 <pre><code class="language-haskell">items :: [TreeItem]
 items =
@@ -2273,13 +2301,13 @@ fileTree = tree "file-tree"
 <h1 id="overlays--windows"><a class="header" href="#overlays--windows">Overlays &amp; Windows</a></h1>
 <p>Modals, floating in-app windows, and popups are regular <code>NanoUI</code> actions controlled by a <code>Var Bool</code> that tracks whether they are open.</p>
 <h2 id="always-call-overlays-unconditionally"><a class="header" href="#always-call-overlays-unconditionally">Always call overlays unconditionally</a></h2>
-<pre><code class="language-haskell">modal  :: Var Bool -&gt; Text -&gt; NanoUI () -&gt; NanoUI ()
-window :: Var Bool -&gt; Text -&gt; NanoUI () -&gt; NanoUI ()
-popup  :: Var Bool -&gt; PopupConfig -&gt; NanoUI () -&gt; NanoUI ()
+<pre><code class="language-haskell">modal          :: Var Bool -&gt; Text -&gt; NanoUI () -&gt; NanoUI ()
+floatingWindow :: Var Bool -&gt; Text -&gt; NanoUI () -&gt; NanoUI ()
+popup          :: Var Bool -&gt; PopupConfig -&gt; NanoUI () -&gt; NanoUI ()
 </code></pre>
 <blockquote class="blockquote-tag blockquote-tag-caution">
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .389.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.389.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path></svg>Caution</p>
-<p>Call every overlay on every frame, even when it is closed. Wrapping <code>modal</code>, <code>window</code>, or <code>popup</code> inside <code>when isShown</code> shifts the widget IDs of every sibling after it whenever it opens or closes, breaking focus, carets, and per-row state. Closed overlays draw nothing.</p>
+<p>Call every overlay on every frame, even when it is closed. Wrapping <code>modal</code>, <code>floatingWindow</code>, or <code>popup</code> inside <code>when isShown</code> shifts the widget IDs of every sibling after it whenever it opens or closes, breaking focus, carets, and per-row state. Closed overlays draw nothing.</p>
 </blockquote>
 <pre><code class="language-haskell">confirmDelete = do
   showConfirm &lt;- useVar False
@@ -2313,13 +2341,13 @@ popup  :: Var Bool -&gt; PopupConfig -&gt; NanoUI () -&gt; NanoUI ()
 </code></pre>
 <p>If you want a modal backdrop and panel without a title bar or close button, use <code>modalPanel</code> or <code>modalPanel'</code>. Pressing Escape or clicking outside still closes it.</p>
 <h2 id="floating-windows"><a class="header" href="#floating-windows">Floating windows</a></h2>
-<p><code>window</code> creates a draggable, resizable floating panel with a scrollable body. Unlike a modal, the main UI and any other open floating windows remain interactive around it:</p>
+<p><code>floatingWindow</code> creates a draggable, resizable floating panel with a scrollable body. Unlike a modal, the main UI and any other open floating windows remain interactive around it:</p>
 <pre><code class="language-haskell">inspector = do
   inspectorOpen &lt;- useVar False
-  window inspectorOpen "Inspector" $ do
+  floatingWindow inspectorOpen "Inspector" $ do
     inspectorBody
 </code></pre>
-<p><code>window'</code> returns both the body’s result and a <code>Response</code>. Use <code>window</code> for inspectors, palettes, and tool panels that sit alongside the main view; use <code>modal</code> when the user needs to finish an interaction before returning to the page.</p>
+<p><code>floatingWindow'</code> returns both the body’s result and a <code>Response</code>. Use <code>floatingWindow</code> for inspectors, palettes, and tool panels that sit alongside the main view; use <code>modal</code> when the user needs to finish an interaction before returning to the page.</p>
 <h2 id="popups"><a class="header" href="#popups">Popups</a></h2>
 <p><code>popup</code> draws a floating panel positioned by a <code>PopupConfig</code>:</p>
 <pre><code class="language-haskell">filterPopup = do
@@ -2337,9 +2365,9 @@ popup  :: Var Bool -&gt; PopupConfig -&gt; NanoUI () -&gt; NanoUI ()
 <p>Key placement options:</p>
 <ul>
 <li><code>AnchorRect (respRect r)</code> anchors the popup to a widget; <code>AnchorPoint pos</code> anchors it to a specific coordinate.</li>
-<li><code>cfgPlacement</code> chooses where the popup opens (<code>PlacementAuto</code>, <code>PlacementBelow</code>, <code>PlacementAbove</code>, <code>PlacementAtCursor</code>, and others).</li>
-<li><code>cfgOffset</code> sets the pixel gap between the anchor and the popup.</li>
-<li><code>cfgDismissable = False</code> prevents automatic closing on Escape or outside clicks so you can handle dismissal explicitly via <code>popup'</code>.</li>
+<li><code>popupPlacement</code> chooses where the popup opens (<code>PlacementAuto</code>, <code>PlacementBelow</code>, <code>PlacementAbove</code>, <code>PlacementAtCursor</code>, and others).</li>
+<li><code>popupOffset</code> sets the pixel gap between the anchor and the popup.</li>
+<li><code>popupDismissable = False</code> prevents automatic closing on Escape or outside clicks so you can handle dismissal explicitly via <code>popup'</code>.</li>
 </ul>
 <p>Because anchored popups read <code>respRect</code> (which comes from the previous frame), warm up one frame in headless tests before clicking to open them. For tall popup menus, cap the height with <code>popupWith (maxH ...)</code> and place a scroller inside.</p>
 <h2 id="tooltips"><a class="header" href="#tooltips">Tooltips</a></h2>
@@ -2352,10 +2380,10 @@ popup  :: Var Bool -&gt; PopupConfig -&gt; NanoUI () -&gt; NanoUI ()
   tooltipConfigured defaultTooltipConfig
     {tooltipPlacement = PlacementAtCursor} more "Follows the pointer"
 </code></pre>
-<p>By default, tooltips appear after hovering for 0.5 seconds. Pass a <code>TooltipConfig</code> to <code>tooltipConfigured</code> to change the delay or placement, or use <code>withTooltip</code> to render a custom widget subtree inside the tooltip instead of plain text.</p>
+<p>By default, tooltips appear after hovering for 0.5 seconds. Pass a <code>TooltipConfig</code> to <code>tooltipConfigured</code> to change the delay or placement, or use <code>tooltipWidget</code>, <code>tooltipWidgetConfigured</code>, or <code>withTooltip</code> to render a custom widget subtree inside the tooltip instead of plain text. Tooltips pass pointer events through to widgets underneath and keep their bodies inert so inner controls cannot steal keyboard focus.</p>
 <h2 id="keep-in-mind"><a class="header" href="#keep-in-mind">Keep in mind</a></h2>
 <ul>
-<li><strong>Modals stack cleanly.</strong> Escape dismisses the innermost modal first; sibling modals close in declaration order.</li>
+<li><strong>Modals stack in declaration order.</strong> Escape dismisses the innermost modal first; sibling modals close in declaration order.</li>
 <li><strong>Keep the open <code>Var</code> alive outside conditional branches.</strong> Allocate or read it in a scope that runs even while the overlay is hidden.</li>
 <li><strong>Check focus after overlay calls</strong> so focus queries see widgets declared inside open overlays.</li>
 <li><strong>Avoid nested borders.</strong> Putting a <code>scrollArea</code>, <code>panel</code>, or <code>card</code> inside a modal or popup draws a box inside a box; strip the inner chrome (see <a href="#2-double-borders--box-in-a-box">Double borders</a>).</li>
@@ -2395,7 +2423,7 @@ fileDrop = do
 </code></pre>
 <p><code>dropHovered</code> is <code>True</code> while an external drag hovers over the zone. If you want drop detection on a custom region without drawing a panel, call <code>useDrop rect</code>. Drop events respect layering, so a drop zone covered by an open modal receives nothing.</p>
 <h2 id="dockable-pane-grids"><a class="header" href="#dockable-pane-grids">Dockable pane grids</a></h2>
-<p><code>paneGrid</code> manages splittable, resizable pane layouts. Its response includes <code>pgrDropTarget</code>, which reports where a dragged pane or tab would dock under the cursor and pairs naturally with <code>useDrag</code>:</p>
+<p><code>paneGrid</code> (imported from <code>NanoUI.Widgets.PaneGrid</code>) manages splittable, resizable, tab-groupable pane layouts. Its response includes <code>pgrDropTarget</code>, which reports where a dragged pane or tab would dock under the cursor and pairs with <code>useDrag</code>:</p>
 <pre><code class="language-haskell">dockPanes :: PaneGridConfig -&gt; Maybe (Drag Word64) -&gt; NanoUI ()
 dockPanes cfg gesture = do
   panes &lt;- paneGrid cfg
@@ -2403,7 +2431,7 @@ dockPanes cfg gesture = do
     (Just d, Just target) | dragPhase d == DragReleased -&gt; void (commitPaneDrop target)
     _ -&gt; pure ()
 </code></pre>
-<p><code>pgdLocation</code> is either <code>BesidePane paneId edge</code> or <code>OutsideGrid edge</code>, and <code>pgdRect</code> / <code>pgdPane</code> let you validate or highlight the target. Save <code>pgrTree</code> whenever <code>pgrCommitted</code> is <code>True</code>.</p>
+<p><code>pgdLocation</code> is <code>BesidePane paneId edge</code> (on a pane edge), <code>IntoTabs paneId</code> (in a pane center when <code>pgCenterDrop = CenterTab</code>), or <code>OutsideGrid edge</code> (along the outer grid margin). <code>pgdRect</code> and <code>pgdPane</code> let you validate or highlight the target. Save <code>pgrTree</code> whenever <code>pgrCommitted</code> is <code>True</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="custom-drawing--controls"><a class="header" href="#custom-drawing--controls">Custom Drawing &amp; Controls</a></h1>
 <p>When the built-in widgets do not cover what you need, you can draw directly with the 2D canvas API. The six controls in <code>NanoUI.Widgets.Custom</code> are built on this same API and double as clean templates for your own widgets.</p>
@@ -2427,13 +2455,13 @@ dockPanes cfg gesture = do
 <p>Every control provides a primed form (<code>knob'</code>, <code>toggleSwitch'</code>, and so on) returning a <code>Response</code>, plus a <code>...With</code> variant accepting a layout modifier and custom dimensions:</p>
 <pre><code class="language-haskell">controls :: Var Float -&gt; Float -&gt; [Float] -&gt; NanoUI ()
 controls volume progress samples = do
-  knobWith alignMid 48 0 100 volume
+  knobWith alignMiddle 48 0 100 volume
   progressBarWith fillW 6 progress
   sparklineWith (fixedWH 120 32) 120 32 samples
 </code></pre>
 <p><code>sparkline</code> stretches the minimum value to the bottom of its plot box and the maximum to the top, so series of different scales remain readable in a tight strip. Here is a sparkline at its default size next to a wider <code>sparklineWith</code>:</p>
 <pre><code class="language-haskell">sparklines :: [Float] -&gt; NanoUI ()
-sparklines samples = rowWith (gap 16 . alignMid) $ do
+sparklines samples = rowWith (gap 16 . alignMiddle) $ do
   sparkline samples
   sparklineWith (fixedWH 120 32) 120 32 samples
 </code></pre>
@@ -2441,12 +2469,12 @@ sparklines samples = rowWith (gap 16 . alignMid) $ do
 <p>If you need axes, legends, or hover readouts, use <code>plot</code> from <code>nano-ui-diagrams</code> instead (see <a href="#charts-and-diagrams">Charts and diagrams</a>).</p>
 <p>Here is a compact settings row combining a knob and a live readout:</p>
 <pre><code class="language-haskell">settingsRow :: Var Bool -&gt; Var Float -&gt; NanoUI ()
-settingsRow enabled volume = rowWith (gap 12 . alignMid) $ do
+settingsRow enabled volume = rowWith (gap 12 . alignMiddle) $ do
   toggleSwitch enabled
-  labelWith (alignMid . fixedW 64) "Enabled"
+  labelWith (alignMiddle . fixedW 64) "Enabled"
   knob 0 100 volume
   v &lt;- readVar volume
-  labelWith (alignMid . fontMono . fixedW 48) (T.pack (show (round v :: Int)))
+  labelWith (alignMiddle . fontMono . fixedW 48) (T.pack (show (round v :: Int)))
 </code></pre>
 <p>Pinning the numeric label with <code>fixedW</code> prevents the row from jittering as digits change, and reading the <code>Var</code> <em>below</em> the knob keeps drags to a single pass.</p>
 <p><code>spinner</code> paces itself with <code>wakeAfter</code> (60 steps per second) only while it is visible on screen; once scrolled or clipped out of view, it stops requesting frames. Avoid calling a global <code>keepAnimating</code>, which would keep the event loop spinning even when no spinner is on screen.</p>
@@ -2473,7 +2501,7 @@ badge = void $ canvas (fixedWH 120 40) $ \r@(Rect x y _ h) -&gt; do
 <pre><code class="language-haskell">dot :: Float -&gt; Float -&gt; NanoUI Response
 dot angle volume = do
   (resp, ()) &lt;- customWidget defaultCustomWidgetSpec
-    { widgetLayout = fixedWH 48 48 defaultLayout
+    { widgetLayout = fixedWH 48 48
     , widgetContent = contentKey [angle, volume]
     , widgetDraw = \cdc (Rect x y w h) -&gt; runCanvasFor cdc $ do
         drawCircle (V2 (x + w / 2) (y + h / 2)) 16 (themeAccent (cdcTheme cdc))
@@ -2651,17 +2679,17 @@ clipped r@(Rect x y _ h) = do
   drawCircle (centre r) 34 rose
   drawText (V2 (x - 6) (y + h / 2)) AlignStart AlignMiddle "text past the edge" ink
 
-clipBox :: Rect -&gt; Rect
-clipBox (Rect x y w h) = Rect (x + 10) (y + 8) (w - 20) (h - 16)
+clipRect :: Rect -&gt; Rect
+clipRect (Rect x y w h) = Rect (x + 10) (y + 8) (w - 20) (h - 16)
 
 clips :: [(Text, Rect -&gt; CanvasM ())]
 clips =
   [ ("no clip", clipped)
-  , ("withClip box", \r -&gt; withClip (clipBox r) (clipped r))
+  , ("withClip box", \r -&gt; withClip (clipRect r) (clipped r))
   ]
 </code></pre>
 <h3 id="text"><a class="header" href="#text">Text</a></h3>
-<p><code>drawText pos alignX alignY txt color</code> places text relative to an anchor point (the red dot below). Alignment specifies which part of the text sits on that point: <code>AlignStart</code> anchors the left edge, <code>AlignTop</code> anchors the top of the line box, and <code>AlignBaseline</code> anchors the text baseline. Use <code>drawTextWith</code> with a <code>TextFont</code> to customize size, variant, weight, or slant.</p>
+<p><code>drawText pos alignX alignY txt color</code> places text relative to an anchor point (the red dot below). Alignment specifies which part of the text sits on that point: <code>AlignStart</code> anchors the left edge, <code>AlignTop</code> anchors the top of the line box, and <code>AlignBaseline</code> anchors the text baseline. Use <code>drawTextWith</code> with a <code>TextFont</code> to customize size, variant, weight, or slant, and <code>drawTextClipped</code> / <code>drawTextClippedWith</code> to clip a single text draw to a sub-rectangle without pushing a separate <code>withClip</code> scope.</p>
 <img src="images/canvas/text.svg" alt="Eight cells showing the word Anchor placed against a red dot: left, center and right aligned; then top, middle, baseline and bottom aligned; and a large bold amber 42.">
 <pre><code class="language-haskell">textAnchors :: [(Text, Rect -&gt; CanvasM ())]
 textAnchors =
@@ -2675,7 +2703,7 @@ textAnchors =
           drawTextWith defaultTextFont {textFontSize = 24, textFontWeight = WeightBold} (centre r) AlignCenter AlignMiddle "42" amber)
        ]
 </code></pre>
-<p>Measure strings inside the view using <code>lineWidthUi</code> and <code>uiFontMetrics</code> (or trim them to fit with <code>truncateTextUi</code>) and pass those measurements into your drawing callback. Both helpers ensure the needed glyphs are loaded first. The pure <code>lineWidth</code> is only exact for text that has already been measured or drawn; otherwise it falls back to summing per-glyph advances, which drifts from HarfBuzz’s unrounded shaped runs over long strings.</p>
+<p>Measure strings inside the view using <code>lineWidthUi</code> and <code>uiFontMetrics</code> (or trim them to fit with <code>truncateTextUi</code>) and pass those measurements into your drawing callback. Both helpers load and shape the needed glyphs first. The pure <code>lineWidth</code> is only exact for text that has already been measured or drawn; otherwise it falls back to summing per-glyph advances, which drifts from HarfBuzz’s unrounded shaped runs over long strings.</p>
 <h3 id="borders-inset-vs-centered"><a class="header" href="#borders-inset-vs-centered">Borders: inset vs. centered</a></h3>
 <p><code>drawStrokeRoundedRect</code> draws its entire border inside the given rectangle. By contrast, <code>drawStrokePath</code> centers the stroke on the path edge, pushing half the border width outside the rectangle. The thin guide below shows the exact rectangle passed to each call:</p>
 <img src="images/canvas/borders.svg" alt="Two blue rounded borders over a thin guide rectangle: drawStrokeRoundedRect sits entirely inside it, drawStrokePath straddles it.">
@@ -2691,7 +2719,7 @@ borders =
 <pre><code class="language-haskell">gauge :: Float -&gt; Float -&gt; Float -&gt; NanoUI Response
 gauge angle volume scrollY = do
   (resp, ()) &lt;- customWidget defaultCustomWidgetSpec
-    { widgetLayout = fixedWH 48 48 defaultLayout
+    { widgetLayout = fixedWH 48 48
     , widgetContent = contentKey [angle, volume, fromIntegral (round scrollY :: Int)]
     , widgetDraw = \cdc rect -&gt; runCanvasFor cdc (drawGauge rect)
     }
@@ -2705,7 +2733,7 @@ dragGhost mx my = drawingVersioned (contentKey [mx, my]) (fixedWH 32 32) ghostOp
 </code></pre>
 <p>Without a version key, it stays frozen on the draw ops from its very first frame.</p>
 <h2 id="svg-icons"><a class="header" href="#svg-icons">SVG icons</a></h2>
-<p>Parse inline SVG markup with <code>parseSvg</code> or load a file once at startup with <code>loadSvg</code>. Any stroke or fill using <code>currentColor</code> automatically inherits the active text color (so <code>fontColor</code> and semantic tones tint it cleanly), while hard-coded colors in the SVG stay untouched:</p>
+<p>Parse inline SVG markup with <code>parseSvg</code> or load a file once at startup with <code>loadSvg</code>. Any stroke or fill using <code>currentColor</code> automatically inherits the active text color (so <code>fontColor</code> and semantic tones tint it directly), while hard-coded colors in the SVG stay untouched:</p>
 <pre><code class="language-haskell">icons :: Svg -&gt; Color -&gt; NanoUI ()
 icons star accent = do
   svgIcon 24 star
@@ -2740,7 +2768,7 @@ starBadge owner star tint = do
 </tbody>
 </table>
 </div>
-<p>Each <code>Style</code> sets <code>bg</code>, <code>fg</code>, <code>border</code>, <code>borderWidth</code>, <code>cornerRadius</code>, <code>hoverBg</code>, and <code>activeBg</code>. Beyond those five surfaces, a <code>Theme</code> defines shared semantic colors: <code>themeAccent</code>, <code>themeOnAccent</code>, <code>themeMuted</code>, <code>themeSelection</code>, <code>themeFocusRing</code>, <code>themeWindow</code>, <code>themeSeparator</code>, and the success, warning, and danger tones.</p>
+<p>Each <code>Style</code> sets <code>styleBg</code>, <code>styleFg</code>, <code>styleBorder</code>, <code>styleBorderWidth</code>, <code>styleCornerRadius</code>, <code>styleHoverBg</code>, <code>styleActiveBg</code>, and <code>styleBorderSides</code>. Beyond those five surfaces, a <code>Theme</code> defines shared semantic colors: <code>themeAccent</code>, <code>themeOnAccent</code>, <code>themeMuted</code>, <code>themeSelection</code>, <code>themeFocusRing</code>, <code>themeWindow</code>, <code>themeSeparator</code>, and the success, warning, and danger tones. Construct colors with <code>colorRGB</code>, <code>colorRGBA</code>, <code>colorHex "#38bdf8"</code>, or <code>colorHexA "#38bdf8cc"</code>.</p>
 <p>The backdrop behind your view is <code>pageBackground</code>, which defaults to <code>themeWindow</code> unless the theme sets <code>themePage</code> (via <code>pageColor</code>). Calling <code>styled panelPage</code> puts a borderless view directly on the panel surface. The window color itself still peeks through gaps between panels:</p>
 <pre><code class="language-haskell">-- An app with no panel of its own: the panel surface is the page.
 panelPageOptions :: SdlOptions
@@ -2751,7 +2779,7 @@ body :: NanoUI ()
 body = styled panelPage (columnWith (padAll 12) (label "Body"))
 </code></pre>
 <p>A full-window scroller (<code>scrollWith grow</code>) paints using this page color instead of drawing a bordered well.</p>
-<p>Built-in themes include <code>defaultTheme</code> (dark), <code>defaultLightTheme</code>, the Tomorrow variants, and Base16 generators (<code>themeFromBase16</code>, <code>themeFromBase16Dark</code>, <code>themeFromBase16Light</code>). Set a theme at startup with <code>sdlAppTheme = Just appTheme</code>, change it dynamically per frame with <code>setUiTheme</code>, or match the OS appearance automatically with <code>followSystemTheme</code> or <code>lightDark</code>.</p>
+<p><code>defaultTheme</code> (dark) and <code>defaultLightTheme</code> live in <code>NanoUI</code>; extra presets (Tomorrow variants) and Base16 generators (<code>themeFromBase16</code>, <code>themeFromBase16Dark</code>, <code>themeFromBase16Light</code>) live in <code>NanoUI.Themes</code>. Set a theme at startup with <code>sdlAppTheme = Just appTheme</code>, change it dynamically per frame with <code>setTheme</code>, or match the OS appearance automatically with <code>followSystemTheme</code> or <code>lightDark</code>.</p>
 <h2 id="scoped-styling"><a class="header" href="#scoped-styling">Scoped styling</a></h2>
 <pre><code class="language-haskell">themedViews = do
   -- Replace the base theme for a subtree.
@@ -2764,7 +2792,7 @@ body = styled panelPage (columnWith (padAll 12) (label "Body"))
 <ul>
 <li><strong>Style modifiers</strong> (<code>Style -&gt; Style</code>): <code>background</code>, <code>foreground</code>, <code>borderColor</code>, <code>borderWidth</code>, <code>borderSides</code>, <code>cornerRadius</code>, <code>hoverBackground</code>, <code>pressBackground</code>, and <code>fillColor</code>.</li>
 <li><strong>Theme modifiers</strong> (<code>Theme -&gt; Theme</code>): <code>buttonStyle</code>, <code>inputStyle</code>, <code>panelStyle</code>, <code>everyStyle</code>, <code>accentColor</code>, <code>textColor</code>, <code>rounded</code>, <code>subtle</code>, <code>tinted</code>, and <code>readableOn</code>.</li>
-<li><strong>Semantic shortcuts</strong>: <code>primary</code>, <code>destructive</code>, <code>success</code>, <code>warning</code>, <code>tone Danger</code>, and <code>toneColor Warning</code>.</li>
+<li><strong>Semantic shortcuts</strong>: <code>primary</code>, <code>destructive</code>, <code>success</code>, <code>warning</code>, <code>tone Danger</code>, <code>calloutTone Warning</code>, and <code>toneColor Warning</code>.</li>
 </ul>
 <p>For example, here is a quiet, borderless button helper:</p>
 <pre><code class="language-haskell">quiet :: Theme -&gt; Theme
@@ -2800,10 +2828,12 @@ quietSkip = whenM (styled quiet (button "Skip")) skip
 <p>Compare all four states across dark and light themes:</p>
 <p><nano-ui-state-lab></nano-ui-state-lab></p>
 <h2 id="typography-and-fonts"><a class="header" href="#typography-and-fonts">Typography and fonts</a></h2>
-<p>Font modifiers compose right alongside layout modifiers on any text widget (<code>labelWith</code>, <code>headingWith</code>, <code>textInputWith</code>, <code>buttonWith</code>, and so on):</p>
+<p>Font modifiers compose right alongside layout modifiers on text and labeled widgets (<code>labelWith</code>, <code>buttonWith</code>, <code>selectWith</code>, <code>textAreaWith</code>, and <code>ticLayout</code> inside <code>textInputConfigured</code>):</p>
 <ul>
-<li><code>fontSize px</code>, <code>fontMono</code>, <code>fontBold</code> (or <code>fontWeight</code>), <code>fontItalic</code>, <code>fontUnderline</code>, <code>fontStrike</code></li>
-<li><code>fontTone Warning</code>, <code>fontColor color</code></li>
+<li><strong>Size and face:</strong> <code>fontSize px</code>, <code>fontSizeScale factor</code>, <code>fontRegular</code>, <code>fontProportional</code>, <code>fontMono</code>, <code>fontTabular</code> (tabular lining digits so numeric columns align without jumping)</li>
+<li><strong>Weight, slant, decoration:</strong> <code>fontBold</code> (or <code>fontWeight</code>), <code>fontItalic</code>, <code>fontUnderline</code>, <code>fontStrike</code></li>
+<li><strong>Color and tone:</strong> <code>fontTone Warning</code>, <code>fontColor color</code></li>
+<li><strong>Single-line truncation:</strong> <code>singleLine</code> keeps a label on one line even inside a column and truncates overflow with an ellipsis; <code>ellipsisEnd</code> (default), <code>ellipsisMiddle</code> (for file paths), or <code>ellipsisStart</code> chooses where the ellipsis sits (<code>textEllipsis</code>).</li>
 </ul>
 <pre><code class="language-haskell">warningLabel = labelWith (fontMono . fontSize 15 . fontTone Warning) "warning: low disk"
 </code></pre>
@@ -2987,7 +3017,7 @@ editableName draft = do
 <p>Focus requests are ignored if the target widget is disabled, covered by an open modal, missing from the current pass, or not a Tab stop. Because inactive tab bodies do not run, widgets inside them lose focus when you switch away; call <code>requestFocus</code> again when switching back if needed.</p>
 <p><code>disabledWhen</code> dims a subtree and blocks focus and input without disturbing layout. Customize the focus outline color through <code>themeFocusRing</code>.</p>
 <h2 id="input-method-editors-ime"><a class="header" href="#input-method-editors-ime">Input Method Editors (IME)</a></h2>
-<p>Built-in text inputs and text areas support IME composition out of the box, rendering pre-edit text at the caret and suppressing shortcuts until composition commits.</p>
+<p>Built-in text inputs and text areas support IME composition directly, rendering pre-edit text at the caret and suppressing shortcuts until composition commits.</p>
 <p>If you build a custom widget that reads typed characters from <code>inputChars</code>, opt into text input on every frame it can accept text:</p>
 <pre><code class="language-haskell">-- Every frame the widget accepts text:
 composition :: WidgetId -&gt; Rect -&gt; NanoUI ()
@@ -3044,7 +3074,7 @@ fileView app path = do
 <p>How task lifecycles work:</p>
 <ul>
 <li><strong>Key changes restart the job.</strong> Whenever the key changes, <code>nano-ui</code> cancels the previous worker with an asynchronous exception and starts a new one.</li>
-<li><strong>Skipping the hook cancels the job.</strong> If a full frame runs without calling <code>useTask</code> (for instance, because the user switched to another tab or hid a conditional panel), the running worker is cancelled. Call <code>useTask</code> outside the tab or branch if work should keep going while hidden.</li>
+<li><strong>Skipping the hook cancels the job.</strong> If a full frame runs without calling <code>useTask</code> (for instance, because the user switched to another tab or hid a conditional panel), the running worker is canceled. Call <code>useTask</code> outside the tab or branch if work should keep going while hidden.</li>
 <li><strong>Include a counter in the key to support retries.</strong> Pressing Retry on the same input only restarts the task if the key changes (for example, <code>(query, attempt)</code>).</li>
 <li><strong>Clean up resources with <code>bracket</code>.</strong> Because cancellation arrives as an asynchronous exception, acquire files, sockets, or database handles inside <code>bracket</code> or <code>withFile</code>.</li>
 <li><strong>Force results on the worker thread.</strong> <code>useTask</code> evaluates the result to weak head normal form on the worker; if you return a lazy list, force its spine (<code>length found \</code>seq` pure found`) before returning so evaluation does not happen on the UI thread.</li>
@@ -3060,7 +3090,7 @@ progress app = do
       update (const i)
   progressBar (fromIntegral pct / 100)
 </code></pre>
-<p>The producer receives <code>update :: (s -&gt; s) -&gt; IO ()</code> and runs until it returns, throws, or gets cancelled. Each call to <code>update</code> wakes the frame loop; multiple pushes between frames coalesce automatically into a single redraw.</p>
+<p>The producer receives <code>update :: (s -&gt; s) -&gt; IO ()</code> and runs until it returns, throws, or gets canceled. Each call to <code>update</code> wakes the frame loop; multiple pushes between frames coalesce automatically into a single redraw.</p>
 <ul>
 <li><strong>Stop by skipping the call.</strong> Guarding <code>useStream</code> with <code>when isRunning</code> cancels the producer as soon as <code>isRunning</code> becomes <code>False</code>.</li>
 <li><strong>Save state outside if you want pause/resume.</strong> Stopping a stream discards its internal accumulator and restarts from the initial value next time.</li>
@@ -3104,7 +3134,7 @@ fading = pulse 1.2
 breathingDot = do
   t &lt;- pulse 1.2
   (resp, ()) &lt;- customWidget defaultCustomWidgetSpec
-    { widgetLayout = fixedWH 24 24 defaultLayout
+    { widgetLayout = fixedWH 24 24
     , widgetContent = contentKey [t * 100]
     , widgetDraw = \cdc (Rect x y w h) -&gt; runCanvasFor cdc $
         drawCircle (V2 (x + w / 2) (y + h / 2)) (6 + 3 * t) (themeAccent (cdcTheme cdc))
@@ -3186,13 +3216,13 @@ heroBanner =
 <p>With <code>OverloadedRecordDot</code>, both uniform fields (<code>u.ppColor</code>) and GLSL-style vector swizzles (<code>u.ppColor.rgb</code>, <code>ctx.uv.xy</code>) resolve at compile time with no Template Haskell:</p>
 <pre><code class="language-haskell">pulseRing :: Shader 'Surface PulseParams
 pulseRing = surfaceShader $ \u ctx -&gt;
-  let centered = ctx.uv *^ floatE 2.0 - vec2 (floatE 1.0) (floatE 1.0)
+  let centered = ctx.uv *^ 2.0 - vec2 1.0 1.0
       dist = vLength centered
-      wave = floatE 0.5 + floatE 0.5 * sin (dist * u.ppRings - u.ppPhase)
-      half = ctx.size *^ floatE 0.5
+      wave = 0.5 + 0.5 * sin (dist * u.ppRings - u.ppPhase)
+      half = ctx.size *^ 0.5
       edge = sdRoundedBox (ctx.pos - half) half ctx.cornerRadius
-      aa = floatE 0.75 / maxE ctx.scale (floatE 1.0)
-      mask = floatE 1.0 - smoothstep (negate aa) aa edge
+      aa = 0.75 / maxE ctx.scale 1.0
+      mask = 1.0 - smoothstep (negate aa) aa edge
    in vec4_31 (u.ppColor.rgb *^ wave) (u.ppColor.a * mask)
 </code></pre>
 <p>Every fragment shader receives a <code>FragCtx</code> containing <code>ctx.uv</code> (normalized <code>[0, 1]</code> over the node rect), <code>ctx.pos</code> (logical pixels from the node’s top-left corner), <code>ctx.size</code> (logical width and height), <code>ctx.origin</code> (window-space logical origin), <code>ctx.scale</code> (device pixels per logical unit), <code>ctx.cornerRadius</code>, and <code>ctx.color</code> (vertex tint).</p>
@@ -3202,7 +3232,7 @@ pulseRing = surfaceShader $ \u ctx -&gt;
 blurredCard sigma body =
   withShader gaussianBlur sigma (panel body)
 </code></pre>
-<p><code>gaussianBlur</code> runs two separable 1D passes (horizontal then vertical) by pinging between pooled offscreen targets. Its bleed margin (<code>3 * sigma</code> pixels on each side) expands the offscreen target, cull test, and partial-damage region automatically so soft halos never clip at the widget edge.</p>
+<p><code>gaussianBlur</code> runs two separable 1D passes (horizontal then vertical) by alternating between pooled offscreen targets. Its bleed margin (<code>3 * sigma</code> pixels on each side) expands the offscreen target, cull test, and partial-damage region automatically so soft halos never clip at the widget edge. Use <code>withShader'</code> when you need both the subtree’s return value and its <code>Response</code>.</p>
 <p>Compatible effects fuse into a single GPU pass with zero extra offscreen targets:</p>
 <ul>
 <li><code>composeColor :: Shader 'ColorEffect u1 -&gt; Shader 'ColorEffect u2 -&gt; Shader 'ColorEffect (u1, u2)</code></li>
@@ -3218,20 +3248,20 @@ dimmedPanel body =
   withShader disabledTint (0.85, TintParams (colorRGB 30 60 110) 0.25) (panel body)
 </code></pre>
 <h2 id="bounded-loops-in-fragm"><a class="header" href="#bounded-loops-in-fragm">Bounded loops in <code>FragM</code></a></h2>
-<p>Iterative kernels (blurs, shadows, multi-octave noise) use the <code>FragM</code> builder (<code>surfaceShaderM</code>, <code>colorEffectM</code>, <code>distortionEffectM</code>, <code>layerEffectM</code>) with explicit <code>bind</code> and structured <code>forRange</code> loops:</p>
+<p>Iterative kernels (blurs, shadows, multi-octave noise) use the <code>FragM</code> builder (<code>surfaceShaderM</code>, <code>colorEffectM</code>, <code>distortionEffectM</code>, <code>layerEffectM</code>) with explicit <code>bind</code>, branchless selection (<code>selectE</code>), and structured <code>forRange</code> loops:</p>
 <pre><code class="language-haskell">boxAverage5 :: Shader 'LayerEffect Float
 boxAverage5 =
   layerEffectM (\step -&gt; V2 (2 * abs step) (2 * abs step)) $ \u ctx layer -&gt; do
-    step &lt;- bind (maxE (uVal u) (floatE 0.0))
-    zero &lt;- bind (vec4 (floatE 0.0) (floatE 0.0) (floatE 0.0) (floatE 0.0))
+    step &lt;- bind (maxE (uVal u) 0.0)
+    zero &lt;- bind (vec4 0.0 0.0 0.0 0.0)
     acc &lt;- forRange (-2) 3 zero $ \iy rowAcc -&gt;
       forRange (-2) 3 rowAcc $ \ix colAcc -&gt; do
         let offset = vec2 (intToFloat ix * step) (intToFloat iy * step)
             sample = sampleLayer layer (ctx.pos + offset)
         pure (colAcc + sample)
-    pure (acc *^ floatE (1.0 / 25.0))
+    pure (acc *^ (1.0 / 25.0))
 </code></pre>
-<p>The first argument to <code>layerEffectM</code> reports the maximum sample offset in logical pixels (<code>V2 marginX marginY</code>) for the current uniform value.</p>
+<p>The first argument to <code>layerEffectM</code> reports the maximum sample offset in logical pixels (<code>V2 marginX marginY</code>) for the current uniform value. If you want to supply hand-written GLSL, MSL, or SPIR-V sources directly without the EDSL, import <code>NanoUI.Shader.Raw</code> from <code>nano-ui</code>.</p>
 <h2 id="built-in-effects"><a class="header" href="#built-in-effects">Built-in effects</a></h2>
 <p><code>NanoUI.Shader</code> ships 21 ready-to-use shaders:</p>
 <div class="table-wrapper">
@@ -3248,7 +3278,7 @@ boxAverage5 =
 </table>
 </div>
 <h2 id="capabilities-fallbacks-and-svg-export"><a class="header" href="#capabilities-fallbacks-and-svg-export">Capabilities, fallbacks, and SVG export</a></h2>
-<p>On SDL 3.4+, <code>RenderDriverAuto</code> selects SDL’s <code>"gpu"</code> render driver when available (falling back cleanly to standard drivers or software rendering when unavailable). Inspect live GPU support inside a view with <code>askShaderCapabilities</code>:</p>
+<p>On SDL 3.4+, <code>RenderDriverAuto</code> selects SDL’s <code>"gpu"</code> render driver when available (falling back to standard drivers or software rendering when unavailable). Inspect live GPU support inside a view with <code>askShaderCapabilities</code>:</p>
 <pre><code class="language-haskell">shaderStatus :: NanoUI ()
 shaderStatus = do
   caps &lt;- askShaderCapabilities
@@ -3290,9 +3320,9 @@ editor :: Var Text -&gt; NanoUI ()
 editor docName = column $ do
   textInput docName
   name &lt;- readVar docName
-  setWindowTitleUi (name &lt;&gt; " - My App")         -- setter: every frame
-  whenM (button "Maximize") toggleMaximizedUi    -- command: on click only
-  whenM (button "Quit") quitUi
+  setWindowTitle (name &lt;&gt; " - My App")         -- setter: every frame
+  whenM (button "Maximize") toggleMaximized    -- command: on click only
+  whenM (button "Quit") quit
 </code></pre>
 <p><code>runSdlApp :: SdlOptions -&gt; NanoUI () -&gt; IO ()</code> opens a native window using <code>opts</code> and runs the event loop until the window closes. On each frame, it runs your view on the main display thread, solves layout, diffs the draw commands against the previous frame, and repaints only the changed rectangles. (If your view modifies a <code>Var</code> it already read earlier in the same pass, it runs a second pass before layout.)</p>
 <p>Frames only run when an input event, window event, timer, animation, or background task wakes the loop. When a window sits idle, no frames run at all.</p>
@@ -3301,25 +3331,25 @@ editor docName = column $ do
 <h2 id="controlling-the-window-from-a-view"><a class="header" href="#controlling-the-window-from-a-view">Controlling the window from a view</a></h2>
 <p>Because the OS window persists across the entire session while your view runs every frame, window actions fall into two groups: <strong>declarative setters</strong> and <strong>imperative commands</strong>.</p>
 <h3 id="declarative-setters"><a class="header" href="#declarative-setters">Declarative setters</a></h3>
-<p>Setters remember the last value they sent to the OS and skip the backend call when nothing changed. You can call them unconditionally on every frame (as <code>editor</code> above does with <code>setWindowTitleUi</code>), and skipping a setter simply leaves the current value in place:</p>
+<p>Setters remember the last value they sent to the OS and skip the backend call when nothing changed. You can call them unconditionally on every frame (as <code>editor</code> above does with <code>setWindowTitle</code>), and skipping a setter simply leaves the current value in place:</p>
 <ul>
-<li><code>setWindowTitleUi</code></li>
-<li><code>setWindowModeUi</code></li>
-<li><code>setWindowMinSizeUi</code> / <code>setWindowMaxSizeUi</code></li>
-<li><code>setWindowOpacityUi</code></li>
-<li><code>setWindowIconUi</code></li>
+<li><code>setWindowTitle</code></li>
+<li><code>setWindowMode</code></li>
+<li><code>setWindowMinSize</code> / <code>setWindowMaxSize</code></li>
+<li><code>setWindowOpacity</code></li>
+<li><code>setWindowIcon</code></li>
 </ul>
-<p>A repeated setter call costs only an <code>Eq</code> check. For <code>setWindowIconUi</code>, build the <code>RgbaPixels</code> once at startup and reuse that same value every frame: <code>ByteString</code> equality returns immediately when both sides share the same buffer, whereas freshly decoded icons compare byte by byte.</p>
+<p>A repeated setter call costs only an <code>Eq</code> check. For <code>setWindowIcon</code>, build the <code>RgbaPixels</code> once at startup and reuse that same value every frame: <code>ByteString</code> equality returns immediately when both sides share the same buffer, whereas freshly decoded icons compare byte by byte.</p>
 <h3 id="imperative-commands"><a class="header" href="#imperative-commands">Imperative commands</a></h3>
 <p>Commands forward directly to the OS on every call, because the user can also move, resize, or maximize the window independently and there is no single desired value to cache. Always guard commands behind one-shot events such as <code>button</code>:</p>
 <ul>
-<li><code>moveWindowUi</code> (takes desktop coordinates on SDL, physical pixels on RGFW)</li>
-<li><code>centerWindowUi</code></li>
-<li><code>resizeWindowUi</code></li>
-<li><code>minimizeWindowUi</code>, <code>maximizeWindowUi</code>, <code>restoreWindowUi</code>, <code>toggleMaximizedUi</code></li>
+<li><code>moveWindow</code> (takes desktop coordinates on SDL, physical pixels on RGFW)</li>
+<li><code>centerWindow</code></li>
+<li><code>resizeWindow</code></li>
+<li><code>minimizeWindow</code>, <code>maximizeWindow</code>, <code>restoreWindow</code>, <code>toggleMaximized</code></li>
 </ul>
 <p>Keep in mind that SDL applies commands asynchronously and reports the updated geometry back through an OS event, so <code>askWindow</code> still sees the old size during the frame the command ran and updates on the following frame.</p>
-<p>Call <code>quitUi</code> to close the window after the current frame finishes painting (<code>runSdlApp</code> then returns). Inside a secondary <code>nativeWindow</code>, <code>quitUi</code> closes only that child window.</p>
+<p>Call <code>quit</code> to close the window after the current frame finishes painting (<code>runSdlApp</code> then returns). Inside a secondary <code>nativeWindow</code>, <code>quit</code> closes only that child window.</p>
 <h3 id="reading-window-state-and-updating-from-worker-threads"><a class="header" href="#reading-window-state-and-updating-from-worker-threads">Reading window state and updating from worker threads</a></h3>
 <p>Window operations read the active session from <code>NanoUI</code>, which is only live on the UI thread during a frame. To update a window from a background thread, write to a <code>Var</code> with <code>writeVarIO</code>, wake the loop with <code>askWake</code>, and let the view apply the setter on the next frame (see <a href="#state--var">State &amp; <code>Var</code></a>).</p>
 <p><code>askWindow :: NanoUI WindowState</code> returns the current window metrics captured at the start of the frame: logical size, display scale, focus, maximized/fullscreen flags, and <code>winCloseRequested</code>. Calling <code>askWindow</code> opts your view into redrawing whenever window metadata changes (focus, moves, maximize toggles). Views that never call <code>askWindow</code> skip those redraws completely.</p>
@@ -3341,7 +3371,7 @@ appView = do
   whenM (winCloseRequested &lt;$&gt; askWindow) (writeVar confirming True)
   modal confirming "Quit?" $ do
     label "Unsaved changes will be lost."
-    whenM (button "Quit") quitUi
+    whenM (button "Quit") quit
     whenM (button "Cancel") (writeVar confirming False)
 </code></pre>
 <p>For a full example that only prompts when the buffer is dirty, see <a href="#tutorial-2-build-a-notepad">Tutorial 2: Build a Notepad</a>.</p>
@@ -3360,10 +3390,10 @@ editorView showInspector = do
 <p>A few important details about secondary windows:</p>
 <ul>
 <li><strong>Independent focus and IDs.</strong> Each native window owns its own keyboard focus, text carets, scroll positions, and hover state. <code>useVar</code> calls inside <code>body</code> count from zero independently of the parent window.</li>
-<li><strong>Initial settings apply once.</strong> <code>nativeWindow</code> reads <code>WindowSettings</code> only when opening the window. To update the title or mode afterward, call setters like <code>setWindowTitleUi</code> inside <code>body</code>.</li>
+<li><strong>Initial settings apply once.</strong> <code>nativeWindow</code> reads <code>WindowSettings</code> only when opening the window. To update the title or mode afterward, call setters like <code>setWindowTitle</code> inside <code>body</code>.</li>
 <li><strong>Closures stay fresh.</strong> Every frame of the parent view also re-evaluates each open child <code>body</code>, so any local values captured from the parent stay up to date.</li>
 <li><strong>Watch parent animation rates.</strong> Because child views re-evaluate when the parent renders, a parent animating at 60 fps also lays out open child windows at 60 fps (though a child only repaints pixels when its draw list actually changes).</li>
-<li><strong>Nesting and shared state.</strong> Child windows can open further windows of their own, and all windows share state cleanly through <code>Var</code>s (a write in one window shows up in the others on their next frame).</li>
+<li><strong>Nesting and shared state.</strong> Child windows can open further windows of their own, and all windows share state directly through <code>Var</code>s (a write in one window shows up in the others on their next frame).</li>
 <li><strong>Elm-style usage.</strong> With <code>NanoUIE</code> (<a href="#elm-style-state">Elm-Style State</a>), child windows emit to the same reducer. To store the open flag in your model, pass <code>constVar model.inspectorOpen</code>, set <code>wsExitOnCloseRequest = False</code>, and emit a close message when <code>winCloseRequested</code> fires.</li>
 <li><strong>Platform notes.</strong> Both SDL and RGFW support <code>nativeWindow</code>, while headless <code>NanoUI.Testing</code> ignores it without running <code>body</code>. On Windows, Win32 blocks the message pump during a window resize drag, so sibling windows pause redrawing until the drag ends.</li>
 </ul>
@@ -3382,12 +3412,12 @@ framelessView = columnWith (fillW . fillH) $ do
   mainContent
 
 titleBar :: NanoUI ()
-titleBar = rowWith (fixedH 32 . fillW . alignMid) $ do
+titleBar = rowWith (fixedH 32 . fillW . alignMiddle) $ do
   menuResp &lt;- button' "File"          -- interactive: exclude from dragging
   label "My Application"
   spacer (Grow 1) Fit
   closeClicked &lt;- windowCaption [respRect menuResp]
-  when closeClicked quitUi
+  when closeClicked quit
 </code></pre>
 <p>Any remaining strip across the top of the window acts as a native drag handle. Specifically, <code>windowCaption</code> starts with the full width of the caption row, subtracts the caption buttons, any open floating panels (menus or modals), and the interactive exclusion rectangles you pass in (<code>[respRect menuResp]</code> above), and registers the leftover spans with SDL’s hit-test callback. When the user drags one of those spans, the OS moves the window natively without sending a press to the view.</p>
 <p>Pass the <code>respRect</code> of every clickable control sitting in your custom title bar. <code>windowCaption</code> scales those logical rectangles by <code>winScale</code> automatically. Note that because <code>respRect</code> reflects the previous frame’s layout, exclusion zones trail a moving widget by one frame, and any frame that omits <code>windowCaption</code> clears the drag spans.</p>
@@ -3396,7 +3426,7 @@ titleBar = rowWith (fixedH 32 . fillW . alignMid) $ do
 <li><code>DecorationsFrame</code> hides the title bar while preserving the native OS resize border.</li>
 <li><code>DecorationsNone</code> removes both the title bar and OS border (on resizable windows, the outer edges still act as resize borders).</li>
 </ul>
-<p>Use <code>windowCaptionWith</code> to customize button appearance or resize border thickness. <code>windowFrame</code> wraps your view in a full-window panel with a rounded border <code>frameWidth</code> thick and insets the view by <code>frameWidth</code>:</p>
+<p>Use <code>windowCaptionWith</code> to customize button appearance or resize border thickness. <code>windowFrame</code> (from <code>NanoUI.Chrome</code>) wraps your view in a full-window panel with a rounded border <code>frameWidth</code> thick and insets the view by <code>frameWidth</code>:</p>
 <pre><code class="language-haskell">framedView :: NanoUI ()
 framedView = windowFrame (defaultWindowFrame (colorRGBA 70 70 80 255)) $ do
   mainContent
@@ -3435,7 +3465,7 @@ view app = do
 </code></pre>
 <p>If you are working directly with <code>SdlEnv</code> (from <code>askSdlEnv</code>), <code>nano-ui-sdl</code> also exposes <code>saveScreenshot env path</code> (writes a BMP file) and <code>captureScreenshot env</code> (returns raw pixels) for the last presented frame. Call both on the display thread, and encode formats like PNG with <code>JuicyPixels</code> on a worker thread.</p>
 <h2 id="testing-views-that-use-window-apis"><a class="header" href="#testing-views-that-use-window-apis">Testing views that use window APIs</a></h2>
-<p>Window setters and commands become no-ops when no OS window is attached, so views that call them still run cleanly under headless <code>NanoUI.Testing</code>. Testing screenshots or custom title bars requires a real SDL window (see the hidden-window tests in <code>nano-ui-demo</code>).</p>
+<p>Window setters and commands become no-ops when no OS window is attached, so views that call them still run under headless <code>NanoUI.Testing</code>. Testing screenshots or custom title bars requires a real SDL window (see the hidden-window tests in <code>nano-ui-demo</code>).</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="ecosystem-packages"><a class="header" href="#ecosystem-packages">Ecosystem Packages</a></h1>
 <p>The <code>nano-ui</code> workspace splits optional backends and domain widgets into focused companion packages. Pin whichever ones you need in <code>cabal.project</code> alongside <code>nano-ui</code>, as shown in the <a href="#quick-start">Quick Start</a>.</p>
@@ -3447,6 +3477,8 @@ view app = do
 <tbody>
 <tr><td><code>nano-ui-sdl</code></td><td>Desktop SDL3 backend with TrueType fonts, native file dialogs, and custom title bars</td></tr>
 <tr><td><code>nano-ui-rgfw</code></td><td>Lightweight RGFW + OpenGL 3.2 backend with a bundled bitmap font</td></tr>
+<tr><td><code>nano-ui-sdl-web</code></td><td>Browser backend for GHC’s WebAssembly target using SDL_ttf and WebGL2</td></tr>
+<tr><td><code>nano-ui-emit</code></td><td>Statically typed emitting views and Elm-style reducers (<code>NanoUIE</code>)</td></tr>
 <tr><td><code>nano-ui-diagrams</code></td><td>Line, bar, scatter, area, and step charts plus <code>diagrams-lib</code> widgets</td></tr>
 <tr><td><code>nano-ui-form</code></td><td>Validated applicative forms built on <code>ditto</code></td></tr>
 <tr><td><code>nano-ui-markdown</code></td><td>CommonMark rendering with incremental appends for streaming</td></tr>
@@ -3616,7 +3648,7 @@ signupView owner = do -- owner &lt;- newFormState in setup
     Just (Signup name _) -&gt; label ("Welcome, " &lt;&gt; name)
     Nothing              -&gt; pure ()
 </code></pre>
-<p><code>nanoFormLive</code> returns <code>Just a</code> continuously whenever the form is valid, <code>nanoFormEx</code> accepts a <code>FormConfig</code>, and <code>runNanoForm</code> separates the rendered view from its result. Built-in inputs cover <code>inputText</code>, <code>inputPassword</code>, <code>inputTextArea</code>, <code>inputCheckbox</code>, <code>inputSlider</code>, <code>inputSelect</code>, <code>inputRadio</code>, and <code>inputColor</code>, paired with validators such as <code>notEmpty</code>, <code>minLength</code>, <code>maxLength</code>, <code>inRange</code>, <code>validEmail</code>, <code>matches</code>, and <code>customProof</code>. Wrap any custom <code>Var a -&gt; NanoUI Response</code> widget with <code>inputWidget</code>, choosing when edits publish (<code>OnChange</code>, <code>OnChangeOr</code>, or <code>OnlyWhen</code>).</p>
+<p><code>nanoFormLive</code> returns <code>Just a</code> continuously whenever the form is valid, <code>nanoFormEx</code> accepts a <code>FormConfig</code>, and <code>runNanoForm</code> separates the rendered view from its result. Built-in inputs cover <code>inputText</code>, <code>inputPassword</code>, <code>inputTextArea</code>, <code>inputCheckbox</code>, <code>inputSlider</code>, <code>inputSelect</code>, <code>inputEnumSelect</code>, <code>inputRadio</code>, <code>inputEnumRadio</code>, and <code>inputColor</code>, alongside <code>formLabel</code> and <code>formSeparator</code>, paired with validators such as <code>notEmpty</code>, <code>minLength</code>, <code>maxLength</code>, <code>inRange</code>, <code>validEmail</code>, <code>matches</code>, and <code>customProof</code>. Wrap any custom <code>Var a -&gt; NanoUI Response</code> widget with <code>inputWidget</code>, choosing when edits publish (<code>OnChange</code>, <code>OnChangeOr</code>, or <code>OnlyWhen</code>).</p>
 <h2 id="markdown"><a class="header" href="#markdown">Markdown</a></h2>
 <p><code>nano-ui-markdown</code> parses CommonMark (with GitHub tables, task lists, strikethrough, and autolinks) and renders it as selectable rich text:</p>
 <pre><code class="language-haskell">doc :: MarkdownDoc
@@ -3627,7 +3659,7 @@ view cache = do -- cache &lt;- newMarkdownCache in setup
   clicked &lt;- markdown cache doc
   for_ clicked $ \url -&gt; liftIO (void (Sdl.openUrl url))
 </code></pre>
-<p>Allocate <code>cache &lt;- newMarkdownCache</code> once during setup. <code>markdown</code> returns the URL of any link clicked on the current frame. For streaming chat replies or live logs, append chunks incrementally without reparsing the whole document:</p>
+<p>Allocate <code>cache &lt;- newMarkdownCache</code> once during setup. <code>markdown</code> returns the URL of any link clicked on the current frame, and <code>markdownWith</code> applies a layout modifier to the document column. For streaming chat replies or live logs, append chunks incrementally without reparsing the whole document:</p>
 <pre><code class="language-haskell">reply :: Stream Int MarkdownDoc -&gt; MarkdownCache -&gt; Int -&gt; NanoUI ()
 reply stream cache replyId = do
   answer &lt;- useStream stream replyId emptyMarkdown $ \update -&gt;
@@ -3635,6 +3667,8 @@ reply stream cache replyId = do
   void (markdown cache answer)
 </code></pre>
 <p>If tokens arrive on the UI thread, concatenate each frame’s batch into a single <code>appendMarkdown</code> call. The incremental parser only reparses the trailing block (except when a chunk completes an unsplittable block or adds a link-reference definition). To customize rendering for specific elements (such as adding syntax highlighting to fenced code blocks), override <code>MarkdownConfig.mdBlock</code>.</p>
+<h2 id="shaders-1"><a class="header" href="#shaders-1">Shaders</a></h2>
+<p><code>nano-ui-shader</code> provides a pure-Haskell typed fragment shader EDSL, algebraic pass fusion (<code>composeColor</code>, <code>composeDistort</code>, <code>distortThenColor</code>, <code>chainLayer</code>), compilers for GLSL 150, GLSL ES 300, SPIR-V, MSL, and a CPU reference evaluator, plus 21 built-in surface fills and subtree effects (<code>meshGradient4</code>, <code>gaussianBlur</code>, <code>dropShadow</code>, <code>groupOpacity</code>, and more). See the <a href="#shaders">Shaders</a> chapter for full examples and backend fallback rules.</p>
 <h2 id="svg-export"><a class="header" href="#svg-export">SVG export</a></h2>
 <p><code>nano-ui-svg</code> exports graphics at two levels:</p>
 <ul>
@@ -3727,7 +3761,7 @@ diskSelect options selectedVar = do
 <p>flatList :: NanoUI () -&gt; NanoUI ()
 flatList = styled (inputStyle (background colorTransparent . borderWidth 0))</p>
 <pre><code>
-- Match `themeFloatingWindow` and `themePopup` to your panel surface so padded content blends cleanly into the dialog.
+- Match `themeFloatingWindow` and `themePopup` to your panel surface so padded content blends into the dialog.
 - Between adjacent chrome regions, place a single `separator` in the parent instead of drawing touching borders on both sides.
 
 Both `stronghead` and `winget-gui` adopted these patterns to eliminate duplicate popover and dialog borders.
@@ -3752,8 +3786,8 @@ snap f v = let k = max 1 (fmSnapScale f) in fromIntegral (round (v * k) :: Int) 
 </code></pre>
 <h3 id="geometric-centering-looks-slightly-high"><a class="header" href="#geometric-centering-looks-slightly-high">Geometric centering looks slightly high</a></h3>
 <p>Stacking a large label over a smaller label and centering by line boxes leaves extra empty space beneath the smaller line’s baseline, making the pair look roughly 4 px too high. Either nudge it with <code>padTop</code>, or compute optical centering from the ink bounds and cap/x-height midpoints exposed by <code>FontMetrics</code>.</p>
-<h3 id="alignmid-on-a-row-aligns-the-row-itself-not-its-children"><a class="header" href="#alignmid-on-a-row-aligns-the-row-itself-not-its-children"><code>alignMid</code> on a row aligns the row itself, not its children</a></h3>
-<p>Applying <code>alignMid</code> to a <code>row</code> centers the row inside its parent. To vertically center items <em>inside</em> the row, put <code>alignMid</code> on each child instead.</p>
+<h3 id="alignmiddle-on-a-row-aligns-the-row-itself-not-its-children"><a class="header" href="#alignmiddle-on-a-row-aligns-the-row-itself-not-its-children"><code>alignMiddle</code> on a row aligns the row itself, not its children</a></h3>
+<p>Applying <code>alignMiddle</code> to a <code>row</code> centers the row inside its parent. To vertically center items <em>inside</em> the row, put <code>itemsCenter</code> on the row (or <code>alignMiddle</code> on individual children). The same holds for <code>itemsEnd</code> and <code>itemsBaseline</code>.</p>
 <h2 id="4-stale-cached-drawings"><a class="header" href="#4-stale-cached-drawings">4. Stale cached drawings</a></h2>
 <p>Unkeyed custom widgets rebuild and diff their draw ops every frame. Adding a content key avoids that work on unchanged frames, which means anything missing from the key will never trigger a redraw.</p>
 <h3 id="a-keyed-canvas-freezes-when-an-input-changes"><a class="header" href="#a-keyed-canvas-freezes-when-an-input-changes">A keyed canvas freezes when an input changes</a></h3>
@@ -3778,12 +3812,11 @@ dragGhost mx my = drawingVersioned (contentKey [mx, my]) (fixedWH 32 32) ghostOp
 <h3 id="mouse-wheel-scrolling-feels-misaligned-with-row-height"><a class="header" href="#mouse-wheel-scrolling-feels-misaligned-with-row-height">Mouse-wheel scrolling feels misaligned with row height</a></h3>
 <p>The default wheel notch scrolls 60 logical pixels, which can feel awkward over 54 px rows or dense lists. Match the step to your row height:</p>
 <pre><code class="language-haskell">oneRowPerNotch :: Float -&gt; NanoUI ()
-oneRowPerNotch rowHeight = do
-  ctx &lt;- askContext
-  liftIO $ setScrollTuning ctx defaultScrollTuning
+oneRowPerNotch rowHeight =
+  setScrollTuning defaultScrollTuning
     {scrollWheelStep = rowHeight, scrollSmoothTime = 0}
 </code></pre>
-<p>You can also override one scroller at a time with <code>setScrollStepUi</code>; pass <code>0</code> to revert to the context default.</p>
+<p>You can also override one scroller at a time with <code>setScrollStep</code>; pass <code>0</code> to revert to the context default.</p>
 <h2 id="6-focus-and-input-ordering"><a class="header" href="#6-focus-and-input-ordering">6. Focus and input ordering</a></h2>
 <h3 id="focus-checks-at-the-top-of-the-view-always-return-false"><a class="header" href="#focus-checks-at-the-top-of-the-view-always-return-false">Focus checks at the top of the view always return <code>False</code></a></h3>
 <p>The layout arena clears before your view runs, so calling <code>isFocused</code> at the top of <code>appView</code> always reports <code>False</code>.</p>
@@ -3825,7 +3858,7 @@ composition wid caretRect = do
 <li><input disabled="" type="checkbox"> <code>liftIO (newVar ...)</code> inside the view allocates a fresh <code>Var</code> every pass; move it to setup.</li>
 <li><input disabled="" type="checkbox"> Unguarded side effects run every frame; wrap them in <code>whenM (button ...)</code> or an explicit event check.</li>
 <li><input disabled="" type="checkbox"> Conditional widgets or <code>useVar</code> calls need <code>scope</code>; dynamic lists need <code>withKey</code> with stable IDs (never indices).</li>
-<li><input disabled="" type="checkbox"> Call <code>modal</code>, <code>window</code>, and <code>popup</code> unconditionally every frame with a <code>Var Bool</code>.</li>
+<li><input disabled="" type="checkbox"> Call <code>modal</code>, <code>floatingWindow</code>, and <code>popup</code> unconditionally every frame with a <code>Var Bool</code>.</li>
 <li><input disabled="" type="checkbox"> Putting <code>useTask</code> inside a tab or conditional cancels the worker as soon as it is hidden.</li>
 <li><input disabled="" type="checkbox"> Calling <code>keepAnimating</code> unconditionally at the top level creates a busy loop; call it inside the animating widget, and use <code>wakeAfter</code> for timers.</li>
 <li><input disabled="" type="checkbox"> Writing a computed <code>NaN</code> to a <code>Var Float</code> redraws endlessly (<code>NaN /= NaN</code>); guard float math.</li>
@@ -3915,7 +3948,7 @@ python scripts/profile/summarize_prof.py profile-json.prof
 <h3 id="continuous-frame-rate-on-linux"><a class="header" href="#continuous-frame-rate-on-linux">Continuous frame rate on Linux</a></h3>
 <p><code>continuous-meter.c</code> is an <code>LD_PRELOAD</code> helper for timing <code>SDL_RenderPresent</code> calls in the SDL demo’s <code>--continuous</code> mode. It skips 1,000 warm-up frames, times the next 10,000, prints wall time, CPU time, FPS, and p50/p95/p99 frame times to stderr, and exits. Build and run commands are documented at the top of the C file. For fair comparisons, alternate runs using the same renderer, window size, DPI, and RTS flags.</p>
 <h3 id="source-line-budget"><a class="header" href="#source-line-budget">Source line budget</a></h3>
-<p><code>source-budget.py &lt;git-rev&gt;</code> reports the net lines of library code changed since a given commit (<code>packages/*/lib</code> and <code>cbits</code>, excluding <code>nano-ui-demo</code>). It counts both raw lines and lines after formatting each modified Haskell file through <code>fourmolu</code> on stdin, ensuring pure reformatting does not masquerade as code reduction. It requires <code>fourmolu</code> on <code>PATH</code> and never modifies files on disk.</p>
+<p><code>source-budget.py &lt;git-rev&gt;</code> reports the net lines of library code changed since a given commit (<code>packages/*/lib</code> and <code>cbits</code>, excluding <code>nano-ui-demo</code>). It counts both raw lines and lines after formatting each modified Haskell file through <code>fourmolu</code> on stdin, so pure reformatting does not masquerade as code reduction. It requires <code>fourmolu</code> on <code>PATH</code> and never modifies files on disk.</p>
 <h2 id="haddocks-and-hoogle-1"><a class="header" href="#haddocks-and-hoogle-1">Haddocks and Hoogle</a></h2>
 <p>Released packages have Haddock documentation on Hackage. To generate docs for the whole checkout locally:</p>
 <pre><code class="language-sh">cabal haddock-project --output=haddocks --hoogle
@@ -3927,7 +3960,7 @@ python scripts/profile/summarize_prof.py profile-json.prof
 <h2 id="book-code"><a class="header" href="#book-code">Book code</a></h2>
 <p>Every Haskell snippet in this book comes from an anchored region of a compiled module: either <code>packages/nano-ui-demo/book/Book/*.hs</code> for regular chapters, or <code>packages/nano-ui-svg/app/*Examples.hs</code> for snippets paired with rendered diagrams. Include them with an anchored <code>#include</code> directive; <code>nano-ui-book-test</code> fails if any Haskell is written inline in a Markdown file.</p>
 <h2 id="module-conventions"><a class="header" href="#module-conventions">Module conventions</a></h2>
-<p>See <a href="#ecosystem-packages">Ecosystem Packages</a> for the companion packages. In <code>packages/nano-ui/lib</code>, the public API consists of <code>NanoUI</code> (with <code>packages/nano-ui/lib/NanoUI.hs</code> holding the full export list) and <code>NanoUI.Widgets.*</code>. Modules under <code>NanoUI.Internal.*</code> are exposed for backends and tests and may change without notice between minor releases.</p>
+<p>See <a href="#ecosystem-packages">Ecosystem Packages</a> for the companion packages. In <code>packages/nano-ui/lib</code>, <code>NanoUI</code> (<code>packages/nano-ui/lib/NanoUI.hs</code>) re-exports the core view API, while specialized public modules cover focused subsystems: <code>NanoUI.Themes</code>, <code>NanoUI.Chrome</code>, <code>NanoUI.Path</code>, <code>NanoUI.Shortcut</code>, <code>NanoUI.Svg</code>, <code>NanoUI.Shader.Raw</code>, <code>NanoUI.Effectful</code>, <code>NanoUI.Widgets.PaneGrid</code>, <code>NanoUI.Widgets.TextDocument</code>, <code>NanoUI.Widgets.Custom</code>, <code>NanoUI.Testing</code> / <code>NanoUI.Testing.Sim</code>, and <code>NanoUI.Backend</code> / <code>NanoUI.Runner</code>. Modules under <code>NanoUI.Internal.*</code> are exposed for companion packages and tests and may change without notice between minor releases.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="architecture--internals"><a class="header" href="#architecture--internals">Architecture &amp; Internals</a></h1>
 <p>You do not need to memorize internals to build apps with <code>nano-ui</code>, but knowing how a frame executes explains why <code>readVar</code> placement, focus ordering, and damage tracking behave the way they do.</p>
@@ -4013,7 +4046,7 @@ editorView (Editor ref) = do
 <tr><td>Has one central domain state updated by workers or CLI commands</td><td>Pattern A (<code>IORef</code> + <code>askWake</code>)</td></tr>
 <tr><td>Consists of many interactive tool panes and inspectors</td><td>Pattern B (record of <code>Var</code>s)</td></tr>
 <tr><td>Wraps an existing domain model or library</td><td>Pattern C (app-owned <code>IORef</code> + <code>requestFrame</code>)</td></tr>
-<tr><td>Models cleanly as pure <code>Msg -&gt; Model -&gt; Model</code> transitions</td><td>Elm-style (<code>nano-ui-emit</code>)</td></tr>
+<tr><td>Fits pure <code>Msg -&gt; Model -&gt; Model</code> state transitions</td><td>Elm-style (<code>nano-ui-emit</code>)</td></tr>
 <tr><td>Is a small utility or prototype</td><td>Keep it simple: a few <code>useVar</code> calls are plenty</td></tr>
 </tbody>
 </table>
@@ -4069,7 +4102,7 @@ editorView (Editor ref) = do
         <script src="book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="theme/nano-ui-banks-28c9304c.js"></script>
         <script src="theme/nano-ui-components-6e817ca2.js"></script>
 
         <script>

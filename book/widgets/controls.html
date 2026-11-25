@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d41be472.js";
+            window.path_to_searchindex_js = "../searchindex-4929b437.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2886a539.js"></script>
@@ -198,12 +198,18 @@ iconButton :: Svg -&gt; Text -&gt; NanoUI Bool
 </code></pre>
 <p><code>buttonContent</code> wraps an arbitrary <code>NanoUI ()</code> view inside a clickable button. The inner widgets are purely visual; clicking anywhere on the button activates it:</p>
 <pre><code class="language-haskell">iconSaveButton =
-  whenM (buttonContent $ rowWith (gap 6 . alignMid) $ do
+  whenM (buttonContent $ rowWith (gap 6 . alignMiddle) $ do
             svgIcon 16 saveIcon
             label "Save") $
     saveDocument
 </code></pre>
 <p><code>iconButton</code> draws an SVG icon next to a label. Passing an empty string <code>""</code> produces a square icon-only button.</p>
+<p>Wrap adjacent buttons (including <code>iconButton</code>, <code>toggleButton</code>, <code>buttonContent</code>, and <code>select</code>) in <code>buttonGroup</code> or <code>buttonGroupWith</code> to join them with zero gap, outer-only corner rounding, and shared 1-pixel internal borders.</p>
+<p>For selectable list items and collapsible sections without a full <code>table</code> or <code>tree</code>:</p>
+<ul>
+<li><code>selectableRow selected body</code> (plus <code>selectableRow'</code>, <code>selectableRowWith</code>, <code>selectableRowWith'</code>) renders a full-width clickable row that tints on hover and highlights when <code>selected</code> is <code>True</code>, returning <code>True</code> when clicked.</li>
+<li><code>collapsing title openVar body</code> (and <code>collapsingWith</code>) renders a toggle header with a disclosure arrow and runs <code>body</code> inside <code>scope</code> while <code>openVar</code> is <code>True</code>.</li>
+</ul>
 <h2 id="menus"><a class="header" href="#menus">Menus</a></h2>
 <p>Menu rows are built from <code>menuItem</code> (returns <code>True</code> when clicked), <code>menuItemShortcut</code> (shows a shortcut label and activates on that chord while the menu is open), <code>menuSeparator</code>, and <code>menuItemDisabled</code>.</p>
 <p>Build a menu bar by pairing <code>menuButton'</code> triggers with <code>popup'</code> overlays anchored to each button’s rectangle:</p>
@@ -214,13 +220,13 @@ iconButton :: Svg -&gt; Text -&gt; NanoUI Bool
   when (respClicked btn) (writeVar fileOpen (not isOpen))
 
   let cfg = (defaultPopupConfig (AnchorRect (respRect btn)))
-              {cfgPlacement = PlacementBelow, cfgOffset = 0}
+              {popupPlacement = PlacementBelow, popupOffset = 0}
   (popupResp, _) &lt;- popup' (constVar isOpen) cfg $
     columnWith (tight . gap 0) $ do
       whenM (menuItemShortcut "New" (cmdOrCtrl &lt;&gt; key 'n')) newDocument
       whenM (menuItem "Open...") openDocument
       menuSeparator
-      whenM (menuItem "Exit") (writeVar fileOpen False &gt;&gt; quitUi)
+      whenM (menuItem "Exit") (writeVar fileOpen False &gt;&gt; quit)
   when (respClicked popupResp) (writeVar fileOpen False)
 </code></pre>
 <p>Here <code>constVar</code> passes a read-only open flag derived from <code>openMenu</code>, and clicks on the popup update <code>openMenu</code> directly.</p>
@@ -253,9 +259,9 @@ saveBindings = do
 <tr><td><code>checkbox</code></td><td><code>Text -&gt; Var Bool -&gt; NanoUI ()</code></td><td>Checkbox with a label</td></tr>
 <tr><td><code>toggleButton</code></td><td><code>Tone -&gt; Text -&gt; Var Bool -&gt; NanoUI ()</code></td><td>Two-state button filled with its tone color when active</td></tr>
 <tr><td><code>radio</code></td><td><code>Foldable f =&gt; f Text -&gt; Var Int -&gt; NanoUI ()</code></td><td>Radio button group indexed by position</td></tr>
-<tr><td><code>boundedRadio</code></td><td><code>(Bounded a, Enum a) =&gt; (a -&gt; Text) -&gt; Var a -&gt; NanoUI ()</code></td><td>Radio group covering every constructor of an enum</td></tr>
+<tr><td><code>enumRadio</code> / <code>enumRadioBy</code></td><td><code>(Bounded a, Enum a) =&gt; (a -&gt; Text) -&gt; Var a -&gt; NanoUI ()</code></td><td>Radio group covering every constructor of an enum (<code>enumRadio</code> uses <code>Show</code>)</td></tr>
 <tr><td><code>select</code></td><td><code>Foldable f =&gt; f Text -&gt; Var Int -&gt; NanoUI ()</code></td><td>Dropdown selector indexed by position</td></tr>
-<tr><td><code>boundedSelect</code></td><td><code>(Bounded a, Enum a) =&gt; (a -&gt; Text) -&gt; Var a -&gt; NanoUI ()</code></td><td>Dropdown selector over every constructor of an enum</td></tr>
+<tr><td><code>enumSelect</code> / <code>enumSelectBy</code></td><td><code>(Bounded a, Enum a) =&gt; (a -&gt; Text) -&gt; Var a -&gt; NanoUI ()</code></td><td>Dropdown selector over every constructor of an enum (<code>enumSelect</code> uses <code>Show</code>)</td></tr>
 <tr><td><code>comboBox</code></td><td><code>Foldable f =&gt; Text -&gt; f Text -&gt; Var Text -&gt; NanoUI ()</code></td><td>Free-text field with filterable autocomplete suggestions</td></tr>
 <tr><td><code>slider</code></td><td><code>Float -&gt; Float -&gt; Var Float -&gt; NanoUI ()</code></td><td>Continuous horizontal slider between min and max</td></tr>
 <tr><td><code>textInput</code></td><td><code>Var Text -&gt; NanoUI ()</code></td><td>Single-line text input</td></tr>
@@ -265,7 +271,7 @@ saveBindings = do
 </tbody>
 </table>
 </div>
-<p>Every widget in this table provides the standard variants: primed (<code>...'</code>) returns a <code>Response</code>, <code>...With</code> accepts a layout modifier, and <code>...Configured</code> accepts a config record:</p>
+<p>Every widget in this table provides a primed form (<code>...'</code>) returning a <code>Response</code>. Simpler controls (<code>checkbox</code>, <code>toggleButton</code>, <code>select</code>, <code>slider</code>) add <code>...With</code> for layout modifiers, while richer fields (<code>textInput</code>, <code>searchInput</code>, <code>numericInput</code>) add <code>...Configured</code> taking a config record (whose <code>*Layout</code> field carries any layout modifier):</p>
 <pre><code class="language-haskell">byteField = do
   byte &lt;- useVar (0 :: Double)
   numericInputConfigured defaultNumericInputConfig
@@ -369,7 +375,7 @@ values accent = do
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-banks-28c9304c.js"></script>
         <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 

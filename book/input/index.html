@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-d41be472.js";
+            window.path_to_searchindex_js = "../searchindex-4929b437.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2886a539.js"></script>
@@ -281,7 +281,7 @@ editableName draft = do
 <p>Focus requests are ignored if the target widget is disabled, covered by an open modal, missing from the current pass, or not a Tab stop. Because inactive tab bodies do not run, widgets inside them lose focus when you switch away; call <code>requestFocus</code> again when switching back if needed.</p>
 <p><code>disabledWhen</code> dims a subtree and blocks focus and input without disturbing layout. Customize the focus outline color through <code>themeFocusRing</code>.</p>
 <h2 id="input-method-editors-ime"><a class="header" href="#input-method-editors-ime">Input Method Editors (IME)</a></h2>
-<p>Built-in text inputs and text areas support IME composition out of the box, rendering pre-edit text at the caret and suppressing shortcuts until composition commits.</p>
+<p>Built-in text inputs and text areas support IME composition directly, rendering pre-edit text at the caret and suppressing shortcuts until composition commits.</p>
 <p>If you build a custom widget that reads typed characters from <code>inputChars</code>, opt into text input on every frame it can accept text:</p>
 <pre><code class="language-haskell">-- Every frame the widget accepts text:
 composition :: WidgetId -&gt; Rect -&gt; NanoUI ()
@@ -357,7 +357,7 @@ renameTest = do
         <script src="../book-609e4cb8.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="../theme/nano-ui-banks-8f0eb628.js"></script>
+        <script src="../theme/nano-ui-banks-28c9304c.js"></script>
         <script src="../theme/nano-ui-components-6e817ca2.js"></script>
 
 
