@@ -395,9 +395,9 @@ Modifiers are plain `Layout -> Layout` functions chained with `(.)`. Because the
 
 ### Alignment and wrapping
 
-`alignStart`, `alignCenter`, and `alignEnd` position a child horizontally inside a column. `alignTop`, `alignMid`, and `alignBottom` position a child vertically inside a row.
+`alignStart`, `alignCenter`, and `alignEnd` position a child horizontally inside a column. `alignTop`, `alignMid`, `alignBottom`, and `alignBaseline` position a child vertically inside a row.
 
-Every alignment modifier applies to the node it is placed on, not to that node's children. Putting `alignMid` on a `row` centers the row inside its parent; to vertically center the items *inside* the row, apply `alignMid` to each child.
+Every `align*` modifier applies to the node it is placed on, not to that node's children. Putting `alignMid` on a `row` centers the row inside its parent. To align the children *inside* a container across its cross axis, put `itemsStart`, `itemsCenter`, `itemsEnd`, or `itemsBaseline` (or `itemsAlign`) on the container itself: `rowWith (itemsCenter . gap 8)` vertically centers every child that does not set its own vertical alignment, and `columnWith itemsCenter` centers fit-width children horizontally without affecting left-aligned text inside `fillW` labels. Any explicit `align*` modifier on a child (including `alignTop` or `alignStart`) overrides the container default, and `itemsAlign` never leaks into nested containers or pinned children.
 
 <details class="nano-example">
 <summary><code>alignStart</code>: align to the left edge</summary>
@@ -579,7 +579,9 @@ For complete examples, look at `packages/nano-ui-demo/examples/LongList.hs` (100
 {{#include ../../../packages/nano-ui-demo/book/Book/Layout.hs:reveal}}
 ```
 
-Inside a view, you can drive scrolling with `scrollToUi`, `scrollByUi`, `scrollPagesUi`, `scrollRectIntoViewUi`, `setScrollOffsetUi`, and `setScrollStepUi`. Matching `Context` variants (`scrollTo`, `getScrollOffset2D`, and so on) are available in `IO`.
+Inside a view, you can drive scrolling with `scrollToUi`, `scrollByUi`, `scrollPagesUi`, `scrollToStartUi`, `scrollToEndUi`, `scrollIntoViewUi`, `scrollRectIntoViewUi`, `setScrollOffsetUi`, and `setScrollStepUi`. Matching `Context` variants (`scrollTo`, `getScrollOffset2D`, and so on) are available in `IO`.
+
+For custom keyboard-driven lists without a full `table` or `tree`, set `scrollFocusable = True` in `ScrollConfig` so the scroller joins the Tab order and takes focus when passive content inside it is clicked. Pair its `WidgetId` with `useListNav` (uniform row height) or `useListNavWith` (custom per-row rectangles) to handle Up, Down, PageUp, PageDown, Home, End, Enter, and Space with automatic `scrollRectIntoViewUi`.
 
 By default, one mouse-wheel notch scrolls 60 logical pixels. For uniform lists, match the wheel step to your row height so one notch advances exactly one row (`askContext` lives in `NanoUI.Monad`):
 

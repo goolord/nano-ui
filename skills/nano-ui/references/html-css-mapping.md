@@ -77,10 +77,10 @@ How web UI mental models translate to `nano-ui`:
 | `justify-content: space-between` | `spacer (Grow 1) Fit` (or `flex`) between children |
 | `justify-content: flex-end` | Leading `spacer (Grow 1) Fit`, or `alignEnd` on a single child in a column |
 | `justify-content: center` | `center body` (both axes), or spacers on both sides |
-| `align-items: center` in a row | `alignMid` on **each child** (modifiers align the node they are placed on) |
-| `align-items: center` in a column | `alignCenter` on each child |
-| `align-items: baseline` | `alignBaseline` on each child |
-| `align-self` | Same alignment modifier on that individual child |
+| `align-items: center` | `itemsCenter` on the row, column, or grid |
+| `align-items: flex-end` | `itemsEnd` on the row, column, or grid |
+| `align-items: baseline` | `itemsBaseline` on the row |
+| `align-self` | `alignStart`/`alignCenter`/`alignEnd` or `alignTop`/`alignMid`/`alignBottom`/`alignBaseline` on the child (overrides container `items*`) |
 | `align-items: stretch` | `fillH` (row) or `fillW` (column) on children |
 | `display: grid; grid-template-columns: repeat(3, 1fr)` | `gridWith 3 (gap 8 . fillW)`, children `fillW` |
 | `repeat(auto-fill, minmax(160px, 1fr))` | `gridMinColW 160` on the grid |
@@ -137,7 +137,7 @@ Colors, borders, and corner radii live in the active `Theme`. Adjust them for a 
 | `:focus` outline | Automatic (`themeFocusRing`); query with `isFocused` |
 | `:disabled` | `disabledWhen` |
 | `opacity` | `withAlpha` on colors; `icOpacity` on images |
-| `font-size` | `fontSize 18` on the text widget; `sdlAppFontSize` for app default |
+| `font-size` | `fontSize 18` or relative `fontSizeScale 1.25` on the text widget; `sdlAppFontSize` for app default |
 | `font-weight: bold` | `fontBold`, `fontWeight WeightSemiBold` |
 | `font-style: italic` | `fontItalic` |
 | `font-family` | `fontMono` per widget; `sdlAppFont` / `sdlAppMonoFont` globally |
@@ -165,11 +165,11 @@ Font modifiers do not cascade from parent containers (`columnWith (fontSize 20)`
 | `oncontextmenu` | `contextMenu resp body`, or `respRightClicked` |
 | `onwheel` | Scrollers handle automatically; `useWheelDeltaOn resp` in custom widgets |
 | `keydown` on `document` | `shortcut (ctrl <> key 's')`, `keyPressed KeyEscape` |
-| `keydown` on an element | Focused custom widget with `focusedKeyPressed` / `useKeyNav` |
+| `keydown` on an element | Focused custom widget with `focusedKeyPressed` / `useKeyNav`, or `scrollFocusable = True` + `useListNav` / `useListNavWith` |
 | `element.focus()`, `autofocus` | `requestFocus (respId resp)` (safe to call every frame; no-op when already focused) |
 | `element.blur()` | `clearFocus` |
 | `getBoundingClientRect()` | `respRect resp` (previous frame's bounds) |
-| `scrollIntoView()` | `scrollIntoView` / `scrollRectIntoViewUi` |
+| `scrollIntoView()` | `scrollIntoViewUi` / `scrollRectIntoViewUi` (plus `scrollToStartUi` / `scrollToEndUi`) |
 | `IntersectionObserver` | `sensor` / `sensorConfigured` / `useVisibility` |
 | `ResizeObserver` | `respRect` and `windowSize`, read each frame |
 | HTML5 drag and drop | `useDrag`, `useReorder` + `insertionIndex`; `dropZone` for OS file drops |

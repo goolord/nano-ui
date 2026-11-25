@@ -116,7 +116,7 @@ Stacking a large label over a smaller label and centering by line boxes leaves e
 
 ### `alignMid` on a row aligns the row itself, not its children
 
-Applying `alignMid` to a `row` centers the row inside its parent. To vertically center items *inside* the row, put `alignMid` on each child instead.
+Applying `alignMid` to a `row` centers the row inside its parent. To vertically center items *inside* the row, put `itemsCenter` on the row (or `alignMid` on individual children). The same holds for `itemsEnd` and `itemsBaseline`.
 
 ## 4. Stale cached drawings
 

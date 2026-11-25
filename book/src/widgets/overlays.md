@@ -70,7 +70,7 @@ Tooltips require no state `Var` and attach directly to any widget's `Response`:
 {{#include ../../../packages/nano-ui-demo/book/Book/Overlays.hs:tooltips}}
 ```
 
-By default, tooltips appear after hovering for 0.5 seconds. Pass a `TooltipConfig` to `tooltipConfigured` to change the delay or placement, or use `withTooltip` to render a custom widget subtree inside the tooltip instead of plain text.
+By default, tooltips appear after hovering for 0.5 seconds. Pass a `TooltipConfig` to `tooltipConfigured` to change the delay or placement, or use `tooltipWidget`, `tooltipWidgetConfigured`, or `withTooltip` to render a custom widget subtree inside the tooltip instead of plain text. Tooltips pass pointer events through to widgets underneath and keep their bodies inert so inner controls cannot steal keyboard focus.
 
 ## Keep in mind
 

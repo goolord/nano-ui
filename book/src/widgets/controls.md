@@ -28,6 +28,8 @@ Reach for the primed variant (`button'`) whenever you need the `Response` for ho
 
 `iconButton` draws an SVG icon next to a label. Passing an empty string `""` produces a square icon-only button.
 
+Wrap adjacent buttons (including `iconButton`, `toggleButton`, `buttonContent`, and `select`) in `buttonGroup` or `buttonGroupWith` to join them with zero gap, outer-only corner rounding, and shared 1-pixel internal borders.
+
 ## Menus
 
 Menu rows are built from `menuItem` (returns `True` when clicked), `menuItemShortcut` (shows a shortcut label and activates on that chord while the menu is open), `menuSeparator`, and `menuItemDisabled`.

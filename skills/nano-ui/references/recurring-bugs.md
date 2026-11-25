@@ -49,7 +49,7 @@ Padded containers paint the panel color, and `scrollArea`, `panel`, and `card` e
   ```
 
 - **Line-box centering looks slightly high.** Stacking a large label over a small one leaves extra empty space below the smaller baseline, reading ~4 px too high. Nudge with `padTop`, or compute optical centering from glyph ink bounds and cap/x-height midpoints in `FontMetrics`.
-- **`alignMid` on a row positions the row itself**, not its contents. Put `alignMid` on each child inside the row instead.
+- **`alignMid` on a row positions the row itself**, not its contents. Put `itemsCenter` (or `itemsEnd` / `itemsBaseline`) on the row to align its children, or `alignMid` on individual children.
 
 ## Cached drawings that do not update
 
