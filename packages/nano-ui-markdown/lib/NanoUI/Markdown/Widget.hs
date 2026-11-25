@@ -195,9 +195,16 @@ markdownConfigured cache cfg doc = do
   withContext (frameNumber >=> startFrame cache)
   theme <- uiTheme
   size <- uiFontSize
-  -- Pin the body size (the backend default if unset) so headings and small
-  -- text scale it rather than 16.
-  let text = mdText cfg . \l -> if layoutFontSize l > 0 then l else fontSize size l
+  -- Pin the body size (the backend default if unset, or scaled if a relative
+  -- fontSizeScale was active) so nested headings and labels share it.
+  let resolveBase l =
+        let sz = layoutFontSize l
+         in if sz > 0
+              then l
+              else if sz < 0
+                then fontSize (max 1 (size * negate sz)) l
+                else fontSize size l
+      text = mdText cfg . resolveBase
   base <- text <$> askDefaultLayout
   fm <- resolveFontUi (layoutFontSize base) (layoutFontWeight base) (layoutFontStyle base) (layoutFontVariant base)
   let env =

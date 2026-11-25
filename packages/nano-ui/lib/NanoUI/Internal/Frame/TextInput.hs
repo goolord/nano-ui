@@ -54,7 +54,7 @@ import NanoUI.Internal.Monad (ifM, unlessM, (<&&>))
 import NanoUI.Internal.Store (fieldSelection, fieldSelectionWrite, fieldText, findSpec, insertSlot, insertSpec, setFieldSelection)
 import NanoUI.Internal.Store.Slots (slotTextInputScroll)
 import NanoUI.Internal.Style (FontStyle (..), FontWeight (..), themeSelection, toneColor)
-import NanoUI.Internal.Types (Color (..), DamageBounds (..), Rect (..), V2 (..), clamp, rectContains, rectIntersect, rectOverlapArea, rectW)
+import NanoUI.Internal.Types (Color (..), DamageBounds (..), Rect (..), V2 (..), clamp, rectContains, rectIntersect, rectW)
 import NanoUI.Internal.WidgetText
 import NanoUI.Widgets.TextBuffer qualified as TB
 
@@ -114,18 +114,15 @@ clearSearchInput ctx wid = do
   modifyStore ctx $
     insertSlot fieldText key "" . setFieldSelection key 0 0
 
--- | Clip a field's spans: its text to @fieldClip@ ('nodeTextFieldGeom'), and
--- a caption to its first line.
+-- | Clip a field's spans to @fieldClip@ ('nodeTextFieldGeom') within
+-- @parentClip@.
 tagTextInputClippedSpans ::
-  Rect -> Rect -> Float -> Float -> Float -> FontMetrics -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
-tagTextInputClippedSpans parentClip fieldClip x y w fm spans =
-  let labelClip = Rect x y w (fmLineHeight fm)
-      tagOne (rect, txt, fg, bg) =
-        let clipRect = padTextClipRect rect
-            isField = rectOverlapArea fieldClip clipRect > rectOverlapArea labelClip clipRect
-            area = if isField then fieldClip else labelClip
-         in (rect, txt, fg, bg,) <$> (rectIntersect area clipRect >>= rectIntersect parentClip)
-   in mapMaybe tagOne spans
+  Rect -> Rect -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
+tagTextInputClippedSpans parentClip fieldClip = mapMaybe tagOne
+  where
+    tagOne (rect, txt, fg, bg) =
+      let clipRect = padTextClipRect rect
+       in (rect, txt, fg, bg,) <$> (rectIntersect fieldClip clipRect >>= rectIntersect parentClip)
 
 -- | A field's or text area's text with its pen at @(x, y)@, in the weight,
 -- slant and decoration packed in its style @si@, as a label draws them. The

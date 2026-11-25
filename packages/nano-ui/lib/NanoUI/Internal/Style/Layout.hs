@@ -67,6 +67,7 @@ module NanoUI.Internal.Style.Layout
   , fontTone
   , fontSize
   , fontSizeScale
+  , resolveFontSize
   , fontColor
   , fontWeight
   , fontBold
@@ -236,7 +237,9 @@ data TextDecoration
 type LayoutModifier = Layout -> Layout
 
 -- | Layout and text options for a node. Lengths use logical pixels. Font size
--- 0 selects the backend default; 'Nothing' for font colour uses the theme.
+-- 0 selects the backend default, positive values set an explicit logical size,
+-- and negative values encode a scale factor relative to the backend default
+-- ('fontSizeScale'); 'Nothing' for font colour uses the theme.
 data Layout = Layout
   { layoutDirection :: !Direction
   , layoutWidth :: !Sizing
@@ -499,9 +502,31 @@ fontTone t l = l {layoutFontTone = Just t}
 fontSize :: Float -> Layout -> Layout
 fontSize sz l = l {layoutFontSize = max 0 sz}
 
--- | Multiply an explicit font size, or 16 when none is set, by a scale factor.
+-- | Scale the node's font size by @s@. When an explicit size is already set,
+-- multiplies that size; otherwise stores a scale factor resolved against the
+-- active base font size ('NanoUI.uiFontSize'). Non-positive factors reset to
+-- the default size.
 fontSizeScale :: Float -> Layout -> Layout
-fontSizeScale s l = fontSize ((if layoutFontSize l > 0 then layoutFontSize l else 16) * s) l
+fontSizeScale s l
+  | s <= 0 = l {layoutFontSize = 0}
+  | cur /= 0 = l {layoutFontSize = cur * s}
+  | otherwise = l {layoutFontSize = negate s}
+  where
+    cur = layoutFontSize l
+
+-- | Resolve a stored 'layoutFontSize' against the host's base logical font
+-- size @baseSize@. Positive values are explicit sizes, negative values encode
+-- a scale factor ('fontSizeScale'), and zero requests the default (returned as
+-- @0@). A scale factor of 1 also returns @0@ so callers stay on the default
+-- font fast path.
+{-# INLINE resolveFontSize #-}
+resolveFontSize :: Float -> Float -> Float
+resolveFontSize baseSize stored
+  | stored > 0 = stored
+  | stored < 0 =
+      let !s = negate stored
+       in if abs (s - 1) <= 1.0e-5 then 0 else max 1 (baseSize * s)
+  | otherwise = 0
 
 -- | Override the theme's text colour for this node.
 {-# INLINE fontColor #-}

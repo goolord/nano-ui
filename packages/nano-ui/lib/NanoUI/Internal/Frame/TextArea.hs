@@ -259,7 +259,7 @@ textAreaContentMetrics ctx idx = do
   store <- getStore ctx
   gen <- readIORef (ctxMetricGen ctx)
   let key = intKey wid
-      face = textNodeFontKey size si
+      face = textNodeFontKey (resolveFontSize (ctxFontSize ctx) size) si
       buf = TA.textAreaBuffer store key
       lns = TB.bufferLines buf
       (seenHead, seenTail) = TB.changedLines buf

@@ -137,7 +137,8 @@ richTextWithMode' selectable f pieces = do
   inp <- askInput
   base <- f <$> askDefaultLayout
   theme <- uiTheme
-  let styled = [(piece, pieceFont l, pieceColor theme l target, layoutTextBreak l) | piece@(Inline _ style target _ _) <- pieces, let l = style base]
+  let baseSize = ctxFontSize ctx
+      styled = [(piece, pieceFont baseSize l, pieceColor theme l target, layoutTextBreak l) | piece@(Inline _ style target _ _) <- pieces, let l = style base]
       plainInput = T.concat [txt | (Inline txt _ _ _ _, _, _, _) <- styled]
       align = layoutAlignX base
   Paragraphs cacheRef <- liftIO $ Host.hostOrInit (ctxParagraphs ctx) (Paragraphs <$> newIORef (ParagraphCache 0 paragraphBound IM.empty))
@@ -499,12 +500,13 @@ measureAt ref extentAt width = unsafeDupablePerformIO $ do
 paragraphBound :: Int
 paragraphBound = 4096
 
--- | Extract 'TextFont' from a 'Layout'. Colour-only variants resolve to the
--- regular face in 'resolveTextFont'.
-pieceFont :: Layout -> TextFont
-pieceFont l =
+-- | Extract 'TextFont' from a 'Layout', resolving relative 'fontSizeScale'
+-- factors against @baseSize@. Colour-only variants resolve to the regular face
+-- in 'resolveTextFont'.
+pieceFont :: Float -> Layout -> TextFont
+pieceFont baseSize l =
   TextFont
-    (layoutFontSize l)
+    (resolveFontSize baseSize (layoutFontSize l))
     (layoutFontVariant l)
     (layoutFontWeight l)
     (layoutFontStyle l)

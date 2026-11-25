@@ -280,6 +280,7 @@ contextMeasurers ctx =
   Measurers
     { msFm = ctxFontMetrics ctx
     , msMonoFm = ctxMonoFontMetrics ctx
+    , msFontSize = ctxFontSize ctx
     , msMeasure = ctxMeasureText ctx
     , msResolveFont = \sz weight style var -> do
         (fm, _) <- ctxResolveFont ctx sz weight style var

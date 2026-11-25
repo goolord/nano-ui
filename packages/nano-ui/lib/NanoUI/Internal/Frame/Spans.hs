@@ -30,7 +30,7 @@ import NanoUI.Internal.Frame.TextInput (fieldEditLine, fieldTextColor, nodeTextC
 import NanoUI.Internal.Input (Input)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (findAncestorMaxW, textWrapCap)
-import NanoUI.Internal.Style (AlignX (..), Style (..), Theme (..), textToneColor)
+import NanoUI.Internal.Style (AlignX (..), Style (..), Theme (..), resolveFontSize, textToneColor)
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, lerpColor, onGrid, rectIntersect, isBounded)
 import NanoUI.Internal.Widgets.ColorPicker (ColorPickerPart (..), colorPickerPartOf, colorPickerPartRect, colorPickerPreviewGeom)
 import NanoUI.Internal.WidgetText
@@ -120,7 +120,7 @@ collectClippedSpans ctx@Context {ctxFontMetrics = fm} idx clip arena = do
                 pure $
                   if hasFlag textInputFlagNumeric si
                     then maybe [] (`tagClippedSpans` spans) (rectIntersect clipHere fieldClip)
-                    else tagTextInputClippedSpans clipHere fieldClip x y w fm spans
+                    else tagTextInputClippedSpans clipHere fieldClip spans
           -- The document lives in the text area's buffer: its rows in view,
           -- clipped as paint clips them, short of the scrollbars.
           NodeTextArea -> do
@@ -263,7 +263,8 @@ nodeTextLines ctx raw si fontSize wTag maxW effMaxW isRowChild ix w
       tw <- measureW raw
       if T.any (== '\n') raw || (not isRowChild && isBounded wrapCap && wrapCap + 0.5 < tw)
         then do
-          wrap <- cachedWrapText ctx (textNodeFontKey fontSize si) measureW raw (max 0 (wrapCap - 2 * ix))
+          let !resolvedSize = resolveFontSize (ctxFontSize ctx) fontSize
+          wrap <- cachedWrapText ctx (textNodeFontKey resolvedSize si) measureW raw (max 0 (wrapCap - 2 * ix))
           prepared <- forM (wrLines wrap) $ \line -> (,) line <$> prepareFontMetrics fm line
           pure (fm, SpanWrapped prepared)
         else do

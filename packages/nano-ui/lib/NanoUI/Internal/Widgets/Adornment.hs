@@ -143,7 +143,7 @@ addAdornments wid lay colorOf (Adornments ls ts) = do
   let na = ctxNodeArena ctx
   inp <- askInput
   color <- colorOf <$> uiTheme
-  let font = fontSize (layoutFontSize lay)
+  let inheritFont l = l {layoutFontSize = layoutFontSize lay}
       add = \case
         AdornIcon size doc -> do
           s <- case size of
@@ -152,11 +152,11 @@ addAdornments wid lay colorOf (Adornments ls ts) = do
               fm <- resolveFontUi (layoutFontSize lay) WeightNormal FontStyleNormal FontRegular
               pure (fromIntegral (round (fmLineHeight fm * 0.9) :: Int))
           Nothing <$ svgIconWith' (fixedWH s s . fontColor color) doc
-        AdornText txt -> Nothing <$ labelEx (tight . font . fontColor color $ defaultLayout) txt
+        AdornText txt -> Nothing <$ labelEx (tight . inheritFont . fontColor color $ defaultLayout) txt
         AdornView v -> Nothing <$ adornmentRow lay color v
         AdornControl v -> do
           from <- liftIO (arenaCount na)
-          withDefaultLayout (font . fontColor color) v
+          withDefaultLayout (inheritFont . fontColor color) v
           to <- liftIO (arenaCount na)
           pure (Just (from, to))
       side align pieces
@@ -171,7 +171,7 @@ addAdornments wid lay colorOf (Adornments ls ts) = do
 -- widget's font and colour @color@.
 adornmentRow :: Layout -> Color -> NanoUI a -> NanoUI a
 adornmentRow lay color =
-  inertContainer (adornmentRowLayout lay) . withDefaultLayout (fontSize (layoutFontSize lay) . fontColor color)
+  inertContainer (adornmentRowLayout lay) . withDefaultLayout ((\l -> l {layoutFontSize = layoutFontSize lay}) . fontColor color)
 
 adornmentRowLayout :: Layout -> Layout
 adornmentRowLayout lay = tight . gap (layoutGap lay) . alignMid . itemsCenter $ defaultLayout {layoutDirection = Row}

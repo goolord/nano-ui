@@ -97,7 +97,7 @@ import NanoUI.Internal.Draw.Shapes
 import NanoUI.Internal.Draw.Types
 import NanoUI.Internal.Font
 import NanoUI.Internal.SIMD (pokeQuadCornersSIMD, pokeQuadSIMD)
-import NanoUI.Internal.Style (FontStyle (..), FontWeight (..), TextDecoration (..), Theme (..), styleBg)
+import NanoUI.Internal.Style (FontStyle (..), FontWeight (..), TextDecoration (..), Theme (..), resolveFontSize, styleBg)
 import NanoUI.Internal.Types (Color (..), Rect (..), onGrid, rectInflate, rectIntersect, isUnbounded)
 
 -- | The line box, in logical pixels, that a 'DrawText' of the text anchored
@@ -418,7 +418,10 @@ emitDrawOps da fm size resolve imageUv ops = go 0 []
     emitOne (DrawTextAligned x y ax ay k font t c) = do
       let font'
             | k == 1 = font
-            | otherwise = font {textFontSize = k * (if textFontSize font > 0 then textFontSize font else size)}
+            | otherwise =
+                let resolved = resolveFontSize size (textFontSize font)
+                    baseSz = if resolved > 0 then resolved else size
+                 in font {textFontSize = k * baseSz}
       (styledFm, native) <- resolve font'
       unlessOffClip styledFm (textBoxTop styledFm y ay) $ do
         prepared <- prepareFontMetrics styledFm t

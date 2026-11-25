@@ -19,7 +19,7 @@ import NanoUI.Internal.Font (FontMetrics, isDefaultNodeFont, measureTextIO, tabu
 import NanoUI.Internal.Layout.ScrollGeometry
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (scrollBarSlotOf)
-import NanoUI.Internal.Style (FontVariant (..), TextDecoration (..), variantFace)
+import NanoUI.Internal.Style (FontVariant (..), TextDecoration (..), resolveFontSize, variantFace)
 import NanoUI.Internal.Types (Rect (..))
 import NanoUI.Internal.WidgetText (containerFlagClip, hasFlag, panelSurface, textNodeFontStyle, textNodeFontTabular, textNodeFontVariant, textNodeFontWeight)
 
@@ -35,7 +35,10 @@ import NanoUI.Internal.WidgetText (containerFlagClip, hasFlag, panelSurface, tex
 -- field's whole style, a button's or select's label font.
 {-# INLINE resolveFontFor #-}
 resolveFontFor :: Context -> NodeType -> Float -> Int -> IO (FontMetrics, Bool, Text -> IO (Float, Float))
-resolveFontFor ctx nt size packed = do
+resolveFontFor ctx nt rawSize packed = do
+  let !size = resolveFontSize (ctxFontSize ctx) rawSize
+      font@(TextFont _ variant weight style _ tabular) =
+        packedTextFont size (nodeFontBits nt packed)
   (fm, native) <- resolveTextFont ctx font
   let measure
         | tabular = measureTextIO fm
@@ -43,9 +46,6 @@ resolveFontFor ctx nt size packed = do
         | variant == FontMono = measureTextIO fm
         | otherwise = ctxMeasureText ctx
   pure (fm, native, measure)
-  where
-    font@(TextFont _ variant weight style _ tabular) =
-      packedTextFont size (nodeFontBits nt packed)
 
 -- | Whether the host draws the weight and slant of the font a text node of
 -- @size@ and packed style @si@ is set in ('resolveFontFor'), for paint, which
@@ -65,7 +65,8 @@ packedTextFont size si =
 -- metrics; everything else defers to the host resolver.
 {-# INLINE resolveTextFont #-}
 resolveTextFont :: Context -> TextFont -> IO (FontMetrics, Bool)
-resolveTextFont ctx (TextFont size variant0 weight style _ tabular) = do
+resolveTextFont ctx (TextFont rawSize variant0 weight style _ tabular) = do
+  let !size = resolveFontSize (ctxFontSize ctx) rawSize
   (fm0, native) <-
     if isDefaultNodeFont size weight style variant
       then pure (if variant == FontMono then ctxMonoFontMetrics ctx else ctxFontMetrics ctx, False)

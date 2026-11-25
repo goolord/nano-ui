@@ -1,6 +1,7 @@
 -- | Shared UI layout constants and control geometry derived from 'FontMetrics'.
 module NanoUI.Internal.Metrics
   ( tableCellInset
+  , controlPadY
   , widgetContentInset
   , widgetPadding
   , buttonPadding
@@ -34,12 +35,18 @@ import NanoUI.Internal.Types (Rect (..), clamp)
 tableCellInset :: Float
 tableCellInset = 6
 
--- | Per-side horizontal/vertical content inset: 1.25 space advances on each axis.
+-- | Shared total vertical padding for single-line controls (buttons, selects,
+-- and text inputs), derived from line height so sibling controls match height
+-- across proportional and monospace fonts.
+{-# INLINE controlPadY #-}
+controlPadY :: FontMetrics -> Float
+controlPadY fm = max 6 (fromIntegral (round (fmLineHeight fm * 0.50) :: Int))
+
+-- | Per-side horizontal and vertical content inset.
 {-# INLINE widgetContentInset #-}
 widgetContentInset :: FontMetrics -> (Float, Float)
 widgetContentInset fm =
-  let pad = fmAdvance fm ' ' * 1.25
-   in (pad, pad)
+  (fmAdvance fm ' ' * 1.25, controlPadY fm / 2)
 
 -- | Total horizontal and vertical content padding, twice 'widgetContentInset'.
 {-# INLINE widgetPadding #-}
@@ -51,12 +58,12 @@ widgetPadding fm =
 -- | Total horizontal/vertical padding inside a button label box.
 {-# INLINE buttonPadding #-}
 buttonPadding :: FontMetrics -> (Float, Float)
-buttonPadding fm = (fmAdvance fm ' ' * 2.0, fmLineHeight fm * 0.30)
+buttonPadding fm = (fmAdvance fm ' ' * 2.0, controlPadY fm)
 
 -- | Total horizontal/vertical padding inside a select button.
 {-# INLINE selectPadding #-}
 selectPadding :: FontMetrics -> (Float, Float)
-selectPadding fm = (fmAdvance fm ' ' * 2.0, fmLineHeight fm * 0.50)
+selectPadding fm = (fmAdvance fm ' ' * 2.0, controlPadY fm)
 
 -- | Blank border between the menu panel edge and its rows.
 menuOuterPad :: Float

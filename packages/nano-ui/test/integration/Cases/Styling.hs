@@ -7,7 +7,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Adornment qualified as A
 import NanoUI.Internal.Context (Context (..), RecordedOp (..), drawRecordedOps, setDrawRecordOps)
-import NanoUI.Internal.Layout.Arena (getStyleIdx, lookupNodeByWidgetId, nodeFontBits)
+import NanoUI.Internal.Layout.Arena (arenaCount, getNodeRect, getNodeType, getStyleIdx, lookupNodeByWidgetId, nodeFontBits)
 import NanoUI.Testing.Sim
 
 tests :: [Spec]
@@ -21,6 +21,8 @@ tests =
   , spec "background-moves-shades" runBackgroundMovesShadesTest
   , spec "label-font-flags" runLabelFontFlagsTest
   , spec "checkbox-box-center" runCheckboxBoxCenterTest
+  , pixelSpec "font-size-scale-relative" runFontSizeScaleRelativeTest
+  , pixelSpec "uniform-control-heights" runUniformControlHeightsTest
   ]
 
 inp :: Input
@@ -201,3 +203,63 @@ runCheckboxBoxCenterTest base failed = do
       -- 12px font clamps box to 18px; 24px font clamps box to 22px.
       assertGt failed (rectW b2) (rectW b1 + 2)
     other -> assertEq failed (1 :: Int, 1 :: Int) (length (fst other), length (snd other))
+
+-- | 'fontSizeScale' scales relative to the active base font size (not a
+-- hardcoded 16), composes multiplicatively, respects an explicit 'fontSize',
+-- and scales unsized 'A.icon' adornments on buttons.
+runFontSizeScaleRelativeTest :: Context -> IORef Int -> IO ()
+runFontSizeScaleRelativeTest base failed = do
+  doc <- either fail pure (parseSvg "<svg viewBox='0 0 24 24'><rect width='24' height='24'/></svg>")
+  let ctx = withFontMetrics (withFontSize base 12) (monospaceMetrics 12)
+      btnPlain = defaultButtonConfig {bcAdornments = A.leading (A.icon doc)}
+      btnScaled = defaultButtonConfig {bcLayout = fontSizeScale 1.5 defaultLayout, bcAdornments = A.leading (A.icon doc)}
+      ui = columnWith (tight . gap 4) $ do
+        labelWith (fontSizeScale 1.5) "Scaled"
+        labelWith (fontSizeScale 0.5 . fontSizeScale 1.5) "Composed"
+        labelWith (fontSizeScale 1.5 . fontSize 20) "Explicit"
+        void (buttonConfigured' btnPlain "PlainBtn")
+        void (buttonConfigured' btnScaled "ScaledBtn")
+  _ <- warmup2 ctx (withInputOff 500 300) ui
+  ss <- collectTextSpans ctx
+  assertJust failed (spanRect "Scaled" ss) $ \r -> assertEq failed 18 (rectH r)
+  assertJust failed (spanRect "Composed" ss) $ \r -> assertEq failed 9 (rectH r)
+  assertJust failed (spanRect "Explicit" ss) $ \r -> assertEq failed 30 (rectH r)
+  -- The two NodeImage nodes are the leading icons of PlainBtn (12 * 0.9 = 11)
+  -- and ScaledBtn (18 * 0.9 = 16).
+  let na = ctxNodeArena ctx
+  n <- arenaCount na
+  iconWs <-
+    concat <$> forM [0 .. n - 1] (\i -> getNodeType na i >>= \nt -> if nt == NodeImage then (: []) . rectW <$> getNodeRect na i else pure [])
+  assertEq failed [11, 16] iconWs
+
+-- | Single-line controls (button, select, textInput, searchInput, numericInput,
+-- and comboBox) share one intrinsic height across proportional and monospace fonts.
+runUniformControlHeightsTest :: Context -> IORef Int -> IO ()
+runUniformControlHeightsTest ctx failed = do
+  sel <- newVar (0 :: Int)
+  txt <- newVar ("abc" :: Text)
+  qry <- newVar ("" :: Text)
+  num <- newVar (42 :: Double)
+  cmb <- newVar ("One" :: Text)
+  let rowProp = rowWith (tight . gap 8) $ do
+        rBtn <- button' "Save"
+        rSel <- select' ["One", "Two"] sel
+        rTxt <- textInput' txt
+        rSrch <- searchInput' "Find" qry
+        rNum <- numericInputConfigured' defaultNumericInputConfig {nicLayout = fixedW 90 defaultLayout} num
+        rCmb <- comboBox' "Pick" ["One", "Two"] cmb
+        pure (map (rectH . respRect) [rBtn, rSel, rTxt, rSrch, rNum, rCmb])
+      rowMono = rowWith (tight . gap 8) $ do
+        rBtn <- buttonWith' fontMono "Save"
+        rSel <- selectWith' fontMono ["One", "Two"] sel
+        rTxt <- textInputConfigured' defaultTextInputConfig {ticLayout = fontMono (ticLayout defaultTextInputConfig)} txt
+        rSrch <- searchInputConfigured' defaultSearchInputConfig {sicLayout = fontMono (sicLayout defaultSearchInputConfig)} qry
+        rNum <- numericInputConfigured' defaultNumericInputConfig {nicLayout = fontMono (fixedW 90 defaultLayout)} num
+        pure (map (rectH . respRect) [rBtn, rSel, rTxt, rSrch, rNum])
+  (hsProp, hsMono) <- warmup2 ctx (withInputOff 900 300) $ column ((,) <$> rowProp <*> rowMono)
+  case hsProp of
+    h0 : rest -> assert failed (h0 > 0 && all (\h -> abs (h - h0) < 0.5) rest)
+    [] -> assert failed False
+  case hsMono of
+    h0 : rest -> assert failed (h0 > 0 && all (\h -> abs (h - h0) < 0.5) rest)
+    [] -> assert failed False

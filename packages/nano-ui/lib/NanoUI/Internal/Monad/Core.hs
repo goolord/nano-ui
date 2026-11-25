@@ -324,9 +324,9 @@ withDefaultLayout f (NanoUI m) = NanoUI (localStaticRep (\r -> r {repLayout = f 
 uiFontMetrics :: NanoUI FontMetrics
 uiFontMetrics = fmap ctxFontMetrics askContext
 
--- | The backend's default font size, used when a layout sets none. To scale
--- text relative to it, pass a multiple to 'NanoUI.fontSize';
--- 'NanoUI.fontSizeScale' alone scales from 16.
+-- | The backend's default font size, used when a layout sets none.
+-- 'NanoUI.fontSizeScale' scales relative to this size unless an explicit
+-- 'NanoUI.fontSize' was already set.
 {-# INLINE uiFontSize #-}
 uiFontSize :: NanoUI Float
 uiFontSize = fmap ctxFontSize askContext

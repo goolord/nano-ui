@@ -53,7 +53,7 @@ import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Arena.Types (newFlexScratch)
 import NanoUI.Internal.Layout.Solve.Flex
-import NanoUI.Internal.Style (AlignY (..), Flow (..), FontStyle (..), FontVariant (..), FontWeight (..), ItemsAlign (..), Padding (..), hasExplicitMin)
+import NanoUI.Internal.Style (AlignY (..), Flow (..), FontStyle (..), FontVariant (..), FontWeight (..), ItemsAlign (..), Padding (..), hasExplicitMin, resolveFontSize)
 import NanoUI.Internal.Types (Rect (..), clamp, foldUpTo, newZeroedPrimArray, isBounded, isUnbounded, noLimit)
 import NanoUI.Internal.WidgetText
 
@@ -98,6 +98,7 @@ data PositionLog = PositionLog
 data Measurers = Measurers
   { msFm :: !FontMetrics
   , msMonoFm :: !FontMetrics
+  , msFontSize :: !Float
   , msMeasure :: !(Text -> IO (Float, Float))
   , msResolveFont :: !FontResolver
   , msLookupMeasure :: !(WidgetId -> IO (Maybe CustomMeasureFn))
@@ -132,8 +133,9 @@ data TextMeasurer = TextMeasurer
 nodeMeasurer :: SolveEnv -> NodeIdx -> NodeType -> Int -> IO TextMeasurer
 nodeMeasurer SolveEnv {seArena = na, seMs = ms} idx nt nodeSi = do
   let si = nodeFontBits nt nodeSi
-  size <- getNodeFontSize na idx
-  let variant = textNodeFontVariant si
+  rawSize <- getNodeFontSize na idx
+  let !size = resolveFontSize (msFontSize ms) rawSize
+      variant = textNodeFontVariant si
       weight = textNodeFontWeight si
       style = textNodeFontStyle si
       tabular = textNodeFontTabular si

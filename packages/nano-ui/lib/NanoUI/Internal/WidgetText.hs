@@ -85,7 +85,7 @@ import Data.Text (Text)
 import Data.Word (Word8)
 import GHC.Float (castFloatToWord32)
 import Numeric (showHex)
-import NanoUI.Internal.Font (FontMetrics (..), fmLineHeight, tableCellInset, widgetContentInset)
+import NanoUI.Internal.Font (FontMetrics (..), controlPadY, fmLineHeight, tableCellInset, widgetContentInset)
 import NanoUI.Internal.Layout.Arena (labelFontShift)
 import NanoUI.Internal.StyleBits (BitField (..))
 import qualified NanoUI.Internal.StyleBits as SB
@@ -115,11 +115,8 @@ treeDecodeStripe s = if SB.testField SB.treeOdd s then 2 else 1
 textInputMinWidth :: Float
 textInputMinWidth = 160
 
-textInputFieldPadY :: FontMetrics -> Float
-textInputFieldPadY fm = max 3 (fmAdvance fm ' ' * 1.25)
-
 textInputFieldHeight :: FontMetrics -> Float
-textInputFieldHeight fm = fmLineHeight fm + 2 * textInputFieldPadY fm
+textInputFieldHeight fm = fmLineHeight fm + controlPadY fm
 
 -- | Search-field icon geometry. Returns
 -- (icon diameter, outer pad, left chrome lead, right chrome tail). The lead/tail

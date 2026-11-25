@@ -638,6 +638,7 @@ emitText p x y ax ay scale mFont txt col
         baseSz = textFontSize font
         sz
           | baseSz > 0 = baseSz * scale
+          | baseSz < 0 = 16 * negate baseSz * scale
           | scale /= 1 = 16 * scale
           | otherwise = 0
         sizeAttr = if sz > 0 then numAttr p "font-size" sz else mempty

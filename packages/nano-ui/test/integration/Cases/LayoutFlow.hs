@@ -192,14 +192,14 @@ runTextSizesTest ctx failed = do
         (fixed, _) <- withValue "" (field (fixedWH 100 28))
         pure [a, b, c, d, fixed]
   map respRect <$> warmup2 ctx input0 limits
-    >>= assertEq failed [Rect 0 0 160 28, Rect 168 0 48 16, Rect 224 0 160 28, Rect 392 0 60 16, Rect 460 0 100 28]
+    >>= assertEq failed [Rect 0 0 160 28, Rect 168 0 48 18, Rect 224 0 160 28, Rect 392 0 60 18, Rect 460 0 100 28]
   where
     fixedLabel w = labelWith (\l -> l {layoutWidth = Fixed w})
     cases =
       [ ( columnWith tight $ do
             rowWith tight (labelWith (fixedWH 100 20 . alignEnd) "Name" >> void (button "Go"))
             fixedLabel 100 "a fixed label wide enough to wrap"
-        , 3, ["Name", "Go"], [Rect 0 0 156 20, Rect 0 0 100 20, Rect 108 0 48 16, Rect 0 28 100 60] )
+        , 3, ["Name", "Go"], [Rect 0 0 156 20, Rect 0 0 100 20, Rect 108 0 48 18, Rect 0 28 100 60] )
       , ( columnWith tight . columnWith tight $ do
             labelWith (\l -> (minW 200 l) {layoutWidth = Fixed 100}) "a fixed label wide enough to wrap twice over"
             label "after"
