@@ -1343,8 +1343,9 @@ percentOr (AxisSizing tag val lo hi) avail size =
 --   line is centered in the box, and wrapped lines start at the top. Paint
 --   wraps at explicit newlines, and outside a row where the line overflows
 --   'textWrapCap'.
--- * a widget with a label (a button, select, checkbox): the label's, which
---   paint centers in the widget.
+-- * a widget with a single-line label or text (a button, select, checkbox,
+--   or single-line text input): the text's baseline, which paint centers in
+--   the widget.
 -- * a container: the baseline its baseline-aligned children share if it is a
 --   row that has some, and otherwise its first child's, offset by where
 --   that child's alignment places it in a row or among layers.
@@ -1401,6 +1402,7 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a} ci h = do
       | hasFlag buttonFlagClose si -> pure h
       | otherwise -> label
     NodeSelect -> label
+    NodeTextInput -> label
     NodeContainer -> container
     NodeScrollContainer -> container
     NodeModal -> container
@@ -1410,7 +1412,6 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a} ci h = do
     NodeSpacer -> pure h
     NodeSeparator -> pure h
     NodeSlider -> pure h
-    NodeTextInput -> pure h
     NodeTextArea -> pure h
     NodeImage -> pure h
     NodeBox -> pure h

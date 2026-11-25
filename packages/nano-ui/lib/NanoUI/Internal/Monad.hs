@@ -80,6 +80,9 @@ module NanoUI.Internal.Monad
   , scrollToUi
   , scrollByUi
   , scrollPagesUi
+  , scrollToStartUi
+  , scrollToEndUi
+  , scrollIntoViewUi
   , scrollRectIntoViewUi
   , setScrollStepUi
   , damageWidgetNow

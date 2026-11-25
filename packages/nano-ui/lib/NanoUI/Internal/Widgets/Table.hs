@@ -527,8 +527,9 @@ primAt xs i fallback = if i >= 0 && i < sizeofPrimArray xs then indexPrimArray x
 smallAt :: SmallArray a -> Int -> a -> a
 smallAt xs i fallback = if i >= 0 && i < sizeofSmallArray xs then indexSmallArray xs i else fallback
 
--- Minimum column width, even when dragged: the declared fixed width, else the
--- content minimum so cells never wrap.
+-- Initial column width before any user drag: the declared fixed width, else the
+-- content minimum so undragged cells do not wrap. Once dragged, a column can
+-- shrink down to 'minColW'.
 colFloor :: SmallArray ColSize -> PrimArray Float -> Int -> Float
 colFloor sizes contentWs i = case smallAt sizes i ColContent of
   ColFixed f -> max minColW f
@@ -557,17 +558,16 @@ numCellLayout =
     , layoutFontVariant = FontMono
     }
 
--- | Column @i@'s box: its stored width (never under its floor) once it has
+-- | Column @i@'s box: its stored width (never under 'minColW') once it has
 -- one, else a share of the spare width when the columns fill the table, else
--- its floor. Columns stretch to the row height so every cell's background
--- and borders span the full row even when one cell wraps.
+-- its initial floor. Columns stretch to the row height so every cell's
+-- background and borders span the full row even when one cell wraps.
 --
 -- A stretch column is the table's slack: its minimum is an explicit zero,
 -- so it compresses (under a vertical scrollbar's lane, say, which narrows
 -- the viewport by the lane's width) rather than reporting its content as a
 -- minimum that surfaces a horizontal bar under a table that fits the
--- scroller's full width. Its drag floor ('colFloor') still binds once the
--- column has been resized to a stored width.
+-- scroller's full width.
 --
 -- Under the squeeze ('tableSqueeze') the box instead grows by its pinned
 -- width (its dragged width once it has one, else its floor) up to that
@@ -580,7 +580,7 @@ numCellLayout =
 colBoxLayout :: Bool -> Bool -> Bool -> SmallArray ColSize -> PrimArray Float -> PrimArray Float -> Int -> Layout
 colBoxLayout squeeze fillInner hasStretch sizes contentWs stored i
   | squeeze = box {layoutWidth = Grow pinned, layoutMinW = minColW, layoutMaxW = if grows then noLimit else pinned}
-  | saved > 0 = fixed (max floorW saved)
+  | saved > 0 = fixed (max minColW saved)
   | grows, ColStretch <- size = minW 0 box {layoutWidth = Grow 1}
   | grows = box {layoutWidth = Grow 1}
   | otherwise = fixed floorW
@@ -591,7 +591,7 @@ colBoxLayout squeeze fillInner hasStretch sizes contentWs stored i
     -- Whether the column takes the spare width once it has no stored width.
     grows = saved <= 0 && fillInner && (size == ColStretch || size == ColContent && not hasStretch)
     pinned
-      | saved > 0 = max floorW saved
+      | saved > 0 = max minColW saved
       | ColStretch <- size = max minColW (min 120 (primAt contentWs i minColW))
       | otherwise = floorW
     box = (fillH flatLayout) {layoutMinW = floorW}
@@ -707,11 +707,11 @@ writeTableState stateKey ts =
 
 -- | The column widths this frame lays out: @ts@'s, with the column a held
 -- resize drags set to its start width plus the pointer's travel, never under
--- its floor ('colFloor').
-resizedWidths :: SmallArray ColSize -> PrimArray Float -> Input -> TableState -> [Float]
-resizedWidths sizes contentWs inp ts
+-- 'minColW'.
+resizedWidths :: Input -> TableState -> [Float]
+resizedWidths inp ts
   | col >= 0 && heldIn MouseLeft inp =
-      setAt col (max (colFloor sizes contentWs col) (tsResizeW ts + v2X (inputMousePos inp) - tsResizeX ts)) (tsWidths ts)
+      setAt col (max minColW (tsResizeW ts + v2X (inputMousePos inp) - tsResizeX ts)) (tsWidths ts)
   | otherwise = tsWidths ts
   where
     col = tsResizeCol ts
@@ -943,6 +943,12 @@ data TableInput = TableInput
   -- ^ The shown columns in display order, as laid out.
   , tiWidths :: ![Float]
   -- ^ The column widths laid out ('resizedWidths').
+  , tiSizes :: !(SmallArray ColSize)
+  -- ^ Declared column sizing policies.
+  , tiContentWs :: !(PrimArray Float)
+  -- ^ Measured content width of each source column.
+  , tiFill :: !Bool
+  -- ^ Whether columns fill the table width.
   , tiHeaders :: ![(Int, Response)]
   -- ^ Each shown column's header response.
   , tiShowAll :: !(Maybe Response)
@@ -963,15 +969,16 @@ data TableStep = TableStep
   -- ^ The sort, order, hidden columns or widths changed.
   }
 
--- | One frame of a table's headers: a resize starting, running or ending, a
--- column reordered, hidden or shown again, and a header click sorting.
+-- | One frame of a table's headers: a resize starting, running, auto-fitting
+-- on double-click, or ending, a column reordered, hidden or shown again, and
+-- a header click sorting.
 resolveTableInput :: TableInput -> TableState -> TableStep
 resolveTableInput ti ts0 =
   TableStep
     { tableStepState =
         TableState
           { tsOrder = nextOrder
-          , tsWidths = tiWidths ti
+          , tsWidths = nextWidths
           , tsHidden = nextHidden
           , tsResizeCol = nextDrag
           , tsResizeX = nextDragX
@@ -991,9 +998,23 @@ resolveTableInput ti ts0 =
     reorder = tiReorder ti
     edgeCol = fst <$> tiEdge ti
     isResize = tsResizeCol ts0 >= 0
+    doubleClick = pressedIn MouseLeft inp && inputMouseClicks inp >= 2
+    autoFit col =
+      let fitW = max minColW (primAt (tiContentWs ti) col minColW)
+          curSaved = fromMaybe 0 (listToMaybe (drop col (tiWidths ti)))
+          size = smallAt (tiSizes ti) col ColContent
+       in if curSaved > 0 && abs (curSaved - fitW) <= 1
+            then 0
+            else if size == ColContent && not (tiFill ti)
+              then 0
+              else fitW
+    nextWidths = case tiEdge ti of
+      Just (col, _) | doubleClick -> setAt col (autoFit col) (tiWidths ti)
+      _ -> tiWidths ti
     vis' = reorderOrder reorder
     mReorder = reorderDragging reorder
     (nextDrag, nextDragX, nextDragW)
+      | doubleClick, isJust (tiEdge ti) = (-1, 0, 0)
       | pressedIn MouseLeft inp, Just (col, w) <- tiEdge ti = (col, v2X (inputMousePos inp), w)
       | pressedIn MouseLeft inp || releasedIn MouseLeft inp || not (heldIn MouseLeft inp) || not isResize = (-1, 0, 0)
       | otherwise = (tsResizeCol ts0, tsResizeX ts0, tsResizeW ts0)
@@ -1011,7 +1032,7 @@ resolveTableInput ti ts0 =
         then Nothing
         else listToMaybe [i | (i, r) <- headerPairs, respClicked r, smallAt (tiSortable ti) i False]
     nextSort = maybe sort0 (nextSortCol sort0) sortClick
-    hasChanged = nextSort /= sort0 || nextOrder /= order0 || nextHidden /= hidden0 || tiWidths ti /= tsWidths ts0
+    hasChanged = nextSort /= sort0 || nextOrder /= order0 || nextHidden /= hidden0 || nextWidths /= tsWidths ts0
 
 -- | 'tableConfigured' on a plain sort.
 tableCore ::
@@ -1041,7 +1062,7 @@ tableCore cfg f key cols inputRows curSort =
     derived <- liftIO (tableDerived ctx stateKey cols inputRows sort0)
     let sizes = smallArrayFromList (tableColSizes cfg)
         contentWs = tdWidths derived
-        widths1 = resizedWidths sizes contentWs inp ts0
+        widths1 = resizedWidths inp ts0
         geom = tableGeometry cfg f (ctxFontMetrics ctx) n (sizeofSmallArray (tdEncoded derived)) sizes contentWs widths1 ts0
         vis = tgVisible geom
     -- Last frame's body rect, for the header's resize edges.
@@ -1088,7 +1109,7 @@ tableCore cfg f key cols inputRows curSort =
       -- No resize arrow over the edges while a column is held.
       when (reachable && isNothing (reorderDragging reorder) && not (null edgeZones)) . liftIO $
         -- Strict in the spine and the rects, so no thunk waits in the IORef.
-        modifyIORef' (ctxCursorZones ctx) (\zs -> foldl' (\acc (_, !r) -> (r, UiCursorEwResize) : acc) zs edgeZones)
+        modifyIORef' (ctxCursorZones ctx) (\zs -> foldl' (\acc (_, !r) -> (r, UiCursorColResize) : acc) zs edgeZones)
       let !(TableStep ts1 nextSort sortClicked hasChanged) =
             resolveTableInput
               TableInput
@@ -1097,6 +1118,9 @@ tableCore cfg f key cols inputRows curSort =
                 , tiSortable = tdSortable derived
                 , tiVisible = vis
                 , tiWidths = widths1
+                , tiSizes = sizes
+                , tiContentWs = contentWs
+                , tiFill = tgFill geom
                 , tiHeaders = headerPairs
                 , tiShowAll = showAllResp
                 , tiEdge = (\col -> (col, headerW col)) <$> edgeCol

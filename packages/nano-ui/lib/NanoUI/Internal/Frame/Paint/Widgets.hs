@@ -206,8 +206,13 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
         paintTabHeader da theme (buttonVisualStyle si) (value > 0.5) style (Rect x y w h)
       ButtonTable ->
         paintTableHeader da theme (value > 0.5) style x y w h
-      ButtonChoice ->
-        drawChoiceControl da fm style theme x y h value (buttonVisualStyle si == 0)
+      ButtonChoice -> do
+        fontSize <- getNodeFontSize (peNodeArena env) idx
+        choiceFm <-
+          if fontSize == 0
+            then pure fm
+            else (\(f, _, _) -> f) <$> resolveFontFor ctx NodeButton fontSize si
+        drawChoiceControl da choiceFm style theme x y h value (buttonVisualStyle si == 0)
       ButtonRow -> do
         let (depth, hasKids, expanded) = treeDecodeStyle si
         when hasKids $
@@ -418,14 +423,14 @@ drawSearchMagnifier da (Rect x y w h) col = do
   pushRoundedStroke da (Rect (cx - r0) (cy - r0) (2 * r0) (2 * r0)) r0 t col
   pushLine da (cx + startOff) (cy + startOff) (cx + endOff) (cy + endOff) (t * 0.8) col
 
--- | The box of a checkbox (@isCheckbox@) or radio option at @x@, centred in
--- a slot at most 4 pixels taller than the box within @y h@. A checkbox draws
+-- | The box of a checkbox (@isCheckbox@) or radio option at @x@, centred
+-- vertically within @y h@ to match its single-line label. A checkbox draws
 -- like 'checkboxOps'; a radio box is a well, with an accent ring and dot when
 -- checked.
 drawChoiceControl :: DrawArena -> FontMetrics -> Style -> Theme -> Float -> Float -> Float -> Float -> Bool -> IO ()
 drawChoiceControl da fm style theme x y h value isCheckbox = do
   let box = checkboxBoxSize fm
-      by = y + max 0 ((min h (box + 4) - box) / 2)
+      by = y + max 0 ((h - box) / 2)
       checked = value >= 0.5
   if isCheckbox
     then checkboxOps (pushShapeOp da) theme (styleBorder style) x by box checked

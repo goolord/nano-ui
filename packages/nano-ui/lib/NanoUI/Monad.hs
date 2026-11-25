@@ -81,6 +81,9 @@ module NanoUI.Monad
   , scrollToUi
   , scrollByUi
   , scrollPagesUi
+  , scrollToStartUi
+  , scrollToEndUi
+  , scrollIntoViewUi
   , scrollRectIntoViewUi
   , setScrollStepUi
 

@@ -714,6 +714,9 @@ module NanoUI
   , scrollToUi
   , scrollByUi
   , scrollPagesUi
+  , scrollToStartUi
+  , scrollToEndUi
+  , scrollIntoViewUi
   , scrollRectIntoViewUi
   , setScrollStepUi
 

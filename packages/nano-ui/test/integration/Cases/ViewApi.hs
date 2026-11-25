@@ -221,13 +221,22 @@ runScrollUiTest ctx failed = do
   let inp = withInput 400 300
       tall = void (customWidget (sizedWidget 180 1000 False))
       ui = do
-        (sid, ()) <- scrollArea (fixedWH 200 200 . tight . gap 0) tall
-        (sid,) <$> getScrollMetricsUi sid
+        (sid, bottomId) <- scrollArea (fixedWH 200 200 . tight . gap 0) $ do
+          tall
+          respId <$> button' "Bottom"
+        (sid, bottomId,) <$> getScrollMetricsUi sid
   runSim ctx failed inp ui $ do
-    (sid, m0) <- result
+    (sid, bottomId, m0) <- result
     checkEq (Just 0) (v2Y . scrollOffset <$> m0)
-    (_, m) <- afterView (setScrollOffsetUi sid (V2 0 5000)) >> settle
+    (_, _, m) <- afterView (setScrollOffsetUi sid (V2 0 5000)) >> settle
     checkJust m $ \m' -> checkEq (v2Y (scrollRange m')) (v2Y (scrollOffset m'))
+    (_, _, mStart) <- afterView (scrollToStartUi sid ScrollInstant) >> settle
+    checkEq (Just 0) (v2Y . scrollOffset <$> mStart)
+    (_, _, mEnd) <- afterView (scrollToEndUi sid ScrollInstant) >> settle
+    checkJust mEnd $ \m' -> checkEq (v2Y (scrollRange m')) (v2Y (scrollOffset m'))
+    _ <- afterView (scrollToStartUi sid ScrollInstant) >> settle
+    (_, _, mInto) <- afterView (scrollIntoViewUi sid bottomId ScrollNearest ScrollInstant) >> settle
+    checkJust mInto $ \m' -> checkGt (v2Y (scrollOffset m')) 700
   reader <- newContext
   let rows = do
         sid <- currentId

@@ -123,17 +123,19 @@ runFontStylesTest ctx failed = do
   assertEq failed (Just [FontStyleItalic, FontStyleItalic]) (map textNodeFontStyle <$> mapM (`lookup` styles) ["Composed", "Italic Helper"])
   assertEq failed (Just [DecorationUnderline, DecorationStrikethrough, DecorationUnderline]) $
     map textNodeTextDecoration <$> mapM (`lookup` styles) ["Composed", "Strike Text", "Underline Helper"]
+  fieldVar <- newVar ("Field" :: T.Text)
   let baselined = column $ do
         rowWith (tight . gap 8) $ do
           labelWith (tight . alignBaseline . fontSize 32) "Big"
           labelWith (tight . alignBaseline) "small"
           void (buttonWith alignBaseline "Go")
+          textInputConfigured defaultTextInputConfig {ticLayout = alignBaseline (fixedW 90 defaultLayout)} fieldVar
           columnWith (tight . alignBaseline . padXY 0 5) (label "nested" >> labelWith (tight . fontSize 24) "second")
         label "after"
-  spansOf ctx (withInput 400 200) ["Big", "small", "Go", "nested", "second", "after"] baselined >>= \hits ->
+  spansOf ctx (withInput 500 200) ["Big", "small", "Go", "Field", "nested", "second", "after"] baselined >>= \hits ->
     case map fst <$> sequence hits of
-      Just [big, small, go, nested, second, after] -> do
+      Just [big, small, go, field, nested, second, after] -> do
         let baseline r = rectY r + 0.8 * rectH r
-        assert failed (all (\r -> abs (baseline r - baseline big) < 0.5) [small, go, nested] && rectY small > rectY big)
-        assert failed (rectY after >= maximum [rectY r + rectH r | r <- [big, small, go, second]])
+        assert failed (all (\r -> abs (baseline r - baseline big) < 0.5) [small, go, field, nested] && rectY small > rectY big)
+        assert failed (rectY after >= maximum [rectY r + rectH r | r <- [big, small, go, field, second]])
       _ -> assert failed False

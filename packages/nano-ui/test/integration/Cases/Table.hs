@@ -223,7 +223,7 @@ runTableReorderTest _ failed = do
     [first, Rect sx sy sw sh, _] <- headers
     _ <- press (Within first)
     replicateM_ 2 (moveTo (at (sx + sw - 1) (sy + sh / 2)))
-    check . (/= UiCursorEwResize) =<< pointerCursor
+    check . (/= UiCursorColResize) =<< pointerCursor
     _ <- release
     checkEq [1, 0, 2] =<< order
   writeIORef scrim True
@@ -282,7 +282,7 @@ runTableFrozenTest ctx failed = do
     onContext (\c -> setScrollOffset2D c wid (V2 120 0))
     [Rect _ _ frozenW _, Rect hx hy hw hh, _] <- settle >> headers
     check (hx + hw < fx + frozenW)
-    check . (/= UiCursorEwResize) =<< cursorAt (at (hx + hw - 1) (hy + hh / 2))
+    check . (/= UiCursorColResize) =<< cursorAt (at (hx + hw - 1) (hy + hh / 2))
 
 pageAboveTableUi :: NanoUI (WidgetId, ())
 pageAboveTableUi = scrollArea (fillW . fixedH 200 . gap 0) $ do
@@ -514,7 +514,7 @@ headerScrollerClip ctx = do
 -- arrow and resizes when grabbed, on the header and in the body alike; the
 -- arrow stays for the whole drag and goes on release.
 runTableColResizeTest :: Context -> IORef Int -> IO ()
-runTableColResizeTest _ failed =
+runTableColResizeTest _ failed = do
   forM_ [(inBody, k) | inBody <- [False, True], k <- [0 .. 4]] $ \(inBody, k) -> do
     -- A context per edge: widening earlier columns can scroll the last edge
     -- out of view, where it deliberately cannot start a resize.
@@ -528,16 +528,46 @@ runTableColResizeTest _ failed =
       check (bodyBot > hy + hh + 20)
       let edgeX = hx + hw - 2
           grabY = if inBody then (hy + hh + bodyBot) / 2 else hy + hh / 2
-      check . (/= UiCursorEwResize) =<< cursorAt (at (hx + hw / 2) grabY)
-      checkEq UiCursorEwResize =<< cursorAt (at edgeX grabY)
+      check . (/= UiCursorColResize) =<< cursorAt (at (hx + hw / 2) grabY)
+      checkEq UiCursorColResize =<< cursorAt (at edgeX grabY)
       before <- widthNow
       _ <- press (at edgeX grabY)
       replicateM_ 3 (moveTo (at (edgeX + 60) grabY))
       after <- widthNow
       checkGt after (before + 30)
-      checkEq UiCursorEwResize =<< cursorAt (at (edgeX + 60) 490)
+      checkEq UiCursorColResize =<< cursorAt (at (edgeX + 60) 490)
       _ <- release
-      check . (/= UiCursorEwResize) =<< pointerCursor
+      check . (/= UiCursorColResize) =<< pointerCursor
+  -- Dragging a ColContent column narrower than its content shrinks it down to
+  -- minColW (40px), and double-clicking its divider auto-fits back to content
+  -- width (and a second double-click restores fill sizing).
+  shrinkCtx <- newPixelContext
+  let pathCols = headed "Path" fst <> headed "Note" snd :: Colonnade Headed (Text, Text) Text
+      pathRows = [("src/Main/App.hs", "ok")]
+      pathUi = tableOf defaultTableConfig (fixedH 140) pathCols pathRows
+      firstW = maybe 0 rectW . listToMaybe <$> headers
+  runSim shrinkCtx failed ((withInput 800 300) {inputMousePos = V2 400 100}) pathUi $ do
+    Rect hx hy hw hh : _ <- headers
+    let edgeX = hx + hw - 2
+        grabY = hy + hh / 2
+    -- Shrink well below content width, down toward the 40px floor.
+    _ <- press (at edgeX grabY)
+    replicateM_ 3 (moveTo (at (hx + 50) grabY))
+    shrunk <- firstW
+    checkLt shrunk 90
+    checkGt shrunk 39.5
+    _ <- release >> settle
+    -- Double-click the divider to auto-fit to content width (wider than shrunk).
+    Rect hx2 hy2 hw2 hh2 : _ <- headers
+    _ <- doubleClick (at (hx2 + hw2 - 2) (hy2 + hh2 / 2)) >> settle
+    fitted <- firstW
+    checkGt fitted (shrunk + 80)
+    checkLt fitted 320
+    -- Second double-click restores default fill sizing (wider than tight content fit).
+    Rect hx3 hy3 hw3 hh3 : _ <- headers
+    _ <- doubleClick (at (hx3 + hw3 - 2) (hy3 + hh3 / 2)) >> settle
+    restored <- firstW
+    checkGt restored (fitted + 80)
 
 -- | 'headerButtonRects' in a script.
 headers :: Sim a [Rect]

@@ -178,7 +178,7 @@ cursorZoneKind :: Context -> Input -> IO (Maybe UiCursorKind)
 cursorZoneKind ctx inp = do
   dragging <- getsInteraction ctx isColumnResize
   if heldIn MouseLeft inp && dragging
-    then pure (Just UiCursorEwResize)
+    then pure (Just UiCursorColResize)
     else do
       let mouse = inputMousePos inp
       fmap snd . find (\(r, _) -> rectContains r mouse) <$> readIORef (ctxCursorZones ctx)

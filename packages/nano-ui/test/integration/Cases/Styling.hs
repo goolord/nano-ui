@@ -6,7 +6,7 @@ import Data.Bits ((.&.))
 import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Adornment qualified as A
-import NanoUI.Internal.Context (Context (..))
+import NanoUI.Internal.Context (Context (..), RecordedOp (..), drawRecordedOps, setDrawRecordOps)
 import NanoUI.Internal.Layout.Arena (getStyleIdx, lookupNodeByWidgetId, nodeFontBits)
 import NanoUI.Testing.Sim
 
@@ -20,6 +20,7 @@ tests =
   , spec "border-left" runBorderLeftTest
   , spec "background-moves-shades" runBackgroundMovesShadesTest
   , spec "label-font-flags" runLabelFontFlagsTest
+  , spec "checkbox-box-center" runCheckboxBoxCenterTest
   ]
 
 inp :: Input
@@ -175,3 +176,28 @@ runLabelFontFlagsTest ctx failed = do
     map textNodeFontWeight [nodeFontBits NodeButton bs, nodeFontBits NodeSelect ss, nodeFontBits NodeButton cs]
   assertEq failed FontStyleItalic (textNodeFontStyle (nodeFontBits NodeButton bs))
   assertEq failed (ps .&. 0xFFFFFFFF) (cs .&. 0xFFFFFFFF)
+
+-- | A checkbox taller than its box centres its square across the full height,
+-- aligned with its single-line label, and sizes its box from its own font size.
+runCheckboxBoxCenterTest :: Context -> IORef Int -> IO ()
+runCheckboxBoxCenterTest base failed = do
+  let ctx = withMonospaceFonts 12 24 base
+  setDrawRecordOps ctx True
+  on <- newVar True
+  let ui = columnWith (tight . gap 4) $ do
+        r1 <- checkboxWith' (fixedH 48) "Tall" on
+        r2 <- checkboxWith' (fontSize 24 . fixedH 48) "Big" on
+        pure (r1, r2)
+  ((r1, r2), _) <- warmupDraw ctx (withInputOff 300 200) ui
+  theme <- getTheme ctx
+  ops <- drawRecordedOps ctx
+  -- Checked checkbox fills its rounded box in themeAccent.
+  let accentBox r = [q | RecordedOp _ _ _ (FillRoundedRect q _ c) <- ops, c == themeAccent theme, covers (respRect r) q]
+      centerY (Rect _ y _ h) = y + h / 2
+  case (accentBox r1, accentBox r2) of
+    (b1 : _, b2 : _) -> do
+      assert failed (abs (centerY b1 - centerY (respRect r1)) <= 1.5)
+      assert failed (abs (centerY b2 - centerY (respRect r2)) <= 1.5)
+      -- 12px font clamps box to 18px; 24px font clamps box to 22px.
+      assertGt failed (rectW b2) (rectW b1 + 2)
+    other -> assertEq failed (1 :: Int, 1 :: Int) (length (fst other), length (snd other))

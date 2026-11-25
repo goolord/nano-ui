@@ -6,12 +6,15 @@ module NanoUI.Internal.Monad.Scroll
   , scrollToUi
   , scrollByUi
   , scrollPagesUi
+  , scrollToStartUi
+  , scrollToEndUi
+  , scrollIntoViewUi
   , scrollRectIntoViewUi
   , setScrollStepUi
   )
 where
 
-import NanoUI.Internal.Context (getScrollMetrics, readScrollMetrics, scrollBy, scrollPages, scrollRectIntoView, scrollTo, setScrollOffsetIn, setScrollOffsetPending, setScrollStep, ScrollAlign, ScrollBehavior, ScrollMetrics (scrollAxes))
+import NanoUI.Internal.Context (getScrollMetrics, readScrollMetrics, scrollBy, scrollIntoView, scrollPages, scrollRectIntoView, scrollTo, scrollToEnd, scrollToStart, setScrollOffsetIn, setScrollOffsetPending, setScrollStep, ScrollAlign, ScrollBehavior, ScrollMetrics (scrollAxes))
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Monad.Core (NanoUI, withContext)
 import NanoUI.Internal.Types (Rect, V2)
@@ -52,6 +55,20 @@ scrollByUi wid delta behavior = withContext (\ctx -> scrollBy ctx wid delta beha
 -- | Scroll by whole viewports: @V2 0 0.5@ is half a page down.
 scrollPagesUi :: WidgetId -> V2 -> ScrollBehavior -> NanoUI ()
 scrollPagesUi wid pages behavior = withContext (\ctx -> scrollPages ctx wid pages behavior)
+
+-- | Scroll back to the top (and left).
+scrollToStartUi :: WidgetId -> ScrollBehavior -> NanoUI ()
+scrollToStartUi wid behavior = withContext (\ctx -> scrollToStart ctx wid behavior)
+
+-- | Scroll to the end of the content.
+scrollToEndUi :: WidgetId -> ScrollBehavior -> NanoUI ()
+scrollToEndUi wid behavior = withContext (\ctx -> scrollToEnd ctx wid behavior)
+
+-- | Scroll widget @target@ into the viewport of scroller @wid@ it lives in,
+-- using last frame's layout. For virtualized lists that omit off-screen rows,
+-- use 'scrollRectIntoViewUi' with the row's content rectangle instead.
+scrollIntoViewUi :: WidgetId -> WidgetId -> ScrollAlign -> ScrollBehavior -> NanoUI ()
+scrollIntoViewUi wid target align behavior = withContext (\ctx -> scrollIntoView ctx wid target align behavior)
 
 -- | Scroll a rectangle of the content, in content coordinates, into view:
 -- the row a keyboard selection moved to in a list that builds only the rows
