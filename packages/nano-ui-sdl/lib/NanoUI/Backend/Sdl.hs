@@ -1,4 +1,16 @@
--- | SDL3 backend: event loop, rendering, and application runners.
+-- |
+-- Module      : NanoUI.Backend.Sdl
+-- Description : SDL3 desktop backend for nano-ui
+-- Copyright   : (c) 2026 Zachary Churchill
+-- License     : MIT
+-- Maintainer  : zacharyachurchill@gmail.com
+--
+-- Desktop SDL3 backend with HarfBuzz/SDL3_ttf TrueType font rendering,
+-- system font discovery, native file dialogs, client-side window chrome,
+-- and GPU fragment shader support.
+--
+-- Call 'runSdlApp' with 'defaultSdlOptions' and a 'NanoUI' view to open a
+-- window, or 'runSdlAppReduce' for an Elm-style "NanoUI.Emit" reducer loop.
 module NanoUI.Backend.Sdl
   ( -- * Running
     runSdlApp

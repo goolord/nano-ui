@@ -2,6 +2,7 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StrictData #-}
+{-# OPTIONS_HADDOCK not-home #-}
 
 -- | Core shader descriptors, capability flags, and packed per-frame call
 -- payloads. Shaders are pure, immutable, content-hashed values: views never
@@ -300,7 +301,7 @@ packShaderPass pass u = do
   where
     whenPos n act = if n > 0 then act else pure ()
 
--- | Registration attached to a 'NodeShader' in 'NanoUI.Internal.Context.Types.NodeCustom'.
+-- | Registration attached to a 'NanoUI.Internal.Layout.Arena.NodeShader' in 'NanoUI.Internal.Context.Types.NodeCustom'.
 data ShaderNodeEntry = ShaderNodeEntry
   { snePass :: !PackedShaderPass
   , sneCornerRadius :: {-# UNPACK #-} !Float
@@ -308,7 +309,7 @@ data ShaderNodeEntry = ShaderNodeEntry
   , sneTint :: {-# UNPACK #-} !Color
   }
 
--- | Registration attached to a shaded 'NodeContainer' in
+-- | Registration attached to a shaded 'NanoUI.Internal.Layout.Arena.NodeContainer' in
 -- 'NanoUI.Internal.Context.Types.NodeCustom'.
 data ShaderEffectEntry = ShaderEffectEntry
   { seePasses :: ![PackedShaderPass]

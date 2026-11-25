@@ -28,6 +28,8 @@ module NanoUI.Backend
     -- | Run the view only. 'runFrame' additionally solves layout and paints.
     runNanoUI
   , runFrame
+
+    -- ** Context setup
   , Context
   , newContext
   , newPixelContext
@@ -41,13 +43,8 @@ module NanoUI.Backend
   , setThemeIO
   , getThemeIO
   , followSystemThemeIO
-  , Layout (..)
-  , onGrid
-  , roundHalfUp
-  , colorToWord32
-  , scrollBarTrackColor
-  , scrollBarThumbColor
-  , scrollBarThumbHoverColor
+
+    -- ** Loop pacing and dirty state
   , markDirty
   , clearDirty
   , isDirty
@@ -55,9 +52,31 @@ module NanoUI.Backend
   , requestWakeAfter
   , getWakeAt
 
+    -- ** Layout and color helpers
+  , Layout (..)
+  , onGrid
+  , roundHalfUp
+  , colorToWord32
+  , scrollBarTrackColor
+  , scrollBarThumbColor
+  , scrollBarThumbHoverColor
+
     -- * Rendering a frame
+
+    -- ** Draw buffers and commands
   , DrawData (..)
   , DrawCmd (..)
+  , Layer (..)
+  , drawCmdNull
+  , drawCmdElems
+  , forDrawCmdsInLayer_
+  , drawCmdCount
+  , cmdEffectiveClip
+  , vertexSize
+  , indexSize
+  , collectRasterSpans
+
+    -- ** Shaders and effects
   , ShaderCall (..)
   , EffectSpan (..)
   , EffectPassDraw (..)
@@ -65,13 +84,6 @@ module NanoUI.Backend
   , spanEffectiveClip
   , execEffectSpans
   , withEffectUniforms
-  , IntGenCache
-  , newIntGenCache
-  , intGenCacheStartFrame
-  , intGenCacheLookup
-  , intGenCacheTouch
-  , intGenCacheInsert
-  , intGenCacheSize
   , emptyShaderCalls
   , emptyEffectSpans
   , emptyUniformBytes
@@ -82,24 +94,17 @@ module NanoUI.Backend
   , getShaderCapabilities
   , setDrawPixelScale
   , sysUniformBytes
-  , Layer (..)
-  , drawCmdNull
-  , drawCmdElems
-  , forDrawCmdsInLayer_
-  , drawCmdCount
-  , cmdEffectiveClip
-  , vertexSize
-  , indexSize
-  , collectRasterSpans
-  , uiCursorKind
-  , UiCursorKind (..)
-  , takeDamage
-  , takeDamagePieces
-  , damagePieces
-  , damageIsEmpty
-  , pixelEdges
-  , clipPixelEdges
-  , snapDamage
+
+    -- ** Frame caches
+  , IntGenCache
+  , newIntGenCache
+  , intGenCacheStartFrame
+  , intGenCacheLookup
+  , intGenCacheTouch
+  , intGenCacheInsert
+  , intGenCacheSize
+
+    -- ** Images and texture atlases
   , registerImage
   , registerImages
   , releaseImage
@@ -197,6 +202,8 @@ module NanoUI.Backend
   , getFocusId
 
     -- * Cursors
+  , uiCursorKind
+  , UiCursorKind (..)
   , cursorFallback
   , syncCursorKind
 
@@ -204,7 +211,7 @@ module NanoUI.Backend
 
     -- | A backend configures the context with 'FontMetrics' containing a
     -- 'FontBackend' for text measurement and shaping. 'prepareFontMetrics'
-    -- returns a snapshot with shaped metrics for a specific 'Text' (or the
+    -- returns a snapshot with shaped metrics for a specific 'Data.Text.Text' (or the
     -- original metrics when 'fmBackend' is 'Nothing'). 'drawShaped' shapes a
     -- run into 'ShapedGlyphs', and 'drawGlyph' looks up a single glyph's
     -- 'GlyphQuad' from the snapshot. A backend that loads other fonts or
@@ -244,6 +251,13 @@ module NanoUI.Backend
     -- as after a font change, when glyphs change under rects that did not.
   , Damage (..)
   , DamageBounds (..)
+  , takeDamage
+  , takeDamagePieces
+  , damagePieces
+  , damageIsEmpty
+  , pixelEdges
+  , clipPixelEdges
+  , snapDamage
   , defaultDamageSlop
   , sliderDamageSlop
   , haloDamageSlop
@@ -336,28 +350,6 @@ module NanoUI.Backend
     -- view clears the request ('clearWindowClose').
   , WindowHost (..)
   , defaultWindowHost
-
-    -- * The backend's session
-
-    -- | Each backend names itself in the 'Backend' kind, gives a
-    -- 'BackendSession' type family instance, and installs its session state
-    -- with 'withBackendSession'. SDL has its own constructor; every other
-    -- backend, RGFW included, uses @'Custom "name"@. Backend-specific view
-    -- operations retrieve the session with 'askBackendSession' and the
-    -- 'SBackend' singleton (returning 'Nothing' under other backends).
-    --
-    -- > type instance BackendSession 'Sdl = SdlEnv
-    -- > askSdlEnv = askBackendSession SSdl
-    -- >
-    -- > type instance BackendSession ('Custom "mine") = MyEnv
-    -- > askMyEnv = askBackendSession (SCustom (SSymbol @"mine"))
-  , Backend (..)
-  , SBackend (..)
-  , BackendSession
-  , withBackendSession
-  , setBackendSession
-  , backendSession
-  , askBackendSession
   , WindowCapabilities (..)
   , noWindowCapabilities
   , allWindowCapabilities
@@ -386,6 +378,28 @@ module NanoUI.Backend
   , childWindows
   , childView
   , varChangeCount
+
+    -- * The backend's session
+
+    -- | Each backend names itself in the 'Backend' kind, gives a
+    -- 'BackendSession' type family instance, and installs its session state
+    -- with 'withBackendSession'. SDL has its own constructor; every other
+    -- backend, RGFW included, uses @'Custom "name"@. Backend-specific view
+    -- operations retrieve the session with 'askBackendSession' and the
+    -- 'SBackend' singleton (returning 'Nothing' under other backends).
+    --
+    -- > type instance BackendSession 'Sdl = SdlEnv
+    -- > askSdlEnv = askBackendSession SSdl
+    -- >
+    -- > type instance BackendSession ('Custom "mine") = MyEnv
+    -- > askMyEnv = askBackendSession (SCustom (SSymbol @"mine"))
+  , Backend (..)
+  , SBackend (..)
+  , BackendSession
+  , withBackendSession
+  , setBackendSession
+  , backendSession
+  , askBackendSession
 
     -- * Background work
 

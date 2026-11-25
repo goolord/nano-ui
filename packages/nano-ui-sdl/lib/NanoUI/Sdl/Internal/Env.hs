@@ -26,7 +26,7 @@ import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
 import SDL3.Sys.Bindgen.Video (SDL_Window)
 import SDL3.Sys.Blendmode (SDL_BlendMode)
 
--- | Native resources owned by a 'NanoUI.Sdl.Internal.Window.withSdl'
+-- | Native resources owned by a 'NanoUI.Backend.Sdl.withSdl'
 -- callback. Window, renderer, and font handles must stay on the display
 -- thread and must not outlive the callback. Use the supplied context, which
 -- contains this environment as host data.
@@ -42,7 +42,7 @@ data SdlEnv = SdlEnv
   , sdlScaleRef :: IORef Float
   -- ^ Backbuffer pixels per layout unit: the pixel density times the zoom.
   , sdlUiScaleRef :: !(IORef Float)
-  -- ^ The requested UI scale; see 'NanoUI.Sdl.Internal.Window.sdlAppUiScale'.
+  -- ^ The requested UI scale; see 'NanoUI.Backend.Sdl.sdlAppUiScale'.
   , sdlPointerSeen :: !(IORef Bool)
   -- ^ Whether a pointer event has arrived, so the input's position, which
   -- the events set in layout units, can be trusted over a query.

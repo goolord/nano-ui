@@ -288,7 +288,7 @@ comboStep ci cs0 =
       | escDismiss = committed0
       | otherwise = text
 
--- | Combo box: the 'searchInput' with a select-style dropdown of options.
+-- | Combo box: the 'NanoUI.searchInput' with a select-style dropdown of options.
 -- While the field holds focus, a dropdown popup lists the options filtered
 -- by the field text (all of them while it is empty). The
 -- value is free text: options are suggestions, not a closed set. See

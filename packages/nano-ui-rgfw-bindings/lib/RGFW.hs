@@ -1,33 +1,43 @@
--- | Haskell wrappers over the RGFW C API used by nano-ui-rgfw: OpenGL windows,
--- event polling and waiting, window size, scale, options and state, cursors,
--- and the clipboard. Re-exports "RGFW.Raw".
+-- |
+-- Module      : RGFW
+-- Description : Haskell bindings to the RGFW windowing library
+-- Copyright   : (c) 2026 Zachary Churchill
+-- License     : MIT
+-- Maintainer  : zacharyachurchill@gmail.com
+--
+-- Haskell wrappers over the RGFW C API used by @nano-ui-rgfw@: OpenGL
+-- windows, event polling and waiting, window size, scale, options and state,
+-- cursors, and the clipboard. Re-exports "RGFW.Raw".
 module RGFW
-  ( Window (..)
-  , Event (..)
+  ( -- * Window lifecycle and OpenGL
+    Window (..)
   , createWindowGL
   , swapBuffersGL
+  , makeCurrentGL
   , closeWindow
+
+    -- * Events and input
+  , Event (..)
   , pollEvent
   , pollAnyEvent
-  , makeCurrentGL
   , waitForEvent
   , stopWaitForEvent
   , withEventBuffer
   , physicalToMappedKey
   , isKeyDown
+
+    -- * Window geometry and state
   , windowSize
   , windowScale
-  , setMouseStandard
-  , setMouseDefault
-  , showMouse
-  , readClipboardText
-  , writeClipboardText
+  , windowPosition
+  , windowFlags
+  , windowFocused
+  , setWindowName
   , setWindowIcon
   , setWindowMinSize
   , setWindowMaxSize
   , moveWindow
   , centerWindow
-  , setWindowName
   , resizeWindow
   , maximizeWindow
   , minimizeWindow
@@ -35,10 +45,15 @@ module RGFW
   , setWindowFullscreen
   , showWindow
   , hideWindow
-  , windowPosition
-  , windowFlags
-  , windowFocused
-  -- Re-exports
+
+    -- * Cursors and clipboard
+  , setMouseStandard
+  , setMouseDefault
+  , showMouse
+  , readClipboardText
+  , writeClipboardText
+
+    -- * Raw FFI bindings
   , module RGFW.Raw
   )
 where

@@ -82,7 +82,7 @@ import System.IO.Unsafe (unsafePerformIO)
 
 -- | Backbuffer pixels per window coordinate: the factor the retained
 -- framebuffer, glyph rasterization and snapping need. This is not
--- 'SDL_GetWindowDisplayScale', which also folds in the desktop's content
+-- @SDL_GetWindowDisplayScale@, which also folds in the desktop's content
 -- scale. On Windows window coordinates are already pixels, so at 125%
 -- scaling the display scale is 1.25 while the density is 1; sizing the
 -- framebuffer by the display scale rendered 1.56x the window's pixels and
@@ -110,7 +110,7 @@ queryWindowLogicalSize win = do
   pure (if ok then Size (fromIntegral w) (fromIntegral h) else Size 0 0)
 
 -- | Pointer position relative to the window with mouse focus, in window
--- coordinates. Uses 'SDL_GetMouseState' rather than the global pointer +
+-- coordinates. Uses @SDL_GetMouseState@ rather than the global pointer +
 -- window position: the latter is unreliable on Wayland (window position is not
 -- exposed) and breaks hover/wheel targeting.
 queryMouseWindowPos :: IO V2

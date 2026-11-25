@@ -1,5 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# OPTIONS_HADDOCK not-home #-}
 -- The 'BackendSession' instance for 'Sdl' is an orphan by construction: the
 -- core owns the backend kind, and this package owns its session type.
 {-# OPTIONS_GHC -Wno-orphans #-}
@@ -139,7 +140,7 @@ data SdlOptions = SdlOptions
   -- opacity and close behaviour (default: 'defaultWindowSettings'). Sizes
   -- are layout units converted at the opening zoom; a later
   -- 'NanoUI.Backend.Sdl.setSdlUiScale' does not resize the window. A
-  -- 'WindowPositionDefault' window opens where the desktop puts it, or
+  -- 'NanoUI.WindowPositionDefault' window opens where the desktop puts it, or
   -- centred when 'sdlAppUiScale' enlarges it. A transparent window
   -- ('wsTransparent') repaints fully on any change. Where translucent
   -- colours overlap, the resulting alpha depends on the render driver: most
@@ -434,7 +435,7 @@ withSdlWindow hints flags opts ctx act =
 type instance BackendSession 'Sdl = SdlEnv
 
 -- | Look up the 'SdlEnv' of the SDL session driving this view, for IO-level
--- SDL operations ('NanoUI.Sdl.Internal.Dialog.openFileDialog' and similar),
+-- SDL operations ('NanoUI.Backend.Sdl.openFileDialog' and similar),
 -- which run on the display thread like the view. Returns 'Nothing' when the
 -- context is not driven by an SDL session (such as in headless tests).
 askSdlEnv :: NanoUI (Maybe SdlEnv)

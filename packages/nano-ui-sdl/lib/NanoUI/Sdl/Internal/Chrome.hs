@@ -122,7 +122,7 @@ setWindowShadow env on = do
 -- | Register hit-test regions for a borderless window. The first call installs
 -- the SDL hit-test callback on the window; subsequent calls only update the
 -- stored regions, so a view can call this every frame for the cost of an
--- 'IORef' write.
+-- 'Data.IORef.IORef' write.
 --
 -- The rectangles are in layout coordinates and are scaled here by the window's
 -- zoom to match the window coordinates used by the hit-test callback.

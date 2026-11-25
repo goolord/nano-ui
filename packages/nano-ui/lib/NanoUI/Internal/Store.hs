@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | The widget store: per-widget state in maps by value type, keyed by widget
 -- id and 'Slot'.
 module NanoUI.Internal.Store

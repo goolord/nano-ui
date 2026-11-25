@@ -1,4 +1,5 @@
 {-# LANGUAGE StrictData #-}
+{-# OPTIONS_HADDOCK not-home #-}
 
 -- | Pure-Haskell CPU reference evaluator for 'ShaderIR'.
 --

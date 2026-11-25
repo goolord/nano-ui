@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | A frame's draw data as WebGL draw commands: the texture uploads it
 -- needs, then each command clipped to its rect and the damage, as
 -- nano-ui-sdl's @NanoUI.Sdl.Internal.Render@ submits them to SDL.
@@ -62,9 +64,12 @@ data Renderer = Renderer
   -- paired with the next 1-based slot ID.
   }
 
+-- | Allocate an empty browser renderer state with no command buffer or
+-- uploaded textures yet.
 newRenderer :: IO Renderer
 newRenderer = Renderer <$> newIORef (nullPtr, 0) <*> newIORef 0 <*> newIORef (Map.empty, 1)
 
+-- | Free the renderer's native command buffer.
 freeRenderer :: Renderer -> IO ()
 freeRenderer r = do
   (buf, _) <- readIORef (rCommands r)

@@ -353,7 +353,7 @@ typeText txt = frameWith (\i -> i {inputChars = txt})
 pressKey :: Key -> Sim a a
 pressKey k = frameWith (keyInp k)
 
--- | One frame pressing a chord such as @cmdOrCtrl <> key 'z'@, with exactly
+-- | One frame pressing a chord such as @cmdOrCtrl <> key \'z\'@, with exactly
 -- its modifiers held for that frame. The key and modifiers are let go
 -- afterwards, so the same chord again is a new press, not an auto-repeat.
 chord :: Shortcut -> Sim a a

@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | File dialogs in the browser. A page sees no paths: opening hands over
 -- the chosen files' names and bytes, and saving hands the browser bytes to
 -- write where the user says (a save dialog where the browser has one, else
@@ -89,7 +91,7 @@ saveFile host opts name bytes = do
     then pure Nothing
     else Just . T.unpack . TE.decodeUtf8Lenient <$> BSI.create n (whTakePicked host)
 
--- | The files in 'whPickFiles'' answer: per file a 32-bit little-endian
+-- | The files in the answer from 'whPickFiles': per file a 32-bit little-endian
 -- name length, the UTF-8 name, a 32-bit length and the bytes. A truncated
 -- record ends the list.
 decodePicked :: ByteString -> [WebFile]

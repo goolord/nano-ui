@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | What the browser session reports about itself: the core's frame timings
 -- with the canvas, its pixel ratio, the UI font and the WebGL renderer.
 module NanoUI.SdlWeb.Internal.Debug

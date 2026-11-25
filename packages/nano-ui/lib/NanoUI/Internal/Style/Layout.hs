@@ -209,7 +209,7 @@ data FontVariant
   | FontMono
   deriving (Eq, Show, Enum, Bounded, Ord)
 
--- | A semantic theme color ('NanoUI.Internal.Style.Theme.toneColor') for text
+-- | A semantic theme color ('NanoUI.toneColor') for text
 -- ('fontTone') and buttons.
 data Tone
   = Accent

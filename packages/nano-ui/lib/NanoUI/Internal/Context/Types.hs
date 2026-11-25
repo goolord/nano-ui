@@ -1,4 +1,5 @@
 {-# LANGUAGE StrictData #-}
+{-# OPTIONS_HADDOCK not-home #-}
 
 -- | Record types behind 'Context': interaction, damage, overlay, animation,
 -- scroll and drawing-cache state, theme scopes, and frame messages.
@@ -929,21 +930,21 @@ initialInteractionState = InteractionState
 -- a font-configured copy is not an independent session.
 --
 -- A field whose comment ends with the tag sentence naming
--- 'NanoUI.Internal.Frame.resetUiBuild' holds what one view run builds:
+-- @resetUiBuild@ holds what one view run builds:
 -- that function writes the field's initial value before each run. The
 -- nano-ui-test case @per-build-reset@ checks each tagged field and fails
 -- when the number of tags here differs from the fields it checks.
 data Context = Context
   { ctxNodeArena :: NodeArena
   -- ^ The nodes the view declares, which layout solves and the paint pass
-  -- walks. Reset by 'NanoUI.Internal.Frame.resetUiBuild'.
+  -- walks. Reset by @resetUiBuild@.
   , ctxDrawArena :: DrawArena
   -- ^ The frame's draw commands and vertices, emptied before each paint.
   , ctxHotId :: IORef WidgetId
   -- ^ The widget under the pointer after this frame's layout
   -- ('NanoUI.Internal.Frame.Input.refreshHover'), or @WidgetId 0@ for none.
   -- It is @WidgetId 0@ while the view runs, and the paint pass and the
-  -- draw-reuse key read it. Reset by 'NanoUI.Internal.Frame.resetUiBuild'.
+  -- draw-reuse key read it. Reset by @resetUiBuild@.
   , ctxLastHotId :: IORef WidgetId
   -- ^ The same widget as 'ctxHotId', kept through the next view run: the
   -- next 'NanoUI.Internal.Frame.Input.refreshHover' compares against it to
@@ -984,7 +985,7 @@ data Context = Context
   -- next frame routes the composition to it
   -- ('NanoUI.Internal.Frame.TextInput.claimComposition'), and backends read
   -- the text input area from it ('NanoUI.Internal.Frame.TextArea.textInputArea').
-  -- Reset by 'NanoUI.Internal.Frame.resetUiBuild'.
+  -- Reset by @resetUiBuild@.
   , ctxInputMethod :: !(IORef (Maybe InputMethodRequest))
   , ctxStore :: IORef WidgetStore
   , ctxDamageState :: IORef DamageState
@@ -1004,7 +1005,7 @@ data Context = Context
   , ctxIdCursor :: !IdCursor
   -- ^ The id path and sibling position the next declared widget takes its
   -- id from. Starts at 'NanoUI.Internal.Id.initialIdContext'. Reset by
-  -- 'NanoUI.Internal.Frame.resetUiBuild'.
+  -- @resetUiBuild@.
   , ctxVarFrame :: !(MutablePrimArray RealWorld Word64)
   -- ^ Var bookkeeping for the frame being built: current pass tick, frame
   -- base tick, pass number, flags, and the passes the last frame ran
@@ -1069,7 +1070,7 @@ data Context = Context
   -- default.
   , ctxDamageWanted :: !(IORef Bool)
   -- | Layout overlay state. Its 'esScopes' are ranges of this run's node
-  -- arena. Reset by 'NanoUI.Internal.Frame.resetUiBuild'.
+  -- arena. Reset by @resetUiBuild@.
   , ctxExplain :: !(IORef ExplainState)
   , ctxTheme :: !(IORef Theme)
   -- ^ Base theme; scoped themes live in 'ctxThemeScopes'.
@@ -1084,26 +1085,26 @@ data Context = Context
   , ctxContainerStack :: IORef [Int]
   -- ^ Node indices of the containers open at this point of the view,
   -- innermost first; a widget's parent is the head. Reset by
-  -- 'NanoUI.Internal.Frame.resetUiBuild'.
+  -- @resetUiBuild@.
   , ctxFocusables :: IORef (MutablePrimArray RealWorld WidgetId)
   -- ^ The run's focus order ('NanoUI.Internal.Context.registerFocusable'),
   -- in its first 'ctxFocusablesCount' slots. The array is kept between runs
   -- and grows by doubling.
   , ctxFocusablesCount :: !(PrimVar RealWorld Int)
   -- ^ How many slots of 'ctxFocusables' this run filled. Reset by
-  -- 'NanoUI.Internal.Frame.resetUiBuild'.
+  -- @resetUiBuild@.
   , ctxSpanBase :: SpanArena
   -- ^ Base-layer text spans for the current frame, reused on the next frame.
   , ctxSpanOverlay :: SpanArena
   -- ^ Overlay text spans for the current frame, reused on the next frame.
   , ctxInteractionState :: !(IORef InteractionState)
   -- | Rects the view asked a cursor for this build, newest first: a table's
-  -- column edges. Reset by 'NanoUI.Internal.Frame.resetUiBuild'.
+  -- column edges. Reset by @resetUiBuild@.
   , ctxCursorZones :: !(IORef [(Rect, UiCursorKind)])
   -- | Node ranges [from, below) of this build's
   -- 'NanoUI.withCursorShape' scopes, newest first.
   -- Scopes are pushed when they end, so an outer scope precedes its inner
-  -- ones. Reset by 'NanoUI.Internal.Frame.resetUiBuild'.
+  -- ones. Reset by @resetUiBuild@.
   , ctxCursorRegions :: !(IORef [(Int, Int, UiCursorKind)])
   , ctxClipboardGet :: IO (Maybe Text)
   , ctxClipboardSet :: Text -> IO Bool
@@ -1127,8 +1128,7 @@ data Context = Context
   -- timers re-register each frame and the loop can sleep until the next timer.
   , ctxChildWindows :: !(IORef [ChildWindow])
   -- ^ The open native windows the last view run declared
-  -- ('NanoUI.Internal.ChildWindow.nativeWindow'), newest first. Reset by
-  -- 'NanoUI.Internal.Frame.resetUiBuild'.
+  -- ('NanoUI.nativeWindow'), newest first. Reset by @resetUiBuild@.
   , ctxShaderCaps :: !(IORef ShaderCapabilities)
   -- ^ Shader capabilities reported by the active backend.
   , ctxEffectNodes :: !(IORef (Word32, [Int]))
@@ -1145,12 +1145,12 @@ data ChildWindow = ChildWindow
   , childOpen :: !(Var Bool)
   , childSettings :: !WindowSettings
   , childRun :: Context -> Input -> IO ()
-  -- ^ The declared body, as @\\c inp -> 'NanoUI.Internal.Monad.runNanoUI' c inp body@
-  -- ('NanoUI.Internal.ChildWindow.nativeWindow'). A function field because
-  -- the 'NanoUI.NanoUI' type is defined in "NanoUI.Internal.Monad.Core",
+  -- ^ The declared body, as @\\c inp -> 'NanoUI.Backend.runNanoUI' c inp body@
+  -- ('NanoUI.nativeWindow'). A function field because
+  -- the 'NanoUI.NanoUI' type is defined in @NanoUI.Internal.Monad.Core@,
   -- which imports "NanoUI.Internal.Context", which imports this module: a
   -- @NanoUI ()@ field here would make an import cycle. The backend runs it
-  -- through 'NanoUI.Internal.ChildWindow.childView'.
+  -- through 'NanoUI.Backend.childView'.
   }
 
 -- | Convert a widget's hash to its store key. The representation assumes a

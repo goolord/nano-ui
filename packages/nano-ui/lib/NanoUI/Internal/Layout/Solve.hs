@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | The layout solver: measures and places the node arena's flow tree, then
 -- positions modals, windows and popups.
 module NanoUI.Internal.Layout.Solve

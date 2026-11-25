@@ -1,6 +1,18 @@
--- | Public facade for the @nano-ui-shader@ typed fragment shader EDSL,
+-- |
+-- Module      : NanoUI.Shader
+-- Description : Typed fragment shader EDSL and multi-target GPU compiler
+-- Copyright   : (c) 2026 Zachary Churchill
+-- License     : MIT
+-- Maintainer  : zacharyachurchill@gmail.com
+--
+-- Public facade for the @nano-ui-shader@ typed fragment shader EDSL,
 -- multi-target compiler (GLSL 150, GLSL ES 300, SPIR-V 1.0, MSL, CPU),
 -- algebraic effect fusion, and standard effect library.
+--
+-- Define shaders at top level so compilation runs once, then draw leaf
+-- surfaces with 'NanoUI.shaderBox' or wrap interactive subtrees with
+-- 'NanoUI.withShader' from "NanoUI". For hand-written backend shader
+-- sources, import "NanoUI.Shader.Raw".
 module NanoUI.Shader
   ( -- * Core shader types (re-exported from @nano-ui@)
     Shader

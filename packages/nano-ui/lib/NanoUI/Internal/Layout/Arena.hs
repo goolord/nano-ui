@@ -1,5 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE StrictData #-}
+{-# OPTIONS_HADDOCK not-home #-}
 
 -- | Layout nodes for one frame, stored in flat mutable arrays.
 --

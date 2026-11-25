@@ -498,7 +498,7 @@ instance
 data FragCtx = FragCtx
   { uv :: !(Expr V2)
   -- ^ Normalized coordinates in @[0, 1] x [0, 1]@ over the node's layout rect
-  -- (may extend outside @[0, 1]@ inside a 'LayerEffect' bleed margin).
+  -- (may extend outside @[0, 1]@ inside a 'NanoUI.LayerEffect' bleed margin).
   , pos :: !(Expr V2)
   -- ^ Local logical pixel coordinates relative to the node's top-left corner.
   , size :: !(Expr V2)
@@ -551,7 +551,7 @@ swiz2 is v = Expr $ \d b ->
   let (vid, b1) = runExpr d v b
    in emitNode TVec2 (OpSwizzle vid is) b1
 
--- | Handle to the rendered offscreen subtree texture inside a 'LayerEffect'.
+-- | Handle to the rendered offscreen subtree texture inside a 'NanoUI.LayerEffect'.
 data Layer = Layer
   { layerUvOrigin :: !(Expr V2)
   , layerUvSpan :: !(Expr V2)

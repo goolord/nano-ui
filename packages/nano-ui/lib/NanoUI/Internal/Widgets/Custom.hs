@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | 'CustomDrawContext' construction for custom widgets ("NanoUI.Widgets.Custom")
 -- and the paint, damage and cursor passes.
 module NanoUI.Internal.Widgets.Custom

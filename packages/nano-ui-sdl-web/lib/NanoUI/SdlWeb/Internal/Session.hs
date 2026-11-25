@@ -1,5 +1,6 @@
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# OPTIONS_HADDOCK not-home #-}
 -- The 'BackendSession' instance for the browser session is an orphan by
 -- construction: the core owns the backend kind, and this package owns its
 -- session.
@@ -170,6 +171,9 @@ data SdlWebOptions = SdlWebOptions
   -- ^ End the session when this holds for a frame's input (default: never).
   }
 
+-- | Default browser session options: 'defaultWindowSettings', bundled Inter
+-- at 16 px, extended-Latin fallback font, 1x UI scale, and 60 Hz animation
+-- pacing.
 defaultSdlWebOptions :: SdlWebOptions
 defaultSdlWebOptions =
   SdlWebOptions
@@ -350,7 +354,7 @@ loadFallback host wf =
 
 -- | Ask for a UI font. The session loads and applies it before the next
 -- frame, which this asks for: the glyph atlas, metrics and text all change
--- together, as 'NanoUI.Backend.Sdl.setSdlUiFont' does on the desktop.
+-- together, as @setSdlUiFont@ does on the desktop.
 -- Loading an installed family or a URL waits for the page, so that frame
 -- comes when the font is in. Asking for the font already asked for does
 -- nothing.

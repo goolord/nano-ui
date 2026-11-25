@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | The core "NanoUI" widgets, which emitting views use unchanged. Kept so
 -- imports of this module still resolve; "NanoUI.Emit" re-exports them.
 module NanoUI.Emit.Widgets

@@ -102,8 +102,8 @@ shaderConfigured' cfg sh u = do
     mixNodePaintHash arena idx paintH
     registerNodeShaderAt ctx idx entry
 
--- | Wrap a child subtree in a Tier 2 fragment effect ('ColorEffect',
--- 'DistortionEffect', or 'LayerEffect'). On backends that do not support
+-- | Wrap a child subtree in a Tier 2 fragment effect ('NanoUI.ColorEffect',
+-- 'NanoUI.DistortionEffect', or 'NanoUI.LayerEffect'). On backends that do not support
 -- offscreen node effects, children render straight through with no effect.
 {-# INLINE withShader #-}
 withShader :: IsNodeEffect k => Shader k u -> u -> NanoUI a -> NanoUI a

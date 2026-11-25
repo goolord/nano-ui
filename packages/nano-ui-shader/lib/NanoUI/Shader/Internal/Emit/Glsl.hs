@@ -1,4 +1,5 @@
 {-# LANGUAGE StrictData #-}
+{-# OPTIONS_HADDOCK not-home #-}
 
 -- | Pure-Haskell GLSL 150 (OpenGL 3.2, @nano-ui-rgfw@) and GLSL ES 300
 -- (WebGL2, @nano-ui-sdl-web@) fragment shader emitters for 'ShaderIR'.

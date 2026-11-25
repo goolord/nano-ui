@@ -5,6 +5,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StrictData #-}
 {-# LANGUAGE TypeOperators #-}
+{-# OPTIONS_HADDOCK not-home #-}
 
 -- | GPU uniform types and std140 byte-layout packing via 'GHC.Generics'.
 --

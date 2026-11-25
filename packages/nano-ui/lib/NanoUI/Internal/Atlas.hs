@@ -36,7 +36,7 @@ import NanoUI.Internal.Types (ImageId (..))
 
 -- | GPU texture id shared by every packed image so draw cmds batch. It is
 -- reserved, like the glyph atlas pages' ids above it
--- ('NanoUI.Internal.Draw.Types.glyphPageTextureId'), rather than a small
+-- ('NanoUI.Backend.glyphPageTextureId'), rather than a small
 -- number: a drawing's image op names a registered 'ImageId' or a raw
 -- texture, and 'freshImageId' starts at 1, so an unregistered image id must
 -- not also name the atlas. It is the id below the last glyph page's, so more

@@ -380,7 +380,7 @@ rectArea :: Rect -> Float
 rectArea (Rect _ _ w h) = w * h
 
 -- | Region to repaint: the whole window or a clip in logical window coordinates.
--- An empty 'DamageClip' means no repaint is needed.
+-- An empty 'NanoUI.Backend.DamageClip' means no repaint is needed.
 data Damage
   = DamageFull
   | DamageClip !Rect

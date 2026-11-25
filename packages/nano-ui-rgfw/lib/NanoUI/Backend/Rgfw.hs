@@ -1,22 +1,36 @@
--- | Run nano-ui views in an RGFW window with OpenGL 3.2 and the bundled
+-- |
+-- Module      : NanoUI.Backend.Rgfw
+-- Description : RGFW and OpenGL 3.2 backend for nano-ui
+-- Copyright   : (c) 2026 Zachary Churchill
+-- License     : MIT
+-- Maintainer  : zacharyachurchill@gmail.com
+--
+-- Run nano-ui views in an RGFW window with OpenGL 3.2 and the bundled
 -- Cozette bitmap font. 'runRgfwApp' runs a view; 'runRgfwAppReduce' runs a
 -- view against a model and an update function for "NanoUI.Emit".
 module NanoUI.Backend.Rgfw
-  ( runRgfwApp
+  ( -- * Running
+    runRgfwApp
   , runRgfwAppWith
   , runRgfwAppReduce
   , runRgfwAppReduceCustom
   , runRgfwAppReduceCustomWith
-  , RgfwDebugSampler
-  , newRgfwDebugSampler
+
+    -- * Options and window settings
   , RgfwOptions (..)
   , defaultRgfwOptions
   , WindowSettings (..)
   , defaultWindowSettings
   , WindowPosition (..)
   , WindowMode (..)
+
+    -- * Low-level context
   , newRgfwContext
   , applyRgfwTheme
+
+    -- * Debugging
+  , RgfwDebugSampler
+  , newRgfwDebugSampler
   , RgfwDebugSnapshot (..)
   , CoreDebugSnapshot (..)
   , RgfwFrameStats (..)

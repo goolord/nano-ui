@@ -1,4 +1,5 @@
 {-# LANGUAGE RecordWildCards #-}
+{-# OPTIONS_HADDOCK not-home #-}
 
 -- | The 'Context' a view runs against, and the operations on its state:
 -- focus, dirty flags and damage, the widget store, drawing and measure

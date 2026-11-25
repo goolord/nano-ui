@@ -15,7 +15,7 @@
 --
 -- * 'useVar' allocates view-local mutable state keyed by its position among
 --   the positional 'Var's of its scope (apart from widget ids), for 'Int',
---   'Double', 'Float', 'Bool', 'Text' and 'NanoUI.SortCol', and enumerations
+--   'Double', 'Float', 'Bool', 'Data.Text.Text' and 'NanoUI.SortCol', and enumerations
 --   via 'useEnumVar'.
 -- * 'newVar' allocates a 'Var' of any type in 'IO' for application-owned
 --   state.
@@ -25,7 +25,7 @@
 --   via the primed widget's 'NanoUI.Response'.
 --
 -- With @OverloadedRecordDot@, @v.field@ focuses a 'Var' on a single field of a
--- single-constructor 'Generic' record. 'forEachVar' projects a 'Var' of a list
+-- single-constructor 'GHC.Generics.Generic' record. 'forEachVar' projects a 'Var' of a list
 -- into a 'Var' per element.
 --
 -- = Rerun semantics

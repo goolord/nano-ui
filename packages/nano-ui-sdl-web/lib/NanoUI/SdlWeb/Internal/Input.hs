@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | Browser events, as @web/nano-ui-sdl-web.js@ queues them, decoded and
 -- folded into 'Input'.
 --

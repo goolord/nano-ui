@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | Font selection for the SDL backend.
 module NanoUI.Sdl.Internal.NanoUIFont
   ( NanoUIFont (..)

@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | Translation of RGFW events into 'NanoUI.Input.Input': key and modifier
 -- tables, the cursor table, and the decoding of a drained event queue. The
 -- session ("NanoUI.Rgfw.Internal.Session") polls the queue and folds the
@@ -151,7 +153,7 @@ data RgfwEvent
 
 -- | Drain the RGFW queue, recording scale changes for the next sync, which
 -- reads the window size itself. Character keys are remapped to the current
--- layout ('layoutKey').
+-- layout (@layoutKey@).
 pollRgfwEvents :: R.Window -> Ptr R.RGFW_event -> IORef Float -> IORef Float -> IO [RgfwEvent]
 pollRgfwEvents win evPtr scaleRef monScaleRef = do
   raw <- drain []

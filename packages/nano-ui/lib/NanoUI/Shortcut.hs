@@ -9,7 +9,7 @@
 -- > whenM (shortcut (key (KeyF 5))) refresh
 --
 -- The short names are meant for unqualified import where chords are
--- written, or qualified (@K.ctrl <> K.key 's'@). Chords are typed values, so
+-- written, or qualified (@K.ctrl <> K.key \'s\'@). Chords are typed values, so
 -- they cannot be misspelled; 'parseShortcut' reads one from text, such as a
 -- settings file.
 module NanoUI.Shortcut

@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | Upload the core image atlas to SDL textures and manage their native lifetime.
 module NanoUI.Sdl.Internal.Image
   ( ImageAtlas

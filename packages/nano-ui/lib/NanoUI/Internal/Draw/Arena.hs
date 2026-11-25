@@ -624,7 +624,7 @@ freezeUniformPrefix da uLen
       unsafeFreezeByteArray dst
 
 -- | Cut commands (when damage pieces are active), group by layer, and map
--- each 'PendingEffectSpan''s raw command boundaries into final 'drawCommands'
+-- the raw command boundaries of each 'PendingEffectSpan' into final 'drawCommands'
 -- indices. Only reached on frames that use Tier 2 subtree effects.
 {-# NOINLINE finishWithEffects #-}
 finishWithEffects ::

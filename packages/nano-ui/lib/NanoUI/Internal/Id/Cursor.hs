@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | The view's position in the id tree, kept unboxed: the current path and
 -- the next widget and Var positions within it. Taking a widget id or a Var
 -- key allocates nothing; entering a scope boxes the parent once.

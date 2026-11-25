@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE StrictData #-}
+{-# OPTIONS_HADDOCK not-home #-}
 
 -- | Typed SSA intermediate representation for fragment shaders, with pure
 -- structural hash-consing (global value numbering / CSE).
@@ -179,7 +180,7 @@ instance Hashable LoopBody where
 -- pattern so @-0.0@ and @0.0@ remain distinct and hashing is exact.
 data ExprOp
   = OpLitFloat !Word32
-  -- ^ IEEE 754 bit pattern of a 32-bit float literal ('castFloatToWord32').
+  -- ^ IEEE 754 bit pattern of a 32-bit float literal ('GHC.Float.castFloatToWord32').
   | OpLitInt !Int32
   | OpLitUInt !Word32
   | OpLitBool !Bool
@@ -330,7 +331,7 @@ emitLoop start end inits stateTypes buildBody b =
    in emitNode (case stateTypes of (t : _) -> t; [] -> TFloat) (OpLoop lb) b1
 
 -- | Deterministic non-zero 64-bit structural hash of a lowered 'ShaderIR'.
--- Hashing the IR rather than compiled backend strings keeps 'ShaderProgram'
+-- Hashing the IR rather than compiled backend strings keeps 'NanoUI.Shader.Raw.ShaderProgram'
 -- fields lazy so each backend only compiles the target format it consumes.
 hashShaderIR :: ShaderIR -> Word64
 hashShaderIR ir =

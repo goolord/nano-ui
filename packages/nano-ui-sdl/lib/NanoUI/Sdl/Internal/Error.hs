@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | SDL failures reported with SDL's own explanation of them.
 module NanoUI.Sdl.Internal.Error
   ( sdlErrorText

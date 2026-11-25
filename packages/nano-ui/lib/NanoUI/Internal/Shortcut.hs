@@ -1,5 +1,5 @@
 -- | Key chords: a key plus the exact modifiers held with it. Build them with
--- '<>' (@ctrl <> shift <> key 's'@), parse them from xmonad EZConfig-style
+-- '<>' (@ctrl <> shift <> key \'s\'@), parse them from xmonad EZConfig-style
 -- text (@C-S-s@), and label them for menus (@Ctrl+Shift+S@).
 module NanoUI.Internal.Shortcut
   ( Shortcut (..)
@@ -24,7 +24,7 @@ import NanoUI.Internal.Input
 import Text.ParserCombinators.ReadP (choice, eof, get, many, readP_to_S, string, (+++))
 
 -- | A key pressed while exactly these modifiers are held, so
--- @ctrl <> key 's'@ does not match Ctrl+Shift+S. '<>' unions the modifiers
+-- @ctrl <> key \'s\'@ does not match Ctrl+Shift+S. '<>' unions the modifiers
 -- and keeps the right-hand key if it has one. A chord with no key, such as
 -- @ctrl <> shift@, never matches.
 data Shortcut = Shortcut
@@ -52,9 +52,9 @@ instance ToKey Char where
   toKey ' ' = KeySpace
   toKey c = KeyChar (toLower c)
 
--- | The key of a chord: @key 's'@, @key KeyEnter@, @key (KeyF 5)@. Name a
+-- | The key of a chord: @key \'s\'@, @key KeyEnter@, @key (KeyF 5)@. Name a
 -- symbol by its unshifted key: on a US layout Ctrl++ is
--- @ctrl <> shift <> key '='@, while @ctrl <> key '+'@ is keypad plus.
+-- @ctrl <> shift <> key \'=\'@, while @ctrl <> key \'+\'@ is keypad plus.
 key :: ToKey k => k -> Shortcut
 key k = Shortcut (Just (toKey k)) mempty
 
@@ -75,7 +75,7 @@ super :: Shortcut
 super = modifier noModifiers {modSuper = True}
 
 -- | Command held on macOS, Ctrl elsewhere ('modPrimary'), so
--- @cmdOrCtrl <> key 's'@ works on both.
+-- @cmdOrCtrl <> key \'s\'@ works on both.
 cmdOrCtrl :: Shortcut
 cmdOrCtrl = modifier primaryModifiers
 
@@ -83,7 +83,7 @@ modifier :: Modifiers -> Shortcut
 modifier = Shortcut Nothing
 
 -- | Parse a chord from text, such as a settings file: modifier prefixes,
--- then a key. In code, prefer '<>' (@cmdOrCtrl <> shift <> key 'p'@), which
+-- then a key. In code, prefer '<>' (@cmdOrCtrl <> shift <> key \'p\'@), which
 -- cannot be misspelled.
 --
 -- * Modifiers: @C-@ Ctrl, @S-@ Shift, @A-@ Alt (Option), @s-@ Super

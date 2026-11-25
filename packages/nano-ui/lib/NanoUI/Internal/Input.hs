@@ -1,4 +1,5 @@
 {-# LANGUAGE StrictData #-}
+{-# OPTIONS_HADDOCK not-home #-}
 
 -- | Implementation of "NanoUI.Input", plus the input rewrites the frame uses
 -- for repeated passes and covered layers, and the runner's event batching.

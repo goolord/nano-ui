@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | Reading and mutating 'Var's from the view, and tracking dependencies for
 -- reruns and damage.
 --

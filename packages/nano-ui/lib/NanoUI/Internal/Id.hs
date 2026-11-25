@@ -1,4 +1,5 @@
 {-# LANGUAGE StrictData #-}
+{-# OPTIONS_HADDOCK not-home #-}
 
 -- | Widget ids and the id context they are derived from. See the
 -- "Widget identity" section of "NanoUI" for how ids are assigned.

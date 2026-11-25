@@ -315,12 +315,12 @@ sdlDebugSnapshot env = do
 
 -- | Request a UI font family. The SDL display thread resolves and applies it
 -- before the next frame, which this asks for (see
--- 'NanoUI.Sdl.Internal.Window.syncDisplay'), rebuilding the glyph atlas and
+-- 'NanoUI.Backend.Sdl.syncDisplay'), rebuilding the glyph atlas and
 -- text resolver.
 setSdlUiFont :: NanoUIFont -> NanoUI ()
 setSdlUiFont = requestDisplay sdlFontRequestRef
 
--- | Set the UI scale (see 'NanoUI.Sdl.Internal.Window.sdlAppUiScale'): a zoom on top
+-- | Set the UI scale (see 'NanoUI.Backend.Sdl.sdlAppUiScale'): a zoom on top
 -- of the pixel density, or zero or less to follow the display. The display
 -- thread applies it before the next frame, which this asks for.
 setSdlUiScale :: Float -> NanoUI ()

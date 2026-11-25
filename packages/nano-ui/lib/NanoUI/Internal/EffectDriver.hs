@@ -250,7 +250,7 @@ execEffectSpans drv spans parentId parentSlot parentSize@(parentW, parentH) pare
                 runOffscreen
                   `finally` (restoreParent >> edReleaseTarget drv slot0)
 
--- | Copy a 'ShaderCall''s packed std140 uniform block into a temporary buffer,
+-- | Copy the packed std140 uniform block of a 'ShaderCall' into a temporary buffer,
 -- patch the per-pass @uUvRect@ (bytes 16..31) and @uMeta.zw@ target capacity
 -- (bytes 40..47) from 'EffectPassDraw', and pass @(ptr, byteLen)@ to @k@.
 withEffectUniforms ::

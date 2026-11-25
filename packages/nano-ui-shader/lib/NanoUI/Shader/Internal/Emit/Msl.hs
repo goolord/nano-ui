@@ -1,4 +1,5 @@
 {-# LANGUAGE StrictData #-}
+{-# OPTIONS_HADDOCK not-home #-}
 
 -- | Pure-Haskell Metal Shading Language (MSL) fragment shader emitter for
 -- 'ShaderIR', matching SDL 3.4's @SDL_GPURenderState@ Metal interface.

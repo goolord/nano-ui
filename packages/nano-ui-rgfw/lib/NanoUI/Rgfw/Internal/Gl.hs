@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | OpenGL presentation for the RGFW host.
 --
 -- Geometry goes to the GPU straight from the core's shared 'DrawData'

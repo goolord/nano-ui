@@ -67,7 +67,7 @@ currentParent :: Context -> IO Int
 currentParent ctx = fromMaybe (-1) . listToMaybe <$> readIORef (ctxContainerStack ctx)
 
 -- | Anything that carries a widget 'Response' (composite widget results such
--- as 'NanoUI.Internal.Widgets.Tabs.TabResponse'). The @resp*@ accessors work on all of them.
+-- as 'NanoUI.TabResponse'). The @resp*@ accessors work on all of them.
 class HasResponse r where
   toResponse :: r -> Response
 
@@ -218,7 +218,7 @@ clipContainer layout child = do
   styledContainer NodeContainer containerFlagClip layout (tagContainer wid *> child)
 
 -- | A 'container' of type @nt@ with style index @si@: a plain container's
--- flags, or a panel's row fill ('panelSurface').
+-- flags, or a panel's row fill (@panelSurface@).
 styledContainer :: NodeType -> Word64 -> Layout -> NanoUI a -> NanoUI a
 styledContainer nt si layout child = do
   idx <- withContext $ \ctx -> do

@@ -1,6 +1,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_HADDOCK not-home #-}
 
 -- | The 'Var' handle: a constant, or a cell plus a path into its value, with
 -- the paths' reads and writes, the list-element index, and the positional

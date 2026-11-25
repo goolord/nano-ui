@@ -1,4 +1,5 @@
 {-# LANGUAGE TypeFamilies #-}
+{-# OPTIONS_HADDOCK not-home #-}
 -- The 'BackendSession' instance for the RGFW session is an orphan by
 -- construction: the core owns the backend kind, and this package owns its
 -- session type.

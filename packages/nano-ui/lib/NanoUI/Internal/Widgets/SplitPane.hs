@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | Pure tree model and geometry for "NanoUI.Widgets.PaneGrid". A
 -- 'GridNode' is a binary split tree. Each split has an axis, a ratio in
 -- @[0,1]@ for its first (A) side, and two subtrees. Panes and splits have

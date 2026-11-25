@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE NoFieldSelectors #-}
+{-# OPTIONS_HADDOCK not-home #-}
 
 -- | SDL3 event polling and waiting, translation of SDL events into
 -- 'NanoUI.Input.Input', and syncing SDL's text input with the focused text

@@ -93,7 +93,7 @@ data Tab a body = Tab
   -- ^ A short count or status drawn in a pill after the title.
   , tabAdornments :: !Adornments
   -- ^ Icons, texts and views drawn in the header beside its title
-  -- ("NanoUI.Adornment"), in the header's label colour. An 'AdornControl',
+  -- ("NanoUI.Adornment"), in the header's label colour. An 'NanoUI.Adornment.AdornControl',
   -- such as a pin button, handles its own pointer events without selecting
   -- or closing the tab.
   , tabBody :: !body
@@ -130,7 +130,7 @@ tabHeaderH :: Float
 tabHeaderH = 30
 
 -- | A header's layout. The headers of a vertical strip share its width, and
--- start their labels at their padding ('tabLabelAtStart').
+-- start their labels at their padding (@tabLabelAtStart@).
 tabHeaderLay :: Bool -> Layout
 tabHeaderLay vertical = (if vertical then fillW else id) . fixedH tabHeaderH . alignMiddle . gap 6 $ defaultLayout
 

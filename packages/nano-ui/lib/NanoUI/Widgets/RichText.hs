@@ -1,6 +1,7 @@
 -- | Paragraphs of mixed-style text and links.
 module NanoUI.Widgets.RichText
-  ( Inline
+  ( -- * Inline pieces
+    Inline
   , inlineText
   , inlineWith
   , restyle
@@ -10,13 +11,15 @@ module NanoUI.Widgets.RichText
   , inlineBackground
   , inlineTooltip
   , hyperlink
+
+    -- * Paragraphs
   , richText
   , richText'
   , richTextWith
   , richTextWith'
-  , selectableRichTextWith
   , selectableRichText
   , selectableRichText'
+  , selectableRichTextWith
   , selectableRichTextWith'
   ) where
 

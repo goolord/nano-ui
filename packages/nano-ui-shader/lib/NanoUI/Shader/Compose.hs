@@ -169,7 +169,7 @@ surfaceShader ::
 surfaceShader f = surfaceShaderM (\u ctx -> pure (f u ctx))
 
 -- | Compile a monadic Tier 1 leaf 'Surface' fragment shader with explicit
--- 'bind' and 'forRange' support.
+-- 'bind' and 'NanoUI.Shader.Expr.forRange' support.
 surfaceShaderM ::
   Uniforms u =>
   (ExprU u -> FragCtx -> FragM (Expr V4)) ->
@@ -228,7 +228,7 @@ layerEffect ::
 layerEffect margin f = layerEffectM margin (\u ctx layer -> pure (f u ctx layer))
 
 -- | Compile a monadic neighborhood-sampling 'LayerEffect' with explicit
--- 'bind' and 'forRange' support.
+-- 'bind' and 'NanoUI.Shader.Expr.forRange' support.
 layerEffectM ::
   Uniforms u =>
   (u -> V2) ->

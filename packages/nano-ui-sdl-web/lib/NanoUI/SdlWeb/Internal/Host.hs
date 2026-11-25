@@ -1,4 +1,5 @@
 {-# LANGUAGE CPP #-}
+{-# OPTIONS_HADDOCK not-home #-}
 
 -- | What a session asks of the page it runs in: the canvas, the event
 -- queue, WebGL, the text input element and the clipboard. 'browserHost'
@@ -181,6 +182,8 @@ data CanvasInfo = CanvasInfo
   }
   deriving (Eq, Show)
 
+-- | Query the canvas's logical size, device pixel ratio, focus state, and
+-- color scheme from the browser host.
 queryCanvas :: WebHost -> IO CanvasInfo
 queryCanvas host = allocaArray 5 $ \p -> do
   whQueryCanvas host p

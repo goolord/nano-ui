@@ -1,4 +1,5 @@
 {-# LANGUAGE TemplateHaskell #-}
+{-# OPTIONS_HADDOCK not-home #-}
 
 -- | The bundled Cozette bitmap font: glyph lookup, metrics, and glyph bitmaps
 -- at 1x, 2x and 4x (EPX-scaled), box-averaged for other scales.

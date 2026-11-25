@@ -1,5 +1,5 @@
 -- | Expandable tree rows with a controlled pre-order selection index. Each
--- row is a button in the row look ('buttonFlagRow').
+-- row is a button in the row look (@buttonFlagRow@).
 module NanoUI.Internal.Widgets.Tree (TreeItem (..), tree, tree') where
 
 import Control.Monad (void, when, zipWithM)

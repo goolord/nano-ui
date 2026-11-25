@@ -18,7 +18,8 @@
 -- rectangle. The application resolves target priority and calls
 -- 'commitPaneDrop' only when it chooses to create a pane.
 module NanoUI.Widgets.PaneGrid
-  ( GridAxis (..)
+  ( -- * Split tree model
+    GridAxis (..)
   , CenterDropMode (..)
   , GridNode (..)
   , PaneTree (..)
@@ -28,15 +29,24 @@ module NanoUI.Widgets.PaneGrid
   , treeSplit
   , treeAddTab
   , treeSelectTab
+
+    -- * Configuration and pane context
   , PaneGridConfig (..)
   , defaultPaneGridConfig
   , PaneGridCtx (pgcPaneId, pgcRect, pgcMaximized, pgcInTabs, pgcDragging, pgcDndActive, pgcSplit, pgcClose, pgcMaximize, pgcRestore)
   , PaneView (..)
   , PaneGridResponse (..)
+
+    -- * External drag and drop
   , PaneEdge (..)
   , PaneDropLocation (..)
-  , PaneGridDrop, pgdLocation, pgdRect, pgdPane
+  , PaneGridDrop
+  , pgdLocation
+  , pgdRect
+  , pgdPane
   , commitPaneDrop
+
+    -- * Widgets
   , paneGrid
   , paneDragHandle
   ) where

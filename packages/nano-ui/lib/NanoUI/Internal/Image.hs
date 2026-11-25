@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | Pure image geometry: fit, alignment, crop, zoom, opacity and rotation.
 -- Covers the user options ('ImageConfig'), the per-node paint data
 -- ('ImageLook', 'lookDraw') and the canvas image record ('ImageDraw').

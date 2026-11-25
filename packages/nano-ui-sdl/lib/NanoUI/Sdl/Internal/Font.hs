@@ -83,7 +83,7 @@ dropGlyphTextures cache = do
   writeIORef (gaFull ga) True
 
 -- | Bracket an action with SDL_ttf initialisation, closing desktop coverage
--- probes before 'TTF_Quit'.
+-- probes before @TTF_Quit@.
 withTtf :: IO a -> IO a
 withTtf = Ttf.withTtf desktopHooks
 

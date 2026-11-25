@@ -16,7 +16,7 @@ import Data.Word (Word64)
 data GridAxis = AxisV | AxisH
   deriving (Eq, Ord, Show, Read, Enum, Bounded)
 
--- | How dropping a pane onto the center of another pane behaves in a 'PaneGrid'.
+-- | How dropping a pane onto the center of another pane behaves in a "NanoUI.Widgets.PaneGrid".
 data CenterDropMode
   = -- | Swap the dragged pane with the target pane (the default).
     CenterSwap

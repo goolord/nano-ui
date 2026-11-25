@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | The RGFW window session: options, the runners, the window and its
 -- OpenGL presentation. The events it polls are translated into
 -- 'NanoUI.Input.Input' by "NanoUI.Rgfw.Internal.Input".
@@ -130,7 +132,7 @@ data RgfwOptions = RgfwOptions
   -- 'WindowPositionDefault' centres the window. 'wsTransparent' and
   -- 'wsOpacity' do nothing: RGFW windows are always opaque.
   , optTheme  :: !Theme
-  -- ^ Any core theme; the backend draws it square ('NanoUI.Rgfw.Internal.Context.applyRgfwTheme').
+  -- ^ Any core theme; the backend draws it square ('NanoUI.Backend.Rgfw.applyRgfwTheme').
   -- The @Custom@ runners take the theme from the model instead.
   , optThemeFor :: !(Maybe (Maybe Appearance -> Theme))
   -- ^ Pick the theme from the desktop's light or dark setting, such as

@@ -32,7 +32,7 @@ import SDL3.Sys.Surface (convertPixels, destroySurface, saveBMP)
 -- retained session reads its retained texture, since SDL leaves the window
 -- backbuffer undefined after a present.
 --
--- A direct-to-window session ('sdlAppContinuous') has no retained frame and
+-- A direct-to-window session ('NanoUI.Backend.Sdl.sdlAppContinuous') has no retained frame and
 -- a readable one only between drawing and presenting, so from a view use
 -- 'NanoUI.requestScreenshot', which reads it at that point.
 saveScreenshot :: SdlEnv -> FilePath -> IO Bool
@@ -46,7 +46,7 @@ saveScreenshot env path =
 -- window colour's alpha where nothing covers it.
 -- 'Nothing' when SDL cannot read the frame back. Call on the display thread.
 --
--- A direct-to-window session ('sdlAppContinuous') has a readable frame only
+-- A direct-to-window session ('NanoUI.Backend.Sdl.sdlAppContinuous') has a readable frame only
 -- between drawing and presenting, so from a view use
 -- 'NanoUI.requestScreenshot', which reads it at that point.
 captureScreenshot :: SdlEnv -> IO (Maybe Screenshot)

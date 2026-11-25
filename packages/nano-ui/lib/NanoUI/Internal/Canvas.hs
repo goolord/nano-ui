@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | 'CanvasM', the monad custom widgets draw with. "NanoUI.Widgets.Custom"
 -- exports the API; this module also exposes the representation for tools
 -- that build their own draw ops.
@@ -187,7 +189,7 @@ drawImageWith = mapM_ emitOp . imageDrawOp
 drawText :: V2 -> AlignX -> AlignY -> Text -> Color -> CanvasM ()
 drawText (V2 x y) alignX alignY txt col = emitOp (DrawText x y (alignXFraction alignX) (alignYFrac alignY) txt col)
 
--- | 'drawText' with an explicit font: size, variant (such as 'FontMono'),
+-- | 'drawText' with an explicit font: size, variant (such as 'NanoUI.FontMono'),
 -- weight, slant and decoration.
 --
 -- > drawTextWith defaultTextFont {textFontSize = 20, textFontWeight = WeightBold} (V2 cx cy) AlignCenter AlignMiddle "42" ink

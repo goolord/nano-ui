@@ -455,7 +455,7 @@ emitDrawOps da fm size resolve imageUv ops = go 0 []
 -- text a drawing's text has no quads and no node span, so the host draws it
 -- from this one ('daTextSpans'), in the current clip and filed by layer. An
 -- empty clip records nothing, as it gets no command. Top level and out of
--- line so 'emitDrawOps'' local closures capture nothing more for it.
+-- line so the local closures of 'emitDrawOps' capture nothing more for it.
 {-# NOINLINE pushTextSpan #-}
 pushTextSpan :: DrawArena -> Rect -> T.Text -> Color -> IO ()
 pushTextSpan da !box t c = unless (T.null t) $ do

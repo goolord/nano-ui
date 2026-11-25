@@ -44,8 +44,8 @@ domainExtentBy :: GV.Vector v a => (a -> Double) -> v a -> Domain
 domainExtentBy project = settleDomain . domainBoundsBy project
 {-# INLINE domainExtentBy #-}
 
--- | The least and greatest finite values after a projection, without
--- 'domainExtent''s fallbacks: no finite values give the empty domain from
+-- | The least and greatest finite values after a projection, without the
+-- fallbacks of 'domainExtent': no finite values give the empty domain from
 -- infinity down to minus infinity, which 'mergeDomains' leaves out. Merge
 -- the bounds of several series, then 'settleDomain' the result.
 domainBoundsBy :: GV.Vector v a => (a -> Double) -> v a -> Domain

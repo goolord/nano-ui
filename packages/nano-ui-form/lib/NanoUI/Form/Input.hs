@@ -2,9 +2,12 @@
 -- "NanoUI.Form" re-exports these. Use a string literal for a labelled, named
 -- field, or 'unnamed' for a positional input.
 module NanoUI.Form.Input
-  ( FieldName (..)
+  ( -- * Field names
+    FieldName (..)
   , named
   , unnamed
+
+    -- * Input fields
   , inputText
   , inputTextWithPlaceholder
   , inputPassword
@@ -16,8 +19,12 @@ module NanoUI.Form.Input
   , inputRadio
   , inputEnumRadio
   , inputColor
+
+    -- * Static labels and separators
   , formLabel
   , formSeparator
+
+    -- * Errors
   , errors
   , childErrors
   , withErrors

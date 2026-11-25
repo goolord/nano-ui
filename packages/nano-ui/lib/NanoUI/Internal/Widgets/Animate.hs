@@ -68,7 +68,7 @@ animateToA transition =
 
 -- | A smoothly oscillating value in @[0,1]@ driven by the real-time clock, with
 -- the given period in seconds (e.g. @pulse 6@ sweeps once every six seconds).
--- The time is captured in 'Double' (see 'NanoUI.Internal.Monad.uiTime'), so the sweep
+-- The time is captured in 'Double' (see 'NanoUI.uiTime'), so the sweep
 -- stays sub-frame smooth even on long-running processes. Unlike 'animate', it
 -- asks for no frames: pair it with 'keepAnimating' for continuous motion, or
 -- 'wakeAfter' for stepped updates, or it changes only when something else
@@ -82,7 +82,7 @@ pulse periodSec = do
 
 -- | Keep a widget animating for as long as this is called, so the frame loop
 -- does not idle. Widgets driven by the wall clock ('pulse', or drawing from
--- 'NanoUI.Internal.Monad.uiTime') rather than by a frame-counted animation would
+-- 'NanoUI.uiTime') rather than by a frame-counted animation would
 -- otherwise stop repainting once other animations settle. Call it every
 -- frame the widget is shown: the loop goes back to sleep on the first frame
 -- that leaves it out.

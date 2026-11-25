@@ -1,6 +1,6 @@
 -- | Assertion and frame helpers for the integration test suite.
 --
--- Assertions count failures in a shared 'IORef' instead of aborting, so one
+-- Assertions count failures in a shared 'Data.IORef.IORef' instead of aborting, so one
 -- test reports every broken expectation. Each failure prints the caller's
 -- source location and, where there are any, the compared values. 'require'
 -- and 'requireEq' fail at once instead, for a suite whose later checks make

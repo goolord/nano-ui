@@ -84,8 +84,8 @@ data FontMetrics = FontMetrics
   -- | Device pixels per logical unit used to snap glyph quads to the pixel grid.
   , fmSnapScale :: {-# UNPACK #-} !Float
   , fmAdvance :: Char -> Float
-  -- ^ A character's advance. A font whose @' '@, @'x'@ and @'M'@ share one,
-  -- with no kerning between @'x'@ and @'M'@, is taken as monospace.
+  -- ^ A character's advance. A font whose @\' \'@, @\'x\'@ and @\'M\'@ share one,
+  -- with no kerning between @\'x\'@ and @\'M\'@, is taken as monospace.
   , fmKerning :: Char -> Char -> Float
   , fmShape :: Text -> Maybe ShapedText
   -- ^ Shaped line metrics when the host prepared metrics for this text.

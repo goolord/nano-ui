@@ -1,5 +1,5 @@
--- | Two-generation 'IntMap' cache bounded to a small multiple of the entries
--- touched in a frame. Companion caches ('MarkdownCache', 'PlotCache') use it
+-- | Two-generation 'Data.IntMap.Strict.IntMap' cache bounded to a small multiple of the entries
+-- touched in a frame. Companion caches (@MarkdownCache@, @PlotCache@) use it
 -- so churning or growing widget ids never retain unbounded stale entries.
 module NanoUI.Internal.GenCache
   ( IntGenCache
@@ -14,7 +14,7 @@ module NanoUI.Internal.GenCache
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 
--- | Mutable two-generation cache keyed by 'Int' (typically 'intKey').
+-- | Mutable two-generation cache keyed by 'Int' (typically @intKey@).
 newtype IntGenCache a = IntGenCache (IORef (GenState a))
 
 data GenState a = GenState

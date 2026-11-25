@@ -233,7 +233,7 @@ data TextFont = TextFont
   , textFontStyle :: !FontStyle
   , textFontDecoration :: !TextDecoration
   , textFontTabular :: !Bool
-  -- ^ Uniform-width ASCII digits ('NanoUI.Internal.Style.fontTabular').
+  -- ^ Uniform-width ASCII digits ('NanoUI.fontTabular').
   }
   deriving (Eq, Show)
 

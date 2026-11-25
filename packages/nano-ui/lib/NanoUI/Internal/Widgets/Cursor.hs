@@ -15,10 +15,10 @@ import NanoUI.Internal.Monad (NanoUI, askContext, withArenaRange)
 --
 -- Widgets with their own cursor keep it: a button still shows the hand and a
 -- text field the I-beam. A custom widget whose
--- 'NanoUI.Widgets.Custom.widgetCursor' returns 'UiCursorDefault' shows the
+-- 'NanoUI.Widgets.Custom.widgetCursor' returns 'NanoUI.UiCursorDefault' shows the
 -- scope's shape. Disabled widgets have no cursor of their own, so they show
 -- the scope's shape too. The innermost scope wins, so a nested
--- @withCursorShape UiCursorDefault@ restores the arrow, and 'UiCursorHidden'
+-- @withCursorShape UiCursorDefault@ restores the arrow, and 'NanoUI.UiCursorHidden'
 -- hides the pointer.
 --
 -- > withCursorShape UiCursorCrosshair (drawing (fixedWH 320 200) plot)

@@ -1,7 +1,7 @@
 -- | SDL3 native file dialogs.
 --
--- These wrap SDL3's asynchronous dialog API ('SDL_ShowOpenFileDialog',
--- 'SDL_ShowSaveFileDialog', and 'SDL_ShowOpenFolderDialog') into a
+-- These wrap SDL3's asynchronous dialog API (@SDL_ShowOpenFileDialog@,
+-- @SDL_ShowSaveFileDialog@, and @SDL_ShowOpenFolderDialog@) into a
 -- non-blocking, poll-based interface. Launching a dialog returns a
 -- 'FileDialogId' immediately and the app keeps running its normal event loop;
 -- poll the handle on later frames to observe completion.

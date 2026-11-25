@@ -1,4 +1,11 @@
--- | Validated forms for nano-ui, built on ditto. A 'Form' is an applicative
+-- |
+-- Module      : NanoUI.Form
+-- Description : Validated applicative forms for nano-ui
+-- Copyright   : (c) 2026 Zachary Churchill
+-- License     : MIT
+-- Maintainer  : zacharyachurchill@gmail.com
+--
+-- Validated forms for nano-ui, built on ditto. A 'Form' is an applicative
 -- value whose inputs are nano-ui widgets; run one in a view with
 -- 'nanoFormLive', 'nanoFormSubmit', 'nanoFormEx' or 'runNanoForm'.
 module NanoUI.Form

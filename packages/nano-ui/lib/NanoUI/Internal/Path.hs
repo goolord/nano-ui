@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | Paths, affine transforms, and the geometry that turns them into draw ops:
 -- curve flattening, SVG arc conversion, nesting rings into polygons with
 -- holes, triangulation for 'FillPolygon', dashes, miters and gradients.

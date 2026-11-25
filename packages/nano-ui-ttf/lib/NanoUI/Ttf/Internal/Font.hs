@@ -149,7 +149,7 @@ data FontHooks = FontHooks
   , fhPathEncoding :: !(IO TextEncoding)
   -- ^ Encoding used for font file paths passed to SDL_ttf.
   , fhOnTtfQuit :: !(IO ())
-  -- ^ Cleanup action run before 'TTF_Quit' (e.g. closing coverage probes).
+  -- ^ Cleanup action run before @TTF_Quit@ (e.g. closing coverage probes).
   }
 
 -- | Hooks with no system font search, no bold-face lookup, and UTF-8 paths.
@@ -531,7 +531,7 @@ placeClusters stops charAt n clusterPtr nClusters byteStart pen = go 0
               go (i + 1) end'
 
 -- | The caret x before each of the line's @n@ characters and after the last
--- (@endStop@), in layout units. A character no cluster placed ('NaN' in
+-- (@endStop@), in layout units. A character no cluster placed (@NaN@ in
 -- @stops@) takes the caret before it.
 fillCarets :: MutablePrimArray RealWorld Float -> Int -> Float -> Float -> IO (PrimArray Float)
 fillCarets stops n inv endStop = do
@@ -648,7 +648,7 @@ buildGlyphFontMetrics hooks ga sf scale = do
   fm <- prepareText ""
   pure (fm, measure)
 
--- | Bracket an action with 'TTF_Init' and 'TTF_Quit', running 'fhOnTtfQuit'
+-- | Bracket an action with @TTF_Init@ and @TTF_Quit@, running 'fhOnTtfQuit'
 -- before shutting down SDL_ttf.
 withTtf :: FontHooks -> IO a -> IO a
 withTtf hooks =
@@ -741,6 +741,7 @@ data CachedFontEntry = CachedFontEntry
 data SdlFontCache = SdlFontCache
   { sfcHooks :: !FontHooks
   , sfcGlyphAtlas :: !GlyphAtlas
+  -- ^ Glyph atlas shared by every font face in this cache.
   , sfcBasePt :: !Float
   , sfcScaleRef :: !(IORef Float)
   , sfcMonoSource :: !FontSource

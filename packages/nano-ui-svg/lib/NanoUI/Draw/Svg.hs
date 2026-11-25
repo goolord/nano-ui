@@ -1,7 +1,14 @@
 {-# LANGUAGE StrictData #-}
 
--- | Render 'DrawOp' arrays to SVG. Build the ops with a canvas
--- ("NanoUI.Widgets.Custom"), a 'NanoUI.drawing', or a diagrams-lib backend
+-- |
+-- Module      : NanoUI.Draw.Svg
+-- Description : Render nano-ui DrawOp arrays to SVG
+-- Copyright   : (c) 2026 Zachary Churchill
+-- License     : MIT
+-- Maintainer  : zacharyachurchill@gmail.com
+--
+-- Render 'DrawOp' arrays to SVG. Build the ops with a canvas
+-- ("NanoUI.Widgets.Custom"), a 'NanoUI.Widgets.Custom.drawing', or a diagrams-lib backend
 -- ("NanoUI.Diagrams.Backend"), then export them as vector graphics:
 --
 -- > let ops = runCanvasFor cdc $ do
@@ -390,7 +397,7 @@ trianglesValid n tris =
  where
   !nt = sizeofPrimArray tris - sizeofPrimArray tris `mod` 3
 
--- | A 'FillPolygon''s rings as path data, outline first, or 'Nothing' when
+-- | The rings of a 'FillPolygon' as path data, outline first, or 'Nothing' when
 -- the rings or their points are malformed.
 ringsPathData :: Int -> PrimArray Float -> PrimArray Int -> Maybe TB.Builder
 ringsPathData p pts rings

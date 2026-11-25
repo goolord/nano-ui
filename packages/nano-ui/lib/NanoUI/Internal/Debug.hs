@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | Debug readout sampling shared by the backends: frame timing and skip
 -- counts, RTS statistics, draw counts, and the rows shown by the debug
 -- windows and the layout overlay.

@@ -1,6 +1,7 @@
 -- | Shared helpers for integration tests: input gestures, spans, scroll checks.
 module NanoUI.Testing.Harness
-  ( clickPair
+  ( -- * Input gestures
+    clickPair
   , clickPairWith
   , rightClickPair
   , pressAt
@@ -16,29 +17,25 @@ module NanoUI.Testing.Harness
   , withInputOff
   , withDelta
   , centerOf
+
+    -- * Frame warmup and interaction drivers
   , warmup
   , warmup2
   , warmupDraw
   , warmupFocused
   , setFocus
   , held
-  , FrameCost (..)
-  , frameCost
   , runClick
   , runRightClick
-  , assertSpansHas
-  , spanYOf
-  , spanXOf
-  , spanRect
-  , spanRectOf
-  , covers
-  , clipCovers
-  , damageCovers
+  , runDragFrom
+  , clickPos
+  , clickTab
+  , dragPos
+  , dragWindowEdge
   , findGrabHover
   , cursorOver
-  , dragWindowEdge
-  , vertUv
-  , runDragFrom
+
+    -- * Text spans and bounds
   , DemoSpan
   , spanCenter
   , hasText
@@ -48,18 +45,30 @@ module NanoUI.Testing.Harness
   , findRightmost
   , requireSpan
   , expectText
-  , clickPos
-  , clickTab
-  , dragPos
-  , drawQuads
+  , assertSpansHas
+  , spanYOf
+  , spanXOf
+  , spanRect
+  , spanRectOf
+  , covers
+  , clipCovers
+  , damageCovers
+
+    -- * Draw buffer and arena inspection
   , Vertex (..)
   , vertexColor
+  , vertUv
   , drawnVertices
   , indexedVertices
   , textureVertices
   , drawTriangles
   , trianglePicture
+  , drawQuads
   , nodesOfType
+
+    -- * Timing, wakes, and benchmarks
+  , FrameCost (..)
+  , frameCost
   , newWakeSignal
   , measureRuns
   ) where
@@ -329,7 +338,7 @@ keyInp k inp = inp {inputKeys = ks, inputKeysNew = ks}
 keyRepeatInp :: Key -> Input -> Input
 keyRepeatInp k inp = inp {inputKeys = inputKeysFromList [k], inputKeysNew = mempty}
 
--- | A frame pressing a chord such as @ctrl <> key 'a'@, with exactly the
+-- | A frame pressing a chord such as @ctrl <> key \'a\'@, with exactly the
 -- chord's modifiers held.
 chordInp :: Shortcut -> Input -> Input
 chordInp (Shortcut k mods) inp =

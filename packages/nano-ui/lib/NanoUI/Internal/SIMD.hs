@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | Vertex and index writers for the draw buffers. They write with scalar
 -- stores, which measured no slower than packed 128-bit ones.
 module NanoUI.Internal.SIMD

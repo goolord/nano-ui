@@ -66,41 +66,6 @@ module NanoUI
   , requestFrame
   , lastRect
 
-    -- * Focus
-
-    -- | Tab moves focus between focusable widgets. Clicking a text field, a
-    -- select, or a focusable custom widget (a knob, or a canvas with
-    -- 'canvasFocusable') focuses it; clicking anywhere else unfocuses the
-    -- current field.
-    -- A view that handles keyboard input directly can call 'holdFocus' each
-    -- frame to claim focus and receive Tab events.
-    --
-    -- 'requestFocus' focuses a widget, identified by its response's 'respId' or
-    -- by 'currentId' just before declaring it. 'focusNext' and
-    -- 'focusPrevious' act like Tab and Shift+Tab, and 'clearFocus' unfocuses.
-    -- Focus changes apply at the end of the frame and behave like Tab: the
-    -- target widget shows the focus ring, a text field preserves its caret,
-    -- the previously focused field drops its selection and commits, and the
-    -- next Tab continues from the newly focused widget. Disabled widgets and
-    -- widgets behind an open modal cannot be focused. Check focus state with
-    -- 'isFocused' on the next frame:
-    --
-    -- > resp <- searchInput' "Find" query
-    -- > findPressed <- shortcut (ctrl <> key 'f')
-    -- > when findPressed (requestFocus (respId resp))
-    --
-    -- 'NanoUI.Monad.releaseFocus' clears focus immediately mid-frame.
-  , holdFocus
-  , requestFocus
-  , focusNext
-  , focusPrevious
-  , clearFocus
-  , isFocused
-
-    -- * Clipboard
-  , getClipboard
-  , setClipboard
-
     -- * Widget identity
 
     -- | Every widget receives the next 'WidgetId' in its container: IDs count
@@ -172,6 +137,33 @@ module NanoUI
   , withContainerWidth
   , responsiveIn
   , responsiveRowColIn
+  , separator
+  , spacer
+  , spacerW
+  , spacerH
+  , flex
+  , layers
+  , layersWith
+  , layersWith'
+  , mouseArea
+
+    -- * Scrolling
+
+    -- | Scroll containers ('scroll', 'scroll2D') handle mouse wheel input and
+    -- scrollbars automatically. The control functions below adjust scroll
+    -- position and tuning from inside a view using the 'WidgetId' from
+    -- 'scrollWith'', 'scroll2DWith'', or 'scrollConfigured'' (or 'currentId'
+    -- immediately before declaring the scroll container):
+    --
+    -- > sid <- currentId
+    -- > when moved (scrollRectIntoView sid (Rect 0 (row * rowH) 1 rowH) ScrollNearest ScrollInstant)
+    -- > metrics <- getScrollMetrics sid
+    -- > (picked, _) <- scrollWith' (fillW . fillH) (visibleRows metrics)
+    --
+    -- 'setScrollTuning' configures wheel step distance and smooth-scroll
+    -- duration globally; 'setScrollStep' overrides the wheel step for one
+    -- scroll container. Tab and 'requestFocus' scroll focused widgets into
+    -- view automatically.
   , ScrollPolicy (..)
   , ScrollConfig (..)
   , defaultScrollConfig
@@ -184,15 +176,71 @@ module NanoUI
   , scroll2DWith'
   , scrollConfigured
   , scrollConfigured'
-  , separator
-  , spacer
-  , spacerW
-  , spacerH
-  , flex
-  , layers
-  , layersWith
-  , layersWith'
-  , mouseArea
+  , ScrollTuning (..)
+  , defaultScrollTuning
+  , getScrollTuning
+  , setScrollTuning
+  , ScrollMetrics (..)
+  , ScrollAxes (..)
+  , ScrollBehavior (..)
+  , ScrollAlign (..)
+  , getScrollMetrics
+  , setScrollOffset
+  , scrollTo
+  , scrollBy
+  , scrollPages
+  , scrollToStart
+  , scrollToEnd
+  , scrollIntoView
+  , scrollRectIntoView
+  , setScrollStep
+
+    -- * Visibility
+
+    -- | A visibility sensor reports whether a widget's bounds intersect the
+    -- window and all enclosing clip rects (scroll containers, panels, and
+    -- floating windows). 'sensor' wraps a subtree in a monitored container;
+    -- 'useVisibility' monitors an existing widget by 'WidgetId'.
+    --
+    -- Because layout runs after the view pass, visibility reflects the
+    -- previous frame's layout (like 'respRect'). When layout changes a
+    -- sensor's visibility, the frame loop schedules a follow-up pass and
+    -- reports the transition in 'visEvent' on the first pass of that frame.
+    -- If a sensor call is omitted on a frame (e.g. inside an inactive tab or
+    -- skipped 'scope'), its state is cleared and it will report
+    -- 'BecameVisible' again when re-entered.
+    --
+    -- 'sensorAnticipate' expands the intersection margin outward (in pixels)
+    -- for prefetching ahead of scroll. 'sensorDelay' requires the target to
+    -- remain in view for a minimum duration before firing, avoiding work for
+    -- rows scrolled past quickly. 'visRect' is the visible intersection and
+    -- 'visBounds' is the full widget rect:
+    --
+    -- Make @pictureVar <- newVar Nothing@ once during component setup.
+    --
+    -- > thumbnail :: Var (Maybe ImageId) -> FilePath -> NanoUI ()
+    -- > thumbnail pictureVar path = do
+    -- >   picture <- readVar pictureVar
+    -- >   let cfg = defaultSensorConfig {sensorAnticipate = 200, sensorLayout = fixedWH 96 96}
+    -- >   (vis, _) <- sensorConfigured cfg $
+    -- >     maybe (label "Loading") (image (fixedWH 96 96)) picture
+    -- >   when (becameVisible vis && isNothing picture) $ do
+    -- >     (w, h, rgba) <- liftIO (decodeRgba path)
+    -- >     iid <- freshImageId
+    -- >     whenM (registerImageRgba iid w h rgba) (writeVar pictureVar (Just iid))
+    -- >   when (becameHidden vis) $ do
+    -- >     mapM_ releaseImageRgba picture
+    -- >     writeVar pictureVar Nothing
+  , Visibility (..)
+  , VisibilityEvent (..)
+  , becameVisible
+  , becameHidden
+  , sensor
+  , sensorWith
+  , SensorConfig (..)
+  , defaultSensorConfig
+  , sensorConfigured
+  , useVisibility
 
     -- * Text
   , label
@@ -213,6 +261,9 @@ module NanoUI
   , selectableText'
   , selectableTextWith
   , selectableTextWith'
+
+    -- ** Rich text
+  , module NanoUI.Widgets.RichText
 
     -- * Buttons and menus
   , button
@@ -307,7 +358,7 @@ module NanoUI
   , colorToHexA
   , colorFromHex
 
-    -- * Text editing
+    -- ** Text editing
 
     -- | Text fields apply edits through 'TextCommand's. Keyboard input
     -- (Backspace is @'Delete' 'CharLeft'@, Ctrl+Z is 'Undo'), the right-click
@@ -329,6 +380,8 @@ module NanoUI
   , module NanoUI.Widgets.TextField
 
     -- * Tabs, trees, and tables
+
+    -- ** Tabs
   , Tab (..)
   , TabStyle (..)
   , TabOrientation (..)
@@ -351,9 +404,13 @@ module NanoUI
   , enumTabBarBy
   , enumTabBarByConfigured
   , enumTabBar
+
+    -- ** Trees
   , TreeItem (..)
   , tree
   , tree'
+
+    -- ** Tables
   , SortDir (..)
   , SortCol (..)
   , SortKey (..)
@@ -385,6 +442,8 @@ module NanoUI
   , cellWidthText
 
     -- * Overlays
+
+    -- ** Modals and floating windows
   , modal
   , modal'
   , modalWith
@@ -397,6 +456,8 @@ module NanoUI
   , floatingWindow'
   , floatingWindowWith
   , floatingWindowWith'
+
+    -- ** Popups
   , PopupAnchor (..)
   , PopupPlacement (..)
   , PopupConfig (..)
@@ -405,10 +466,8 @@ module NanoUI
   , popup'
   , popupWith
   , popupWith'
-  , tooltip
-  , tooltipAt
-  , tooltipWidget
-  , withTooltip
+
+    -- ** Tooltips
 
     -- | A tooltip opens after the pointer rests on its target for
     -- 'tooltipDelay', or immediately if another tooltip was recently open. It
@@ -416,15 +475,16 @@ module NanoUI
     -- restarts the delay timer via a timed wake without spinning the frame
     -- loop. 'PlacementAtCursor' positions the tooltip 'tooltipGap' below the
     -- cursor. Tooltips also appear on disabled widgets.
+  , tooltip
+  , tooltipAt
+  , tooltipWidget
+  , withTooltip
   , TooltipConfig (..)
   , defaultTooltipConfig
   , tooltipConfigured
   , tooltipWidgetConfigured
 
-    -- * Rich text
-  , module NanoUI.Widgets.RichText
-
-    -- * Images and drawing
+    -- * Images and SVG
   , ImageId (..)
   , image
   , image'
@@ -445,11 +505,34 @@ module NanoUI
   , svgSize
   , box
 
-    -- ** Fragment shaders
+    -- ** Image fit, opacity, and rotation
+
+    -- | 'imageConfigured' fits an image into its layout rect (similar to CSS
+    -- @object-fit@ via 'ContentFit'), with alignment, cropping, zoom, opacity,
+    -- and 'Rotation'. Unlike 'image', an axis left at fit sizing uses the
+    -- image's natural dimension, and a fit height preserves aspect ratio:
+    --
+    -- > imageConfigured defaultImageConfig {icFit = FitContain, icLayout = fixedWH 200 120} photo
+    -- > imageConfigured defaultImageConfig {icRotation = RotateSolid (pi / 2), icOpacity = 0.5} photo
+    -- > imageConfigured defaultImageConfig {icLayout = fillW, icCrop = Just (Rect 0 0 64 64)} sheet
+    --
+    -- 'svgIconConfigured' applies the same rules to SVG icons. 'fitRect'
+    -- computes the destination rectangle for canvases drawing images with
+    -- 'drawImageWith'.
+  , ContentFit (..)
+  , Rotation (..)
+  , rotationAngle
+  , ImageConfig (..)
+  , defaultImageConfig
+  , imageConfigured
+  , imageConfigured'
+  , fitRect
+
+    -- * Shaders
 
     -- | Pure, phantom-typed fragment shaders for leaf surfaces ('shaderBox',
     -- 'shaderConfigured') and subtree effects ('withShader', 'withShader'').
-    -- Uniform records derive 'Uniforms' via 'GHC.Generics' for std140 packing
+    -- Uniform records derive 'Uniforms' via "GHC.Generics" for std140 packing
     -- and automatic paint-hash damage tracking. Use @nano-ui-shader@ to author
     -- multi-backend fragment shaders in typed Haskell, or "NanoUI.Shader.Raw"
     -- for hand-written backend sources.
@@ -473,29 +556,6 @@ module NanoUI
   , withShader'
   , withShaderWith
   , withShaderWith'
-
-    -- * Image fit, opacity and rotation
-
-    -- | 'imageConfigured' fits an image into its layout rect (similar to CSS
-    -- @object-fit@ via 'ContentFit'), with alignment, cropping, zoom, opacity,
-    -- and 'Rotation'. Unlike 'image', an axis left at fit sizing uses the
-    -- image's natural dimension, and a fit height preserves aspect ratio:
-    --
-    -- > imageConfigured defaultImageConfig {icFit = FitContain, icLayout = fixedWH 200 120} photo
-    -- > imageConfigured defaultImageConfig {icRotation = RotateSolid (pi / 2), icOpacity = 0.5} photo
-    -- > imageConfigured defaultImageConfig {icLayout = fillW, icCrop = Just (Rect 0 0 64 64)} sheet
-    --
-    -- 'svgIconConfigured' applies the same rules to SVG icons. 'fitRect'
-    -- computes the destination rectangle for canvases drawing images with
-    -- 'drawImageWith'.
-  , ContentFit (..)
-  , Rotation (..)
-  , rotationAngle
-  , ImageConfig (..)
-  , defaultImageConfig
-  , imageConfigured
-  , imageConfigured'
-  , fitRect
 
     -- * Canvas and built-in custom widgets
 
@@ -537,6 +597,8 @@ module NanoUI
   , drawStrokePathWith
   , withTransform
   , withClip
+
+    -- ** Caching and gestures
   , contentKey
   , contentKeyOf
   , KeyPart
@@ -544,6 +606,8 @@ module NanoUI
   , useDrag2DOn
   , Drag2D (..)
   , useWheelDeltaOn
+
+    -- ** Built-in custom widgets
   , knob
   , knob'
   , knobWith
@@ -568,6 +632,8 @@ module NanoUI
   , sparkline'
   , sparklineWith
   , sparklineWith'
+
+    -- ** Text measurement
   , FontMetrics (fmLineHeight, fmAscent)
   , lineWidth
   , lineWidthUi
@@ -576,22 +642,6 @@ module NanoUI
   , uiFontMetrics
   , uiFontSize
   , resolveFontUi
-  , UiCursorKind (..)
-
-    -- * Cursors
-
-    -- | Built-in widgets set an appropriate cursor when hovered (pointer hand
-    -- on buttons, I-beam on text fields, or 'widgetCursor' on custom widgets).
-    -- 'withCursorShape' sets a fallback cursor for a subtree when no inner
-    -- widget overrides it:
-    --
-    -- > withCursorShape UiCursorMove (canvas (fixedWH 320 200) board)
-    --
-    -- 'UiCursorDefault' indicates no widget override (or resets to the default
-    -- arrow inside 'withCursorShape'). 'UiCursorHidden' hides the cursor.
-    -- Disabled widgets fall back to the default arrow unless wrapped in
-    -- @withCursorShape UiCursorNotAllowed@.
-  , withCursorShape
 
     -- * Drag and drop
   , DropType (..)
@@ -664,89 +714,6 @@ module NanoUI
   , useTask
   , useStream
   , askWake
-
-    -- * Scrolling
-
-    -- | Scroll containers ('scroll', 'scroll2D') handle mouse wheel input and
-    -- scrollbars automatically. The functions below control scroll position
-    -- and tuning from inside a view using the 'WidgetId' from 'scrollWith'',
-    -- 'scroll2DWith'', or 'scrollConfigured'' (or 'currentId' immediately
-    -- before declaring the scroll container):
-    --
-    -- > sid <- currentId
-    -- > when moved (scrollRectIntoView sid (Rect 0 (row * rowH) 1 rowH) ScrollNearest ScrollInstant)
-    -- > metrics <- getScrollMetrics sid
-    -- > (picked, _) <- scrollWith' (fillW . fillH) (visibleRows metrics)
-    --
-    -- 'setScrollTuning' configures wheel step distance and smooth-scroll
-    -- duration globally; 'setScrollStep' overrides the wheel step for one
-    -- scroll container. Tab and 'requestFocus' scroll focused widgets into
-    -- view automatically.
-  , ScrollTuning (..)
-  , defaultScrollTuning
-  , getScrollTuning
-  , setScrollTuning
-  , ScrollMetrics (..)
-  , ScrollAxes (..)
-  , ScrollBehavior (..)
-  , ScrollAlign (..)
-  , getScrollMetrics
-  , setScrollOffset
-  , scrollTo
-  , scrollBy
-  , scrollPages
-  , scrollToStart
-  , scrollToEnd
-  , scrollIntoView
-  , scrollRectIntoView
-  , setScrollStep
-
-    -- * Visibility
-
-    -- | A visibility sensor reports whether a widget's bounds intersect the
-    -- window and all enclosing clip rects (scroll containers, panels, and
-    -- floating windows). 'sensor' wraps a subtree in a monitored container;
-    -- 'useVisibility' monitors an existing widget by 'WidgetId'.
-    --
-    -- Because layout runs after the view pass, visibility reflects the
-    -- previous frame's layout (like 'respRect'). When layout changes a
-    -- sensor's visibility, the frame loop schedules a follow-up pass and
-    -- reports the transition in 'visEvent' on the first pass of that frame.
-    -- If a sensor call is omitted on a frame (e.g. inside an inactive tab or
-    -- skipped 'scope'), its state is cleared and it will report
-    -- 'BecameVisible' again when re-entered.
-    --
-    -- 'sensorAnticipate' expands the intersection margin outward (in pixels)
-    -- for prefetching ahead of scroll. 'sensorDelay' requires the target to
-    -- remain in view for a minimum duration before firing, avoiding work for
-    -- rows scrolled past quickly. 'visRect' is the visible intersection and
-    -- 'visBounds' is the full widget rect:
-    --
-    -- Make @pictureVar <- newVar Nothing@ once during component setup.
-    --
-    -- > thumbnail :: Var (Maybe ImageId) -> FilePath -> NanoUI ()
-    -- > thumbnail pictureVar path = do
-    -- >   picture <- readVar pictureVar
-    -- >   let cfg = defaultSensorConfig {sensorAnticipate = 200, sensorLayout = fixedWH 96 96}
-    -- >   (vis, _) <- sensorConfigured cfg $
-    -- >     maybe (label "Loading") (image (fixedWH 96 96)) picture
-    -- >   when (becameVisible vis && isNothing picture) $ do
-    -- >     (w, h, rgba) <- liftIO (decodeRgba path)
-    -- >     iid <- freshImageId
-    -- >     whenM (registerImageRgba iid w h rgba) (writeVar pictureVar (Just iid))
-    -- >   when (becameHidden vis) $ do
-    -- >     mapM_ releaseImageRgba picture
-    -- >     writeVar pictureVar Nothing
-  , Visibility (..)
-  , VisibilityEvent (..)
-  , becameVisible
-  , becameHidden
-  , sensor
-  , sensorWith
-  , SensorConfig (..)
-  , defaultSensorConfig
-  , sensorConfigured
-  , useVisibility
 
     -- * Animation
   , Transition (..)
@@ -851,7 +818,34 @@ module NanoUI
   , PointerMode (..)
   , pointer
 
-    -- * Text style
+    -- * Styling and themes
+
+    -- | A 'Theme' defines surface styles ('Style' for buttons, inputs, panels,
+    -- floating windows, popups) and semantic colors (accents, text selection,
+    -- links). 'setTheme' sets the active base theme, and 'styled' applies a
+    -- 'Theme' -> 'Theme' modifier to a subtree. Style and theme modifiers
+    -- compose with @(.)@:
+    --
+    -- > toolbar = styled (subtle . buttonStyle (cornerRadius 6)) $ row $ do
+    -- >   whenM (button "Open") openFile
+    -- >   styled primary (whenM (button "Save") save)
+    --
+    -- The page behind the view is the window background by default
+    -- ('pageBackground'; 'themeWindow'), laid under the content. 'panelPage'
+    -- gives a view that draws no panel the panel surface instead.
+    --
+    -- Nested 'styled' calls modify the enclosing theme, so semantic modifiers
+    -- ('primary', 'destructive', etc.) adapt to whichever base theme is
+    -- active. 'uiTheme' reads the current theme in the view.
+    --
+    -- 'disabledWhen' disables all widgets in a subtree: they keep their layout
+    -- and state, ignore input, and render with dimmed colors.
+  , styled
+  , themed
+  , disabledWhen
+  , uiTheme
+
+    -- ** Text style
   , FontVariant (..)
   , FontWeight (..)
   , FontStyle (..)
@@ -890,33 +884,6 @@ module NanoUI
   , ellipsisStart
   , Tone (..)
   , fontTone
-
-    -- * Styling
-
-    -- | A 'Theme' defines surface styles ('Style' for buttons, inputs, panels,
-    -- floating windows, popups) and semantic colors (accents, text selection,
-    -- links). 'setTheme' sets the active base theme, and 'styled' applies a
-    -- 'Theme' -> 'Theme' modifier to a subtree. Style and theme modifiers
-    -- compose with @(.)@:
-    --
-    -- > toolbar = styled (subtle . buttonStyle (cornerRadius 6)) $ row $ do
-    -- >   whenM (button "Open") openFile
-    -- >   styled primary (whenM (button "Save") save)
-    --
-    -- The page behind the view is the window background by default
-    -- ('pageBackground'; 'themeWindow'), laid under the content. 'panelPage'
-    -- gives a view that draws no panel the panel surface instead.
-    --
-    -- Nested 'styled' calls modify the enclosing theme, so semantic modifiers
-    -- ('primary', 'destructive', etc.) adapt to whichever base theme is
-    -- active. 'uiTheme' reads the current theme in the view.
-    --
-    -- 'disabledWhen' disables all widgets in a subtree: they keep their layout
-    -- and state, ignore input, and render with dimmed colors.
-  , styled
-  , themed
-  , disabledWhen
-  , uiTheme
 
     -- ** Style modifiers
   , background
@@ -962,7 +929,7 @@ module NanoUI
   , readableOn
   , disabledTheme
 
-    -- * Themes
+    -- ** Themes
   , Theme (..)
   , Style (..)
   , defaultTheme
@@ -1015,41 +982,40 @@ module NanoUI
   , v2Add
   , v2Sub
 
-    -- * Input
+    -- * Input, focus, and shortcuts
 
-    -- | Per-frame input state populated by the backend (see "NanoUI.Backend").
+    -- ** Focus
+
+    -- | Tab moves focus between focusable widgets. Clicking a text field, a
+    -- select, or a focusable custom widget (a knob, or a canvas with
+    -- 'canvasFocusable') focuses it; clicking anywhere else unfocuses the
+    -- current field.
+    -- A view that handles keyboard input directly can call 'holdFocus' each
+    -- frame to claim focus and receive Tab events.
     --
-    -- During IME text composition ('inputComposition'), the focused text field
-    -- renders the active 'Composition' at the caret, and key events in
-    -- 'inputKeys', 'inputKeysReleased', and 'inputKeysHeld' are suppressed
-    -- until composition finishes so shortcuts do not trigger mid-composition.
-    -- Custom text widgets opt into IME via 'useInputMethod'.
-    -- 'pressedIn', 'releasedIn', and 'heldIn' test a key or mouse button in an
-    -- 'Input'; 'pressedOnceIn' ignores key auto-repeat:
+    -- 'requestFocus' focuses a widget, identified by its response's 'respId' or
+    -- by 'currentId' just before declaring it. 'focusNext' and
+    -- 'focusPrevious' act like Tab and Shift+Tab, and 'clearFocus' unfocuses.
+    -- Focus changes apply at the end of the frame and behave like Tab: the
+    -- target widget shows the focus ring, a text field preserves its caret,
+    -- the previously focused field drops its selection and commits, and the
+    -- next Tab continues from the newly focused widget. Disabled widgets and
+    -- widgets behind an open modal cannot be focused. Check focus state with
+    -- 'isFocused' on the next frame:
     --
-    -- > runSdlApp defaultSdlOptions {sdlAppShouldQuit = pressedOnceIn KeyEscape} view
-  , Input (..)
-  , Pressable (..)
-  , Key (..)
-  , Modifiers (..)
-  , takeEscape
-  , Composition (..)
-  , InputPurpose (..)
-  , useInputMethod
-
-    -- * Mouse buttons
-
-    -- | 'respHeldWith' and 'respClickedWith' report which mouse buttons are
-    -- held on or clicked a widget. 'mousePressed', 'mouseReleased', and
-    -- 'mouseHeld' check mouse button state in the current view scope:
+    -- > resp <- searchInput' "Find" query
+    -- > findPressed <- shortcut (ctrl <> key 'f')
+    -- > when findPressed (requestFocus (respId resp))
     --
-    -- > whenM (mousePressed MouseBack) goBack
-  , MouseButton (..)
-  , mousePressed
-  , mouseReleased
-  , mouseHeld
+    -- 'NanoUI.Monad.releaseFocus' clears focus immediately mid-frame.
+  , holdFocus
+  , requestFocus
+  , focusNext
+  , focusPrevious
+  , clearFocus
+  , isFocused
 
-    -- * Keyboard
+    -- ** Keyboard and shortcuts
 
     -- | 'keyPressed', 'keyReleased', and 'keyHeld' check key state, and
     -- 'shortcut' matches a key chord built with "NanoUI.Shortcut":
@@ -1094,18 +1060,57 @@ module NanoUI
   , modJump
   , modMacCommand
 
-    -- * Debugging
+    -- ** Mouse buttons
 
-    -- | 'explainLayout' draws depth-colored outlines around layout nodes and
-    -- highlights the node under the pointer. 'explainedNode' returns that
-    -- node's 'ExplainedNode' record (widget ID, rect, padding, sizing, gap,
-    -- flow, pin, and pointer mode). 'explainScope' restricts the overlay to a
-    -- subtree.
-  , explainLayout
-  , explainingLayout
-  , explainedNode
-  , explainScope
-  , ExplainedNode (..)
+    -- | 'respHeldWith' and 'respClickedWith' report which mouse buttons are
+    -- held on or clicked a widget. 'mousePressed', 'mouseReleased', and
+    -- 'mouseHeld' check mouse button state in the current view scope:
+    --
+    -- > whenM (mousePressed MouseBack) goBack
+  , MouseButton (..)
+  , mousePressed
+  , mouseReleased
+  , mouseHeld
+
+    -- ** Cursors and clipboard
+
+    -- | Built-in widgets set an appropriate cursor when hovered (pointer hand
+    -- on buttons, I-beam on text fields, or 'widgetCursor' on custom widgets).
+    -- 'withCursorShape' sets a fallback cursor for a subtree when no inner
+    -- widget overrides it:
+    --
+    -- > withCursorShape UiCursorMove (canvas (fixedWH 320 200) board)
+    --
+    -- 'UiCursorDefault' indicates no widget override (or resets to the default
+    -- arrow inside 'withCursorShape'). 'UiCursorHidden' hides the cursor.
+    -- Disabled widgets fall back to the default arrow unless wrapped in
+    -- @withCursorShape UiCursorNotAllowed@.
+  , UiCursorKind (..)
+  , withCursorShape
+  , getClipboard
+  , setClipboard
+
+    -- ** Raw input and IME
+
+    -- | Per-frame input state populated by the backend (see "NanoUI.Backend").
+    --
+    -- During IME text composition ('inputComposition'), the focused text field
+    -- renders the active 'Composition' at the caret, and key events in
+    -- 'inputKeys', 'inputKeysReleased', and 'inputKeysHeld' are suppressed
+    -- until composition finishes so shortcuts do not trigger mid-composition.
+    -- Custom text widgets opt into IME via 'useInputMethod'.
+    -- 'pressedIn', 'releasedIn', and 'heldIn' test a key or mouse button in an
+    -- 'Input'; 'pressedOnceIn' ignores key auto-repeat:
+    --
+    -- > runSdlApp defaultSdlOptions {sdlAppShouldQuit = pressedOnceIn KeyEscape} view
+  , Input (..)
+  , Pressable (..)
+  , Key (..)
+  , Modifiers (..)
+  , takeEscape
+  , Composition (..)
+  , InputPurpose (..)
+  , useInputMethod
 
     -- * The native window
 
@@ -1172,6 +1177,19 @@ module NanoUI
   , requestScreenshot
   , askScreenshot
   , useScreenshot
+
+    -- * Debugging
+
+    -- | 'explainLayout' draws depth-colored outlines around layout nodes and
+    -- highlights the node under the pointer. 'explainedNode' returns that
+    -- node's 'ExplainedNode' record (widget ID, rect, padding, sizing, gap,
+    -- flow, pin, and pointer mode). 'explainScope' restricts the overlay to a
+    -- subtree.
+  , explainLayout
+  , explainingLayout
+  , explainedNode
+  , explainScope
+  , ExplainedNode (..)
   )
 where
 

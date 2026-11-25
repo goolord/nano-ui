@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 
 -- | Mutable cell backing a 'NanoUI.Var.Var' and its per-pass read/mutation
 -- bitmasks. Timestamps come from a single process-wide monotonic counter so

@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | Floating window input: dragging by the title bar, resizing by the edges
 -- and margins, the resize cursor, and persisting window placement.
 module NanoUI.Internal.Frame.Window

@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 
 -- | Implementation of "NanoUI.Monad", plus running a view against a context,
 -- reading and swapping the context, and id-frame plumbing. The definitions

@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | Thread-safe dialog completion and one-shot consumption, independent of SDL.
 module NanoUI.Sdl.Internal.DialogState
   ( FileDialogResult (..)

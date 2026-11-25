@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | Submit nano-ui draw batches to SDL with texture binding and damage clipping.
 module NanoUI.Sdl.Internal.Render
   ( RenderBatch
@@ -49,7 +51,7 @@ data ClipState
   deriving Eq
 
 -- | A layout-unit clip as the device-pixel rect SDL clips to. The pass
--- draws at render scale 1 ('nano_ui_batch_begin' scales the positions), so
+-- draws at render scale 1 (@nano_ui_batch_begin@ scales the positions), so
 -- the clip is the same whole pixels the damage was snapped to
 -- ('snapDamage'), whatever the scale ('clipPixelEdges'). SDL clips to at
 -- least one pixel each way.
@@ -199,6 +201,7 @@ newRenderBatch ren = do
     then fail "nano_ui_batch_create failed"
     else (RenderBatch p <$> malloc) `onException` batchDestroy p
 
+-- | Free a render batch and its clip rectangle storage.
 destroyRenderBatch :: RenderBatch -> IO ()
 destroyRenderBatch batch = batchDestroy (rbBatch batch) >> free (rbClipRect batch)
 

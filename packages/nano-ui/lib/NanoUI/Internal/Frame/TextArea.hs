@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | Multi-line text areas in the frame: their geometry (the field box,
 -- content clip and which scrollbars show where), the node font and cached
 -- content extent, content painting (lines, selection, caret and scrollbars)

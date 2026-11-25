@@ -361,7 +361,7 @@ clearWakeAt ctx = writeIORef (ctxWakeAt ctx) 0
 takeDamage :: Context -> IO Damage
 takeDamage ctx = getsDamage ctx dsDamage
 
--- | The disjoint rects a 'DamageClip' frame repaints, when its damage lies in
+-- | The disjoint rects a 'NanoUI.Backend.DamageClip' frame repaints, when its damage lies in
 -- two or more places far apart; empty when the whole clip repaints. A
 -- backend that draws text itself must clip it to each; draw commands
 -- already are.

@@ -1,4 +1,5 @@
 {-# LANGUAGE StrictData #-}
+{-# OPTIONS_HADDOCK not-home #-}
 
 -- | Pure-Haskell SPIR-V 1.0 binary fragment shader emitter for 'ShaderIR',
 -- matching SDL 3.4's @SDL_GPURenderState@ Vulkan interface:

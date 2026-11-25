@@ -31,7 +31,7 @@ import NanoUI.Internal.Var.Types (Var)
 -- @body@ runs in the window's own frames. It may close over this view's
 -- values: the window runs it again after each frame of this view. A 'Var'
 -- either window writes shows in the other on its next frame. In an
--- emitting view ("NanoUI.Emit"), @body@ emits to the session's reducer.
+-- emitting view (@NanoUI.Emit@), @body@ emits to the session's reducer.
 -- There, to keep the open state in the model, pass a 'NanoUI.constVar',
 -- turn 'NanoUI.wsExitOnCloseRequest' off, and emit a message from @body@
 -- when 'NanoUI.winCloseRequested' is set.

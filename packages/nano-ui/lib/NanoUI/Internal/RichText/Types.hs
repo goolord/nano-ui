@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | Paragraph values and typed layout cache, independent of view execution.
 module NanoUI.Internal.RichText.Types
   ( Inline (..)

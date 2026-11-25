@@ -1,4 +1,11 @@
--- | Run nano-ui views in a browser canvas with the SDL backend's text:
+-- |
+-- Module      : NanoUI.Backend.SdlWeb
+-- Description : WebAssembly browser backend for nano-ui
+-- Copyright   : (c) 2026 Zachary Churchill
+-- License     : MIT
+-- Maintainer  : zacharyachurchill@gmail.com
+--
+-- Run nano-ui views in a browser canvas with the SDL backend's text:
 -- SDL_ttf shapes and rasterises glyphs (FreeType and HarfBuzz), the same
 -- glyph atlas layout holds them, and WebGL2 draws the frame's triangles as
 -- @SDL_RenderGeometry@ does on the desktop. Build the program with

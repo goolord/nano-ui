@@ -1,6 +1,13 @@
 {-# LANGUAGE ImplicitParams #-}
 
--- | Reducer-style views with one statically checked message type.
+-- |
+-- Module      : NanoUI.Emit
+-- Description : Statically typed messages and reducers for nano-ui
+-- Copyright   : (c) 2026 Zachary Churchill
+-- License     : MIT
+-- Maintainer  : zacharyachurchill@gmail.com
+--
+-- Reducer-style views with one statically checked message type.
 --
 -- A 'NanoUIE' view is an ordinary 'NanoUI' action with the view's message
 -- sink in scope, so every widget exported by core "NanoUI" (re-exported
@@ -8,12 +15,15 @@
 -- taking callbacks or several bodies. 'emit' and the adapters below send
 -- messages of the view's type; emitting another type is a compile error.
 module NanoUI.Emit
-  ( NanoUIE
+  ( -- * Emitting messages
+    NanoUIE
   , emit
   , emitWhen
   , emitChanged
   , emitEdited
   , mapMessages
+
+    -- * Headless frame execution and reduction
   , runNanoUIE
   , runFrameE
   , runFrameReduce

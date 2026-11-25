@@ -2,6 +2,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_HADDOCK not-home #-}
 
 -- | Reading and replacing one record field through "GHC.Generics", for the
 -- @v.field@ focus on a 'NanoUI.Var.Var'. The path to the field is found at

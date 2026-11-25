@@ -377,7 +377,7 @@ defaultSearchInputConfig =
 
 -- | Search box with a magnifier and a clear button, bound to mutable state
 -- ('Var'); the first argument is the placeholder. The 'Var' is mutated in place
--- as the user types; @respChanged@ on 'searchInput'' is debounced and fires
+-- as the user types; @respChanged@ on @searchInput'@ is debounced and fires
 -- once typing pauses, or immediately when the field is cleared.
 {-# INLINE searchInput #-}
 searchInput :: Text -> Var Text -> NanoUI ()

@@ -69,7 +69,7 @@ sensorWith :: (Layout -> Layout) -> NanoUI a -> NanoUI (Visibility, a)
 sensorWith f = sensorConfigured defaultSensorConfig {sensorLayout = f}
 
 -- | 'sensor' with a full 'SensorConfig'. Like
--- 'NanoUI.Internal.Widgets.Layout.column', the container takes one widget id
+-- 'NanoUI.column', the container takes one widget id
 -- and runs its body in its own id scope.
 sensorConfigured :: SensorConfig -> NanoUI a -> NanoUI (Visibility, a)
 sensorConfigured cfg body = do

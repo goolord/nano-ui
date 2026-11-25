@@ -279,7 +279,7 @@ linkColor c t = t {themeLink = c}
 selectionColor :: Color -> Theme -> Theme
 selectionColor c t = t {themeSelection = c}
 
--- | The window background, and the page's unless 'pageColor' sets another.
+-- | The window background, and the page's unless 'NanoUI.pageColor' sets another.
 windowColor :: Color -> Theme -> Theme
 windowColor c t = t {themeWindow = c}
 

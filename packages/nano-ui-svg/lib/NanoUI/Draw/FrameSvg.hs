@@ -1,4 +1,11 @@
--- | Render a whole painted frame of any view to an SVG document.
+-- |
+-- Module      : NanoUI.Draw.FrameSvg
+-- Description : Export whole painted nano-ui frames to SVG
+-- Copyright   : (c) 2026 Zachary Churchill
+-- License     : MIT
+-- Maintainer  : zacharyachurchill@gmail.com
+--
+-- Render a whole painted frame of any view to an SVG document.
 --
 -- Paint lowers every widget straight to the vertex buffer. With
 -- 'setDrawRecordOps' on, the shape emitters also record each solid shape they
@@ -126,7 +133,7 @@ defaultFrameSvgConfig =
     , fsIdPrefix = T.empty
     }
 
--- | Render the frame 'runFrame' returned for @inp@ into a standalone SVG
+-- | Render the frame 'NanoUI.Backend.runFrame' returned for @inp@ into a standalone SVG
 -- document sized to the input's window. Page text draws over the page's
 -- shapes, and overlay shapes and text over both, in paint order for each.
 --

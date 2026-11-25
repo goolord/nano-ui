@@ -1,12 +1,34 @@
--- | Charting and plotting API for nano-ui.
+-- |
+-- Module      : NanoUI.Plot
+-- Description : Interactive charts and plotting widgets for nano-ui
+-- Copyright   : (c) 2026 Zachary Churchill
+-- License     : MIT
+-- Maintainer  : zacharyachurchill@gmail.com
+--
+-- Charting and plotting API for nano-ui: line, scatter, bar, area, and step
+-- series, automatic tick scaling, LTTB point decimation, hover inspection,
+-- and cached chart widgets.
 module NanoUI.Plot
-  ( module NanoUI.Plot.Types
-  , module NanoUI.Plot.Series
-  , module NanoUI.Plot.Scale
-  , module NanoUI.Plot.Decimate
-  , module NanoUI.Plot.Chrome
+  ( -- * Chart builders
+    module NanoUI.Plot.Builder
+
+    -- * Chart widgets
   , module NanoUI.Plot.Widget
-  , module NanoUI.Plot.Builder
+
+    -- * Series constructors
+  , module NanoUI.Plot.Series
+
+    -- * Core types
+  , module NanoUI.Plot.Types
+
+    -- * Domains and scales
+  , module NanoUI.Plot.Scale
+
+    -- * Decimation
+  , module NanoUI.Plot.Decimate
+
+    -- * Axes and chrome
+  , module NanoUI.Plot.Chrome
   ) where
 
 import NanoUI.Plot.Builder

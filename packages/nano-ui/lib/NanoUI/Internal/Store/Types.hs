@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | Concrete compound values retained by the widget store. These types depend
 -- only on pure models, so the store does not depend on widget implementations.
 module NanoUI.Internal.Store.Types (GridState (..), Gesture (..), LineWidths (..), TextHistory (..)) where

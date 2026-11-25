@@ -338,7 +338,7 @@ label' = labelWith' id
 -- A label wider than its room wraps in a column. In a row, a single-line
 -- label with 'fillW' or 'maxW' instead ends in @...@ where it is cut, so
 -- @labelWith fillW name@ beside a row's buttons uses the remaining width.
--- 'truncateTextUi' cuts text the same way for a drawing.
+-- 'NanoUI.truncateTextUi' cuts text the same way for a drawing.
 {-# INLINE labelWith #-}
 labelWith :: (Layout -> Layout) -> Text -> NanoUI ()
 labelWith f txt = void (labelWith' f txt)

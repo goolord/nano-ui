@@ -200,7 +200,7 @@ withUiResource acquire release (NanoUI action) =
 -- the action, and leave it. No exception handler is installed: an exception
 -- that escapes the action leaves the scope entered for the rest of the pass,
 -- which 'catchView' undoes for a view that recovers, and the next pass starts
--- from a clean build ('NanoUI.Internal.Frame.resetUiBuild'). Every row,
+-- from a clean build (@resetUiBuild@). Every row,
 -- column, 'scope', 'withKey' row and 'styled' call goes through here, where a
 -- handler would cost an allocation each.
 {-# INLINE withBuildScope #-}
@@ -344,7 +344,7 @@ resolveFontUi size weight style variant =
   withContext (\ctx -> fst <$> resolveTextFont ctx (TextFont size variant weight style DecorationNone False))
 
 -- | The advance of one line of text in these metrics, in logical pixels. Unlike
--- the pure 'NanoUI.Internal.Font.lineWidth' it first loads the glyphs the text needs,
+-- the pure 'NanoUI.lineWidth' it first loads the glyphs the text needs,
 -- so it is right for metrics that have not drawn this text yet.
 lineWidthUi :: FontMetrics -> Text -> NanoUI Float
 lineWidthUi fm txt = liftIO (lineWidthIO fm txt)
@@ -530,7 +530,7 @@ windowHeight :: NanoUI Float
 windowHeight = fmap (sizeH . inputWindowSize) askInput
 
 -- | The session value of the backend driving this view, if it is the
--- backend asked for ('NanoUI.Internal.Context.withBackendSession'). For a
+-- backend asked for ('NanoUI.Backend.withBackendSession'). For a
 -- backend's own view-side operations.
 {-# INLINE askBackendSession #-}
 askBackendSession :: SBackend b -> NanoUI (Maybe (BackendSession b))

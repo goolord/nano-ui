@@ -32,7 +32,7 @@ Define shaders at top level so compilation happens once; uniform updates pack in
 ## Two tiers and pass fusion
 
 - **Tier 1 (`'Surface`):** Single-pass leaf fills drawn directly into the main render target (`meshGradient4`, `radialGlow`, `sdfRoundedBox`, `colorWheelHsv`, `noiseGrain`, `checkerboard`).
-- **Tier 2 (`'ColorEffect`, `'Distortion`, `'LayerEffect`):** Subtree post-processing over pooled offscreen targets that keeps child hit-testing, focus, and scrolling intact (`groupOpacity`, `grayscale`, `tint`, `brightnessContrast`, `colorMatrix`, `vignette`, `scanlines`, `waveDistort`, `rippleDistort`, `pixelate`, `boxBlur`, `gaussianBlur`, `dropShadow`, `outerGlow`, `chromaticAberration`).
+- **Tier 2 (`'ColorEffect`, `'DistortionEffect`, `'LayerEffect`):** Subtree post-processing over pooled offscreen targets that keeps child hit-testing, focus, and scrolling intact (`groupOpacity`, `grayscale`, `tint`, `brightnessContrast`, `colorMatrix`, `vignette`, `scanlines`, `waveDistort`, `rippleDistort`, `pixelate`, `boxBlur`, `gaussianBlur`, `dropShadow`, `outerGlow`, `chromaticAberration`).
 
 Compatible Tier 2 passes fuse into a single GPU program with `composeColor`, `composeDistort`, and `distortThenColor`. Multi-pass chains combine with `chainLayer`.
 

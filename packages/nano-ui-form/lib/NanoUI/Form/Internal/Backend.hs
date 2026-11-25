@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | The ditto environment forms run in: field input values, form prefixes and
 -- submitted state, retained by an explicit typed owner.
 module NanoUI.Form.Internal.Backend
@@ -101,9 +103,11 @@ data FormScope = FormScope !FormState !Text
 newtype FormUI a = FormUI { unFormUI :: ReaderT FormScope NanoUI a }
   deriving newtype (Functor, Applicative, Monad)
 
+-- | Read the current form owner and field prefix inside 'FormUI'.
 askFormScope :: FormUI FormScope
 askFormScope = FormUI ask
 
+-- | Run a 'FormUI' action against a 'FormState' owner and form prefix.
 runFormUI :: FormState -> Text -> FormUI a -> NanoUI a
 runFormUI owner prefix (FormUI action) = runReaderT action (FormScope owner prefix)
 

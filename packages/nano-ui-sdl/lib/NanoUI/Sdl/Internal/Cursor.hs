@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | Own SDL system cursors and apply nano-ui cursor requests on the display thread.
 module NanoUI.Sdl.Internal.Cursor
   ( SdlCursors (..)
@@ -27,6 +29,8 @@ import SDL3.Sys.Mouse
   , showCursorSafe
   )
 
+-- | Session-owned cache of SDL system cursors and the cursor kind currently
+-- shown on screen.
 data SdlCursors = SdlCursors
   { scDefault :: Ptr Mouse.SDL_Cursor
   -- ^ The platform's default arrow, which SDL owns.
@@ -38,6 +42,7 @@ data SdlCursors = SdlCursors
   , scTrace :: Bool
   }
 
+-- | Initialize the session's cursor cache from the platform default arrow.
 initCursors :: IO SdlCursors
 initCursors =
   SdlCursors
@@ -92,6 +97,8 @@ cursorFor SdlCursors {scDefault, scSystem} kind = case sdlSystemCursor kind of
       c <- createSystemCursorSafe sys
       c <$ modifyIORef' scSystem ((sys, c) :)
 
+-- | Resolve the frame's desired pointer cursor and update the active SDL
+-- cursor when it changes.
 syncPointerCursor :: SdlCursors -> Context -> Input -> IO ()
 syncPointerCursor cursors ctx inp = do
   want <- uiCursorKind ctx inp

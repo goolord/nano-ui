@@ -57,7 +57,7 @@ data WindowSettings = WindowSettings
   , wsMode :: !WindowMode
   , wsTransparent :: !Bool
   -- ^ Desktop transparency where the page background is translucent; set it
-  -- with 'pageColor' (an unset page is 'themeWindow'). SDL supports it with a
+  -- with 'NanoUI.pageColor' (an unset page is 'NanoUI.themeWindow'). SDL supports it with a
   -- compositor; RGFW windows are opaque.
   , wsOpacity :: !Float
   -- ^ Whole-window opacity, including decorations, from 0 to 1 (SDL only).

@@ -403,11 +403,15 @@ rgfw_keyRight     = #{const RGFW_keyRight}
 rgfw_keyEnd       = #{const RGFW_keyEnd}
 rgfw_keyHome      = #{const RGFW_keyHome}
 
--- | More named key codes. 'rgfw_keyF1' to 'rgfw_keyF24' are consecutive, as
--- are 'rgfw_keyPad1' to 'rgfw_keyPad9'.
+-- | Navigation and function key codes. 'rgfw_keyF1' to 'rgfw_keyF24' are
+-- consecutive.
 rgfw_keySpace, rgfw_keyInsert, rgfw_keyPageUp, rgfw_keyPageDown, rgfw_keyMenu, rgfw_keyF1, rgfw_keyF24 :: Word32
+-- | Lock and system key codes.
 rgfw_keyCapsLock, rgfw_keyNumLock, rgfw_keyScrollLock, rgfw_keyPrintScreen, rgfw_keyPause :: Word32
+-- | Numeric keypad digit key codes. 'rgfw_keyPad1' to 'rgfw_keyPad9' are
+-- consecutive.
 rgfw_keyPad0, rgfw_keyPad1, rgfw_keyPad2, rgfw_keyPad3, rgfw_keyPad4, rgfw_keyPad5, rgfw_keyPad6, rgfw_keyPad7, rgfw_keyPad8, rgfw_keyPad9 :: Word32
+-- | Numeric keypad punctuation, operator, and enter key codes.
 rgfw_keyPadPeriod, rgfw_keyPadSlash, rgfw_keyPadMultiply, rgfw_keyPadMinus, rgfw_keyPadPlus, rgfw_keyPadEqual, rgfw_keyPadReturn :: Word32
 rgfw_keySpace       = #{const RGFW_keySpace}
 rgfw_keyInsert      = #{const RGFW_keyInsert}
@@ -506,13 +510,13 @@ foreign import ccall "RGFW_window_setName"
 foreign import ccall "RGFW_window_resize"
   c_RGFW_window_resize :: Ptr RGFW_window -> CInt -> CInt -> IO ()
 
--- | Maximize, minimize, or restore the window.
+-- | Maximize the window.
 foreign import ccall "RGFW_window_maximize"
   c_RGFW_window_maximize :: Ptr RGFW_window -> IO ()
+-- | Minimize the window.
 foreign import ccall "RGFW_window_minimize"
   c_RGFW_window_minimize :: Ptr RGFW_window -> IO ()
--- The bundled wrapper restores as RGFW does, minus moving and resizing the
--- window to the geometry RGFW saved, which a desktop maximize leaves unset.
+-- | Restore the window without overwriting desktop-saved maximize geometry.
 foreign import ccall "rgfw_window_restore"
   c_rgfw_window_restore :: Ptr RGFW_window -> IO ()
 
@@ -520,9 +524,10 @@ foreign import ccall "rgfw_window_restore"
 foreign import ccall "RGFW_window_setFullscreen"
   c_RGFW_window_setFullscreen :: Ptr RGFW_window -> CUChar -> IO ()
 
--- | Show or hide the window.
+-- | Show the window.
 foreign import ccall "RGFW_window_show"
   c_RGFW_window_show :: Ptr RGFW_window -> IO ()
+-- | Hide the window.
 foreign import ccall "RGFW_window_hide"
   c_RGFW_window_hide :: Ptr RGFW_window -> IO ()
 

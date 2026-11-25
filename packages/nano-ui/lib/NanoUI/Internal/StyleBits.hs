@@ -25,9 +25,9 @@
 -- 30      inputNumeric
 -- 0-23    buttonVisual      NodeButton: the bits below the type flags
 -- 0-1     buttonVariant     close button (1 trailing, 2 tab), choice (1 radio)
--- 0-1     tabStyle          tab header ('buttonTab')
+-- 0-1     tabStyle          tab header ('buttonKind' = ButtonTab)
 -- 2-3     tabOrient
--- 0-7     treeDepth         tree row ('buttonRow')
+-- 0-7     treeDepth         tree row ('buttonKind' = ButtonRow)
 -- 8       treeHasKids
 -- 9       treeExpanded
 -- 10      treeOdd

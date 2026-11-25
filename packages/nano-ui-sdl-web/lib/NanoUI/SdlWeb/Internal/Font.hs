@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | Browser SDL_ttf font cache and in-memory glyph atlas integration built
 -- over "NanoUI.Ttf.Internal.Font", with fallback fonts for the characters
 -- the UI font lacks: the page has no system fonts to find them in, so they

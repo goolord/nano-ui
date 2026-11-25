@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | Fonts beyond the bundled Inter: the families installed on the machine,
 -- which the browser lists and hands over as bytes through the Local Font
 -- Access API once the user allows it, a font service's families, and font

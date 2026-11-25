@@ -1,3 +1,5 @@
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | Context setup for RGFW: Cozette metrics, square geometry, text drawn
 -- from spans, and square themes.
 module NanoUI.Rgfw.Internal.Context

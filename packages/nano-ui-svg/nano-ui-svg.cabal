@@ -1,7 +1,7 @@
 cabal-version:      3.4
 name:               nano-ui-svg
 version:            0.1.0.0
-synopsis:           SVG export for nano-ui DrawOp arrays
+synopsis:           SVG export for nano-ui frames and DrawOp arrays
 description:
     Renders nano-ui DrawOp sequences (from canvases, custom widgets, paths,
     and diagrams) into standalone SVG documents or <g> fragments with zero
