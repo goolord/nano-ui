@@ -4,7 +4,6 @@
 -- composition for both.
 module NanoUI.Internal.Frame.TextInput
   ( nodeTextFieldGeom
-  , tagTextInputClippedSpans
   , syncTextInputScroll
   , TextInputFrame (..)
   , resolveTextInputFrame
@@ -36,7 +35,7 @@ module NanoUI.Internal.Frame.TextInput
 import Control.Monad (forM_, mfilter, when)
 import Data.Char (isAlphaNum, isMark, isSpace)
 import Data.IORef (readIORef, writeIORef)
-import Data.Maybe (isJust, mapMaybe)
+import Data.Maybe (isJust)
 import Data.Sequence qualified as Seq
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -47,7 +46,6 @@ import NanoUI.Internal.Font (FontMetrics (..), caretXIO, centeredTextY, lineWidt
 import NanoUI.Internal.Frame.Chrome (maskPassword, textInputFocused, textInputValue)
 import NanoUI.Internal.Frame.Hit (withWidgetNode)
 import NanoUI.Internal.Frame.Node (nodeAdornmentInsets, nodeFontMetrics, resolveFontFor)
-import NanoUI.Internal.Layout.ScrollGeometry (padTextClipRect)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (..), getNodeFontColor, getNodeFontSize, getNodeRect, getNodeType, getOptions, getStyleIdx, getWidgetId, nodeFontBits)
@@ -55,7 +53,7 @@ import NanoUI.Internal.Monad (ifM, unlessM, (<&&>))
 import NanoUI.Internal.Store (fieldSelection, fieldSelectionWrite, fieldText, findSpec, insertSlot, insertSpec, setFieldSelection)
 import NanoUI.Internal.Store.Slots (slotTextInputScroll)
 import NanoUI.Internal.Style (FontStyle (..), FontWeight (..), themeSelection, toneColor)
-import NanoUI.Internal.Types (Color (..), DamageBounds (..), Rect (..), V2 (..), clamp, rectContains, rectIntersect, rectW)
+import NanoUI.Internal.Types (Color (..), DamageBounds (..), Rect (..), V2 (..), clamp, rectContains, rectW)
 import NanoUI.Internal.WidgetText
 import NanoUI.Widgets.TextBuffer qualified as TB
 
@@ -114,16 +112,6 @@ clearSearchInput ctx wid = do
   let key = intKey wid
   modifyStore ctx $
     insertSlot fieldText key "" . setFieldSelection key 0 0
-
--- | Clip a field's spans to @fieldClip@ ('nodeTextFieldGeom') within
--- @parentClip@.
-tagTextInputClippedSpans ::
-  Rect -> Rect -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
-tagTextInputClippedSpans parentClip fieldClip = mapMaybe tagOne
-  where
-    tagOne (rect, txt, fg, bg) =
-      let clipRect = padTextClipRect rect
-       in (rect, txt, fg, bg,) <$> (rectIntersect fieldClip clipRect >>= rectIntersect parentClip)
 
 -- | A field's or text area's text with its pen at @(x, y)@, in the weight,
 -- slant and decoration packed in its style @si@, as a label draws them. The
@@ -250,18 +238,8 @@ resolveTextInputFrame ctx idx si focus (Rect _ boxY _ boxH) (Rect clipX _ clipW 
   wid <- getWidgetId na idx
   store <- getStore ctx
   value <- textInputValue ctx idx
-  let key = intKey wid
-      (anchor0, cursor0) = fieldSelection store key value
-  (shown, cursor, anchor, preedit) <-
-    fieldComposition ctx wid >>= \case
-      Nothing -> pure (value, cursor0, anchor0, Nothing)
-      Just c ->
-        let masked
-              | hasFlag textInputFlagPassword si = c {compositionText = maskPassword (compositionText c)}
-              | otherwise = c
-            p = splicePreedit masked value (min anchor0 cursor0) (max anchor0 cursor0)
-         in pure (preeditLine p, preeditCaret p, preeditSelectionEnd p, Just p)
-  scrollX <- syncTextInputScrollWith ctx key store fm focus clipW shown cursor
+  (shown, cursor, anchor, preedit) <- fieldEditLineWith ctx wid store si value
+  scrollX <- syncTextInputScrollWith ctx (intKey wid) store fm focus clipW shown cursor
   let !penX = clipX - scrollX
       !rowY = centeredTextY fm boxY boxH (fmLineHeight fm)
       !edit = if focus then Just (FieldEdit shown cursor anchor fm rowY penX preedit) else Nothing
@@ -285,6 +263,22 @@ readFieldEdit ctx idx (Rect _ boxY _ boxH) penX = do
       fm <- nodeFontMetrics ctx idx
       pure $! Just (FieldEdit value cursor anchor fm (centeredTextY fm boxY boxH (fmLineHeight fm)) penX preedit)
 
+-- | Resolve the displayed edit line, cursor, anchor, and optional preedit from
+-- pre-fetched field metadata (shared by 'resolveTextInputFrame' and 'fieldEditLine').
+fieldEditLineWith :: Context -> WidgetId -> WidgetStore -> Word64 -> Text -> IO (Text, Int, Int, Maybe Preedit)
+fieldEditLineWith ctx wid store si value = do
+  -- Lazy so callers that only need the text skip the selection lookup.
+  let (anchor, cursor) = fieldSelection store (intKey wid) value
+  fieldComposition ctx wid >>= \case
+    Nothing -> pure (value, cursor, anchor, Nothing)
+    Just c ->
+      -- Password fields mask the composition too.
+      let shown
+            | hasFlag textInputFlagPassword si = c {compositionText = maskPassword (compositionText c)}
+            | otherwise = c
+          p = splicePreedit shown value (min anchor cursor) (max anchor cursor)
+       in pure (preeditLine p, preeditCaret p, preeditSelectionEnd p, Just p)
+
 -- | The line field @idx@ displays ('textInputValue') with its cursor and
 -- anchor. During composition ('fieldComposition') the composition replaces
 -- the selection (which a commit will replace), and cursor and anchor are the
@@ -294,18 +288,8 @@ fieldEditLine ctx idx = do
   value <- textInputValue ctx idx
   wid <- getWidgetId (ctxNodeArena ctx) idx
   store <- getStore ctx
-  -- Lazy so callers that only need the text skip the selection lookup.
-  let (anchor, cursor) = fieldSelection store (intKey wid) value
-  fieldComposition ctx wid >>= \case
-    Nothing -> pure (value, cursor, anchor, Nothing)
-    Just c -> do
-      si <- getStyleIdx (ctxNodeArena ctx) idx
-      -- Password fields mask the composition too.
-      let shown
-            | hasFlag textInputFlagPassword si = c {compositionText = maskPassword (compositionText c)}
-            | otherwise = c
-          p = splicePreedit shown value (min anchor cursor) (max anchor cursor)
-      pure (preeditLine p, preeditCaret p, preeditSelectionEnd p, Just p)
+  si <- getStyleIdx (ctxNodeArena ctx) idx
+  fieldEditLineWith ctx wid store si value
 
 drawTextInputSelection :: DrawArena -> Context -> NodeIdx -> FieldEdit -> IO ()
 drawTextInputSelection da ctx idx (FieldEdit value cursor anchor fm rowY textX _) =

@@ -324,24 +324,22 @@ encodeRow sortable views encoders r = do
   !vKeys <- V.unsafeFreeze keys
   pure (vTxts, vKeys)
 
--- | The first cell at which two rows differ, or -1 when they are the same.
-firstDiff :: V.Vector Text -> V.Vector Text -> Int
-firstDiff a b = go 0
+-- | The first cell at which two rows differ under @eq@, or -1 when equal.
+firstDiffBy :: (a -> a -> Bool) -> V.Vector a -> V.Vector a -> Int
+firstDiffBy eq a b = go 0
   where
     k = min (V.length a) (V.length b)
     go !j
       | j >= k = if V.length a == V.length b then -1 else j
-      | eqByPtr (V.unsafeIndex a j) (V.unsafeIndex b j) = go (j + 1)
+      | eq (V.unsafeIndex a j) (V.unsafeIndex b j) = go (j + 1)
       | otherwise = j
 
+-- | The first cell at which two rows differ, or -1 when they are the same.
+firstDiff :: V.Vector Text -> V.Vector Text -> Int
+firstDiff = firstDiffBy eqByPtr
+
 firstKeyDiff :: V.Vector SortKey -> V.Vector SortKey -> Int
-firstKeyDiff a b = go 0
-  where
-    k = min (V.length a) (V.length b)
-    go !j
-      | j >= k = if V.length a == V.length b then -1 else j
-      | sameSortKey (V.unsafeIndex a j) (V.unsafeIndex b j) = go (j + 1)
-      | otherwise = j
+firstKeyDiff = firstDiffBy sameSortKey
 
 -- | Derive from @rows@, reusing @old@ (derived under the same headers):
 -- each row that is the same object under the same columns keeps its text,

@@ -51,7 +51,7 @@ import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.ScrollGeometry (decodeScrollConfig, scrollFocusable)
 import NanoUI.Internal.Monad (ifM, unlessM, whenM, (<&&>))
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectFullyInside)
-import NanoUI.Internal.WidgetText (hasFlag, buttonFlagMenuBar, buttonFlagMenu, buttonFlagRow, textInputFlagSelectable)
+import NanoUI.Internal.WidgetText (ButtonKind (..), buttonKindOf, hasFlag, textInputFlagSelectable)
 import NanoUI.Internal.Widgets.Shortcut (focusTakesChord)
 
 -- | On Tab (Shift+Tab goes backwards), move keyboard focus to 'tabTarget',
@@ -135,7 +135,7 @@ isMenuButtonWidget :: Context -> WidgetId -> IO Bool
 isMenuButtonWidget ctx wid =
   withWidgetNode ctx wid False $ \idx ->
     ((== NodeButton) <$> getNodeType (ctxNodeArena ctx) idx)
-      <&&> ((\si -> hasFlag buttonFlagMenu si || hasFlag buttonFlagMenuBar si) <$> getStyleIdx (ctxNodeArena ctx) idx)
+      <&&> ((\si -> let k = buttonKindOf si in k == ButtonMenu || k == ButtonMenuBar) <$> getStyleIdx (ctxNodeArena ctx) idx)
 
 -- | Find the hot widget in this frame's layout and store it in 'ctxHotId' and
 -- 'ctxLastHotId'. Runs after layout and before painting. When the hot widget
@@ -531,7 +531,7 @@ recordFocusKind ctx ime = do
             NodeTextInput -> si <&> \s -> if hasFlag textInputFlagSelectable s then FocusTextSelectable else FocusTextLine
             NodeTextArea -> pure (FocusControl KeysType)
             -- A tree row moves with the arrows; any other button activates.
-            NodeButton -> si <&> \s -> FocusControl (if hasFlag buttonFlagRow s then KeysNavigate else KeysActivate)
+            NodeButton -> si <&> \s -> FocusControl (if buttonKindOf s == ButtonRow then KeysNavigate else KeysActivate)
             NodeDrawing -> FocusControl . maybe KeysNone cdrKeys <$> lookupCustomDrawing ctx focus
             NodeScrollContainer -> pure (FocusControl KeysNavigate)
             _ -> pure (FocusControl KeysNavigate)

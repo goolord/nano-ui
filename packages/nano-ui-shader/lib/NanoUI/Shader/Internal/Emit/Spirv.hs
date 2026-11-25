@@ -22,8 +22,8 @@ import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Text.Encoding qualified as TE
 import Data.Text qualified as T
+import Data.Text.Encoding qualified as TE
 import Data.Vector (Vector)
 import Data.Vector qualified as V
 import Data.Word (Word32, Word8)
@@ -34,180 +34,71 @@ import NanoUI.Shader.Internal.IR
 -- ---------------------------------------------------------------------------
 -- SPIR-V 1.0 and GLSL.std.450 constants (Khronos specification)
 
-spvMagic :: Word32
+spvMagic, spvVersion10 :: Word32
 spvMagic = 0x07230203
-
-spvVersion10 :: Word32
 spvVersion10 = 0x00010000
 
--- Opcodes
-opExtInstImport, opExtInst, opMemoryModel, opEntryPoint, opExecutionMode :: Word32
-opExtInstImport = 11
-opExtInst = 12
-opMemoryModel = 14
-opEntryPoint = 15
-opExecutionMode = 16
+-- Core opcodes
+opExtInstImport, opExtInst, opMemoryModel, opEntryPoint, opExecutionMode, opCapability :: Word32
+(opExtInstImport, opExtInst, opMemoryModel, opEntryPoint, opExecutionMode, opCapability) = (11, 12, 14, 15, 16, 17)
 
-opCapability :: Word32
-opCapability = 17
+opTypeVoid, opTypeBool, opTypeInt, opTypeFloat, opTypeVector, opTypeImage, opTypeSampledImage, opTypeStruct, opTypePointer, opTypeFunction :: Word32
+(opTypeVoid, opTypeBool, opTypeInt, opTypeFloat, opTypeVector, opTypeImage, opTypeSampledImage, opTypeStruct, opTypePointer, opTypeFunction) = (19, 20, 21, 22, 23, 25, 27, 30, 32, 33)
 
-opTypeVoid, opTypeBool, opTypeInt, opTypeFloat, opTypeVector :: Word32
-opTypeVoid = 19
-opTypeBool = 20
-opTypeInt = 21
-opTypeFloat = 22
-opTypeVector = 23
+opConstantTrue, opConstantFalse, opConstant, opFunction, opFunctionEnd, opVariable, opLoad, opStore, opAccessChain, opDecorate, opMemberDecorate :: Word32
+(opConstantTrue, opConstantFalse, opConstant, opFunction, opFunctionEnd, opVariable, opLoad, opStore, opAccessChain, opDecorate, opMemberDecorate) = (41, 42, 43, 54, 56, 59, 61, 62, 65, 71, 72)
 
-opTypeImage, opTypeSampledImage, opTypeStruct, opTypePointer, opTypeFunction :: Word32
-opTypeImage = 25
-opTypeSampledImage = 27
-opTypeStruct = 30
-opTypePointer = 32
-opTypeFunction = 33
+opVectorShuffle, opCompositeConstruct, opCompositeExtract, opImageSampleImplicitLod, opConvertFToS, opConvertSToF :: Word32
+(opVectorShuffle, opCompositeConstruct, opCompositeExtract, opImageSampleImplicitLod, opConvertFToS, opConvertSToF) = (79, 80, 81, 87, 110, 111)
 
-opConstantTrue, opConstantFalse, opConstant :: Word32
-opConstantTrue = 41
-opConstantFalse = 42
-opConstant = 43
-
-opFunction, opFunctionEnd, opVariable, opLoad, opStore, opAccessChain :: Word32
-opFunction = 54
-opFunctionEnd = 56
-opVariable = 59
-opLoad = 61
-opStore = 62
-opAccessChain = 65
-
-opDecorate, opMemberDecorate :: Word32
-opDecorate = 71
-opMemberDecorate = 72
-
-opVectorShuffle, opCompositeConstruct, opCompositeExtract, opImageSampleImplicitLod :: Word32
-opVectorShuffle = 79
-opCompositeConstruct = 80
-opCompositeExtract = 81
-opImageSampleImplicitLod = 87
-
-opConvertFToS, opConvertSToF :: Word32
-opConvertFToS = 110
-opConvertSToF = 111
-
-opSNegate, opFNegate, opIAdd, opFAdd, opISub, opFSub, opIMul, opFMul, opUDiv, opSDiv, opFDiv, opFMod :: Word32
-opSNegate = 126
-opFNegate = 127
-opIAdd = 128
-opFAdd = 129
-opISub = 130
-opFSub = 131
-opIMul = 132
-opFMul = 133
-opUDiv = 134
-opSDiv = 135
-opFDiv = 136
-opFMod = 141
-
-opDot :: Word32
-opDot = 148
+opSNegate, opFNegate, opIAdd, opFAdd, opISub, opFSub, opIMul, opFMul, opUDiv, opSDiv, opFDiv, opFMod, opDot :: Word32
+(opSNegate, opFNegate, opIAdd, opFAdd, opISub, opFSub, opIMul, opFMul, opUDiv, opSDiv, opFDiv, opFMod, opDot) = (126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 141, 148)
 
 opLogicalEqual, opLogicalNotEqual, opLogicalOr, opLogicalAnd, opLogicalNot, opSelect :: Word32
-opLogicalEqual = 164
-opLogicalNotEqual = 165
-opLogicalOr = 166
-opLogicalAnd = 167
-opLogicalNot = 168
-opSelect = 169
+(opLogicalEqual, opLogicalNotEqual, opLogicalOr, opLogicalAnd, opLogicalNot, opSelect) = (164, 165, 166, 167, 168, 169)
 
-opIEqual, opINotEqual, opUGreaterThan, opSGreaterThan, opUGreaterThanEqual, opSGreaterThanEqual :: Word32
-opIEqual = 170
-opINotEqual = 171
-opUGreaterThan = 172
-opSGreaterThan = 173
-opUGreaterThanEqual = 174
-opSGreaterThanEqual = 175
-
-opULessThan, opSLessThan, opULessThanEqual, opSLessThanEqual :: Word32
-opULessThan = 176
-opSLessThan = 177
-opULessThanEqual = 178
-opSLessThanEqual = 179
+opIEqual, opINotEqual, opUGreaterThan, opSGreaterThan, opUGreaterThanEqual, opSGreaterThanEqual, opULessThan, opSLessThan, opULessThanEqual, opSLessThanEqual :: Word32
+(opIEqual, opINotEqual, opUGreaterThan, opSGreaterThan, opUGreaterThanEqual, opSGreaterThanEqual, opULessThan, opSLessThan, opULessThanEqual, opSLessThanEqual) = (170, 171, 172, 173, 174, 175, 176, 177, 178, 179)
 
 opFOrdEqual, opFOrdNotEqual, opFOrdLessThan, opFOrdGreaterThan, opFOrdLessThanEqual, opFOrdGreaterThanEqual :: Word32
-opFOrdEqual = 180
-opFOrdNotEqual = 182
-opFOrdLessThan = 184
-opFOrdGreaterThan = 186
-opFOrdLessThanEqual = 188
-opFOrdGreaterThanEqual = 190
+(opFOrdEqual, opFOrdNotEqual, opFOrdLessThan, opFOrdGreaterThan, opFOrdLessThanEqual, opFOrdGreaterThanEqual) = (180, 182, 184, 186, 188, 190)
 
 opLoopMerge, opLabel, opBranch, opBranchConditional, opReturn :: Word32
-opLoopMerge = 246
-opLabel = 248
-opBranch = 249
-opBranchConditional = 250
-opReturn = 253
+(opLoopMerge, opLabel, opBranch, opBranchConditional, opReturn) = (246, 248, 249, 250, 253)
 
 -- Enums
 capShader, execModelFragment, execModeOriginUpperLeft :: Word32
-capShader = 1
-execModelFragment = 4
-execModeOriginUpperLeft = 7
+(capShader, execModelFragment, execModeOriginUpperLeft) = (1, 4, 7)
 
 decBlock, decLocation, decBinding, decDescriptorSet, decOffset :: Word32
-decBlock = 2
-decLocation = 30
-decBinding = 33
-decDescriptorSet = 34
-decOffset = 35
+(decBlock, decLocation, decBinding, decDescriptorSet, decOffset) = (2, 30, 33, 34, 35)
 
 scUniformConstant, scInput, scUniform, scOutput, scFunction :: Word32
-scUniformConstant = 0
-scInput = 1
-scUniform = 2
-scOutput = 3
-scFunction = 7
+(scUniformConstant, scInput, scUniform, scOutput, scFunction) = (0, 1, 2, 3, 7)
 
 -- GLSL.std.450 extended instructions
 glslFAbs, glslSAbs, glslFSign, glslSSign, glslFloor, glslCeil, glslFract :: Word32
-glslFAbs = 4
-glslSAbs = 5
-glslFSign = 6
-glslSSign = 7
-glslFloor = 8
-glslCeil = 9
-glslFract = 10
+(glslFAbs, glslSAbs, glslFSign, glslSSign, glslFloor, glslCeil, glslFract) = (4, 5, 6, 7, 8, 9, 10)
 
 glslSin, glslCos, glslTan, glslAtan2, glslPow, glslExp, glslLog, glslLog2, glslSqrt :: Word32
-glslSin = 13
-glslCos = 14
-glslTan = 15
-glslAtan2 = 25
-glslPow = 26
-glslExp = 27
-glslLog = 28
-glslLog2 = 30
-glslSqrt = 31
+(glslSin, glslCos, glslTan, glslAtan2, glslPow, glslExp, glslLog, glslLog2, glslSqrt) = (13, 14, 15, 25, 26, 27, 28, 30, 31)
 
-glslFMin, glslUMin, glslSMin, glslFMax, glslUMax, glslSMax :: Word32
-glslFMin = 37
-glslUMin = 38
-glslSMin = 39
-glslFMax = 40
-glslUMax = 41
-glslSMax = 42
-
-glslFClamp, glslUClamp, glslSClamp, glslFMix, glslStep, glslSmoothStep, glslLength, glslCross, glslNormalize :: Word32
-glslFClamp = 43
-glslUClamp = 44
-glslSClamp = 45
-glslFMix = 46
-glslStep = 48
-glslSmoothStep = 49
-glslLength = 66
-glslCross = 68
-glslNormalize = 69
+glslFMin, glslUMin, glslSMin, glslFMax, glslUMax, glslSMax, glslFClamp, glslUClamp, glslSClamp, glslFMix, glslStep, glslSmoothStep, glslLength, glslCross, glslNormalize :: Word32
+(glslFMin, glslUMin, glslSMin, glslFMax, glslUMax, glslSMax, glslFClamp, glslUClamp, glslSClamp, glslFMix, glslStep, glslSmoothStep, glslLength, glslCross, glslNormalize) = (37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 48, 49, 66, 68, 69)
 
 -- ---------------------------------------------------------------------------
--- Builder state
+-- Builder state & on-demand type/constant memoization
+
+data TypeKey
+  = TKVoid
+  | TKFnVoid
+  | TKIR !IRType
+  | TKBVec !Int
+  | TKImage2D
+  | TKSampledImage2D
+  | TKPtr !Word32 !TypeKey
+  | TKUboPtr !Word32
+  deriving (Eq, Ord)
 
 data ConstKey
   = CKFloat !Word32
@@ -221,67 +112,51 @@ data SpvEnv = SpvEnv
   , seExtGlsl :: !Word32
   , seMainId :: !Word32
   , seEntryLabel :: !Word32
-  , seTVoid :: !Word32
-  , seTFnVoid :: !Word32
-  , seTBool :: !Word32
-  , seTInt :: !Word32
-  , seTUInt :: !Word32
-  , seTFloat :: !Word32
-  , seTVec2 :: !Word32
-  , seTVec3 :: !Word32
-  , seTVec4 :: !Word32
-  , seTBVec2 :: !Word32
-  , seTBVec3 :: !Word32
-  , seTBVec4 :: !Word32
-  , seUboStruct :: !Word32
   , seVColorVar :: !Word32
   , seVUvVar :: !Word32
   , seFragOutVar :: !Word32
   , seUboVar :: !Word32
   , seTexVar :: !(Maybe Word32)
-  , seTSampledImg :: !(Maybe Word32)
-  , sePtrUniform :: !(Map GpuType Word32)
-  , sePtrFunc :: !(Map IRType Word32)
+  , seTypes :: !(Map TypeKey Word32)
+  , seTypeInsts :: ![[Word32]]
+  -- ^ Reversed OpType* instructions emitted in section 9 (before constants).
   , seConsts :: !(Map ConstKey Word32)
   , seConstInsts :: ![[Word32]]
-  -- ^ Reversed list of OpConstant* instructions emitted in section 9.
+  -- ^ Reversed OpConstant* instructions emitted in section 9.
   , seFuncVars :: ![[Word32]]
-  -- ^ Reversed list of function-scope OpVariable instructions emitted at entry.
+  -- ^ Reversed function-scope OpVariable instructions emitted at entry.
   , seBody :: ![[Word32]]
-  -- ^ Reversed list of instructions in main's body.
+  -- ^ Reversed instructions in main's body.
   }
 
 -- | Emit a complete SPIR-V 1.0 binary fragment shader as little-endian bytes.
 emitSpirv :: ShaderIR -> ByteString
-emitSpirv ir =
-  BSL.toStrict . BSB.toLazyByteString . foldMap BSB.word32LE $ emitSpirvWords ir
+emitSpirv = BSL.toStrict . BSB.toLazyByteString . foldMap BSB.word32LE . emitSpirvWords
 
 -- | Emit a complete SPIR-V 1.0 binary fragment shader as 32-bit words.
 emitSpirvWords :: ShaderIR -> [Word32]
 emitSpirvWords ir =
-  let (env0, typeDeclWords, decWords, globalWords) = initModule ir
+  let (env0, decWords, globalWords) = initModule ir
       (outId, env1) = emitMain ir env0
-      bound = seNextId env1
-      header = [spvMagic, spvVersion10, 0, bound, 0]
+      (tVoid, env2) = getType TKVoid env1
+      (tFnVoid, env3) = getType TKFnVoid env2
+      header = [spvMagic, spvVersion10, 0, seNextId env3, 0]
       caps = [inst opCapability [capShader]]
-      extImports = [inst opExtInstImport (seExtGlsl env1 : encodeStr "GLSL.std.450")]
+      extImports = [inst opExtInstImport (seExtGlsl env3 : encodeStr "GLSL.std.450")]
       memModel = [inst opMemoryModel [0, 1]]
       entryPts =
         [ inst opEntryPoint $
-            [execModelFragment, seMainId env1]
+            [execModelFragment, seMainId env3]
               ++ encodeStr "main"
-              ++ [seVColorVar env1, seVUvVar env1, seFragOutVar env1]
+              ++ [seVColorVar env3, seVUvVar env3, seFragOutVar env3]
         ]
-      execModes = [inst opExecutionMode [seMainId env1, execModeOriginUpperLeft]]
-      consts = reverse (seConstInsts env1)
+      execModes = [inst opExecutionMode [seMainId env3, execModeOriginUpperLeft]]
       fnStart =
-        [ inst opFunction [seTVoid env1, seMainId env1, 0, seTFnVoid env1]
-        , inst opLabel [seEntryLabel env1]
+        [ inst opFunction [tVoid, seMainId env3, 0, tFnVoid]
+        , inst opLabel [seEntryLabel env3]
         ]
-      fnVars = reverse (seFuncVars env1)
-      fnBody = reverse (seBody env1)
       fnEnd =
-        [ inst opStore [seFragOutVar env1, outId]
+        [ inst opStore [seFragOutVar env3, outId]
         , inst opReturn []
         , inst opFunctionEnd []
         ]
@@ -293,12 +168,12 @@ emitSpirvWords ir =
           ++ entryPts
           ++ execModes
           ++ decWords
-          ++ typeDeclWords
-          ++ consts
+          ++ reverse (seTypeInsts env3)
+          ++ reverse (seConstInsts env3)
           ++ globalWords
           ++ fnStart
-          ++ fnVars
-          ++ fnBody
+          ++ reverse (seFuncVars env3)
+          ++ reverse (seBody env3)
           ++ fnEnd
 
 inst :: Word32 -> [Word32] -> [Word32]
@@ -308,47 +183,100 @@ inst opcode operands =
 
 encodeStr :: String -> [Word32]
 encodeStr s =
-  let bs = TE.encodeUtf8 (T.pack s)
-      bytes = BSL.unpack (BSL.fromStrict bs) ++ [0 :: Word8]
+  let bytes = BSL.unpack (BSL.fromStrict (TE.encodeUtf8 (T.pack s))) ++ [0 :: Word8]
       padLen = (4 - (length bytes `rem` 4)) `rem` 4
-      padded = bytes ++ replicate padLen 0
       pack4 (a : b : c : d : rest) =
-        let !w =
-              fromIntegral a
-                .|. (fromIntegral b `shiftL` 8)
-                .|. (fromIntegral c `shiftL` 16)
-                .|. (fromIntegral d `shiftL` 24)
+        let !w = fromIntegral a .|. (fromIntegral b `shiftL` 8) .|. (fromIntegral c `shiftL` 16) .|. (fromIntegral d `shiftL` 24)
          in w : pack4 rest
       pack4 _ = []
-   in pack4 padded
+   in pack4 (bytes ++ replicate padLen 0)
 
 allocId :: SpvEnv -> (Word32, SpvEnv)
-allocId e =
-  let !i = seNextId e
-   in (i, e {seNextId = i + 1})
+allocId e = let !i = seNextId e in (i, e {seNextId = i + 1})
 
 emitBody :: [Word32] -> SpvEnv -> SpvEnv
 emitBody w e = e {seBody = w : seBody e}
 
-emitFuncVar :: Word32 -> SpvEnv -> (Word32, SpvEnv)
-emitFuncVar ptrTy e =
-  let (vid, e1) = allocId e
-      w = inst opVariable [ptrTy, vid, scFunction]
-   in (vid, e1 {seFuncVars = w : seFuncVars e1})
+emitRes :: Word32 -> Word32 -> [Word32] -> SpvEnv -> (Word32, SpvEnv)
+emitRes opcode tyId args e =
+  let (r, e1) = allocId e
+   in (r, emitBody (inst opcode (tyId : r : args)) e1)
+
+emitExt :: Word32 -> Word32 -> [Word32] -> SpvEnv -> (Word32, SpvEnv)
+emitExt tyId extOp args e = emitRes opExtInst tyId (seExtGlsl e : extOp : args) e
+
+emitLoad :: Word32 -> Word32 -> SpvEnv -> (Word32, SpvEnv)
+emitLoad tyId ptrId = emitRes opLoad tyId [ptrId]
+
+emitFuncVar :: IRType -> SpvEnv -> (Word32, SpvEnv)
+emitFuncVar ty e0 =
+  let (ptrTy, e1) = getType (TKPtr scFunction (TKIR ty)) e0
+      (vid, e2) = allocId e1
+   in (vid, e2 {seFuncVars = inst opVariable [ptrTy, vid, scFunction] : seFuncVars e2})
+
+-- | Memoized on-demand SPIR-V type allocation.
+getType :: TypeKey -> SpvEnv -> (Word32, SpvEnv)
+getType key e = case Map.lookup key (seTypes e) of
+  Just tid -> (tid, e)
+  Nothing ->
+    let record tid w e' = (tid, e' {seTypes = Map.insert key tid (seTypes e'), seTypeInsts = w : seTypeInsts e'})
+        allocWith build e' = let (tid, e1) = allocId e' in record tid (build tid) e1
+     in case key of
+          TKVoid -> allocWith (\tid -> inst opTypeVoid [tid]) e
+          TKFnVoid ->
+            let (tv, e1) = getType TKVoid e
+             in allocWith (\tid -> inst opTypeFunction [tid, tv]) e1
+          TKIR TBool -> allocWith (\tid -> inst opTypeBool [tid]) e
+          TKIR TInt -> allocWith (\tid -> inst opTypeInt [tid, 32, 1]) e
+          TKIR TUInt -> allocWith (\tid -> inst opTypeInt [tid, 32, 0]) e
+          TKIR TFloat -> allocWith (\tid -> inst opTypeFloat [tid, 32]) e
+          TKIR TVec2 -> vecType TFloat 2 e
+          TKIR TVec3 -> vecType TFloat 3 e
+          TKIR TVec4 -> vecType TFloat 4 e
+          TKBVec n -> vecType TBool (fromIntegral n) e
+          TKImage2D ->
+            let (tf, e1) = getType (TKIR TFloat) e
+             in allocWith (\tid -> inst opTypeImage [tid, tf, 1, 0, 0, 0, 1, 0]) e1
+          TKSampledImage2D ->
+            let (img, e1) = getType TKImage2D e
+             in allocWith (\tid -> inst opTypeSampledImage [tid, img]) e1
+          TKPtr sc inner ->
+            let (innerTy, e1) = getType inner e
+             in allocWith (\tid -> inst opTypePointer [tid, sc, innerTy]) e1
+          TKUboPtr structId ->
+            allocWith (\tid -> inst opTypePointer [tid, scUniform, structId]) e
+  where
+    vecType elemTy n e0 =
+      let (et, e1) = getType (TKIR elemTy) e0
+          (tid, e2) = allocId e1
+       in (tid, e2 {seTypes = Map.insert key tid (seTypes e2), seTypeInsts = inst opTypeVector [tid, et, n] : seTypeInsts e2})
+
+irTypeId :: IRType -> SpvEnv -> (Word32, SpvEnv)
+irTypeId = getType . TKIR
+
+uboFieldIR :: GpuType -> IRType
+uboFieldIR gt = case gt of
+  GFloat -> TFloat
+  GInt32 -> TInt
+  GUInt32 -> TUInt
+  GBool -> TUInt
+  GVec2 -> TVec2
+  GVec3 -> TVec3
+  GVec4 -> TVec4
 
 constWord :: ConstKey -> SpvEnv -> (Word32, SpvEnv)
-constWord key e =
-  case Map.lookup key (seConsts e) of
-    Just cid -> (cid, e)
-    Nothing ->
-      let (cid, e1) = allocId e
-          w = case key of
-            CKFloat bits -> inst opConstant [seTFloat e1, cid, bits]
-            CKInt n -> inst opConstant [seTInt e1, cid, fromIntegral n]
-            CKUInt u -> inst opConstant [seTUInt e1, cid, u]
-            CKBool True -> inst opConstantTrue [seTBool e1, cid]
-            CKBool False -> inst opConstantFalse [seTBool e1, cid]
-       in (cid, e1 {seConsts = Map.insert key cid (seConsts e1), seConstInsts = w : seConstInsts e1})
+constWord key e = case Map.lookup key (seConsts e) of
+  Just cid -> (cid, e)
+  Nothing ->
+    let (ty, build) = case key of
+          CKFloat bits -> (TFloat, \t c -> inst opConstant [t, c, bits])
+          CKInt n -> (TInt, \t c -> inst opConstant [t, c, fromIntegral n])
+          CKUInt u -> (TUInt, \t c -> inst opConstant [t, c, u])
+          CKBool True -> (TBool, \t c -> inst opConstantTrue [t, c])
+          CKBool False -> (TBool, \t c -> inst opConstantFalse [t, c])
+        (tid, e1) = irTypeId ty e
+        (cid, e2) = allocId e1
+     in (cid, e2 {seConsts = Map.insert key cid (seConsts e2), seConstInsts = build tid cid : seConstInsts e2})
 
 constInt :: Int32 -> SpvEnv -> (Word32, SpvEnv)
 constInt = constWord . CKInt
@@ -356,231 +284,95 @@ constInt = constWord . CKInt
 constFloat :: Float -> SpvEnv -> (Word32, SpvEnv)
 constFloat = constWord . CKFloat . castFloatToWord32
 
-irTypeId :: SpvEnv -> IRType -> Word32
-irTypeId e ty = case ty of
-  TFloat -> seTFloat e
-  TInt -> seTInt e
-  TUInt -> seTUInt e
-  TBool -> seTBool e
-  TVec2 -> seTVec2 e
-  TVec3 -> seTVec3 e
-  TVec4 -> seTVec4 e
-
-uboFieldTypeId :: SpvEnv -> GpuType -> Word32
-uboFieldTypeId e gt = case gt of
-  GFloat -> seTFloat e
-  GInt32 -> seTInt e
-  GUInt32 -> seTUInt e
-  GBool -> seTUInt e
-  GVec2 -> seTVec2 e
-  GVec3 -> seTVec3 e
-  GVec4 -> seTVec4 e
-
 -- ---------------------------------------------------------------------------
--- Module type, decoration, and global setup
+-- Module setup
 
-initModule :: ShaderIR -> (SpvEnv, [[Word32]], [[Word32]], [[Word32]])
+initModule :: ShaderIR -> (SpvEnv, [[Word32]], [[Word32]])
 initModule ir =
-  let -- Fixed deterministic ID allocation for core types and globals.
-      extGlsl = 1
-      mainId = 2
-      entryLabel = 3
-      tVoid = 4
-      tFnVoid = 5
-      tBool = 6
-      tInt = 7
-      tUInt = 8
-      tFloat = 9
-      tVec2 = 10
-      tVec3 = 11
-      tVec4 = 12
-      tBVec2 = 13
-      tBVec3 = 14
-      tBVec4 = 15
-      pInVec4 = 16
-      pInVec2 = 17
-      pOutVec4 = 18
-      uboStruct = 19
-      pUniformStruct = 20
-      pUniformFloat = 21
-      pUniformInt = 22
-      pUniformUInt = 23
-      pUniformVec2 = 24
-      pUniformVec3 = 25
-      pUniformVec4 = 26
-      pFuncFloat = 27
-      pFuncInt = 28
-      pFuncUInt = 29
-      pFuncBool = 30
-      pFuncVec2 = 31
-      pFuncVec3 = 32
-      pFuncVec4 = 33
-      vColorVar = 34
-      vUvVar = 35
-      fragOutVar = 36
-      uboVar = 37
-      (next0, texTypes, texDecs, texGlobals, mTexVar, mSampledTy) =
-        if irNeedsInput ir
-          then
-            let tImg = 38
-                tSamp = 39
-                pSamp = 40
-                tVar = 41
-             in ( 42
-                , [ inst opTypeImage [tImg, tFloat, 1, 0, 0, 0, 1, 0]
-                  , inst opTypeSampledImage [tSamp, tImg]
-                  , inst opTypePointer [pSamp, scUniformConstant, tSamp]
-                  ]
-                , [ inst opDecorate [tVar, decDescriptorSet, 2]
-                  , inst opDecorate [tVar, decBinding, 0]
-                  ]
+  let base0 = SpvEnv 1 0 0 0 0 0 0 0 Nothing Map.empty [] Map.empty [] [] []
+      (extGlsl, e1) = allocId base0
+      (mainId, e2) = allocId e1
+      (entryLabel, e3) = allocId e2
+      (vColorVar, e4) = allocId e3
+      (vUvVar, e5) = allocId e4
+      (fragOutVar, e6) = allocId e5
+      (uboVar, e7) = allocId e6
+      (pInVec4, e8) = getType (TKPtr scInput (TKIR TVec4)) e7
+      (pInVec2, e9) = getType (TKPtr scInput (TKIR TVec2)) e8
+      (pOutVec4, e10) = getType (TKPtr scOutput (TKIR TVec4)) e9
+      (tVec4, e11) = irTypeId TVec4 e10
+      (userTys, e12) = mapAccumEnv (\st uf -> irTypeId (uboFieldIR (ufType uf)) st) e11 (irUniforms ir)
+      (uboStruct, e13) = allocId e12
+      e14 = e13 {seTypeInsts = inst opTypeStruct (uboStruct : tVec4 : tVec4 : tVec4 : userTys) : seTypeInsts e13}
+      (pUbo, e15) = getType (TKUboPtr uboStruct) e14
+      (mTexVar, texDecs, texGlobals, e16)
+        | irNeedsInput ir =
+            let (pSamp, s1) = getType (TKPtr scUniformConstant TKSampledImage2D) e15
+                (tVar, s2) = allocId s1
+             in ( Just tVar
+                , [inst opDecorate [tVar, decDescriptorSet, 2], inst opDecorate [tVar, decBinding, 0]]
                 , [inst opVariable [pSamp, tVar, scUniformConstant]]
-                , Just tVar
-                , Just tSamp
+                , s2
                 )
-          else (38, [], [], [], Nothing, Nothing)
-
-      userTypes = map (uboFieldTypeId envBase . ufType) (irUniforms ir)
-      uboMembers = [tVec4, tVec4, tVec4] ++ userTypes
-
-      typeDecls =
-        [ inst opTypeVoid [tVoid]
-        , inst opTypeFunction [tFnVoid, tVoid]
-        , inst opTypeBool [tBool]
-        , inst opTypeInt [tInt, 32, 1]
-        , inst opTypeInt [tUInt, 32, 0]
-        , inst opTypeFloat [tFloat, 32]
-        , inst opTypeVector [tVec2, tFloat, 2]
-        , inst opTypeVector [tVec3, tFloat, 3]
-        , inst opTypeVector [tVec4, tFloat, 4]
-        , inst opTypeVector [tBVec2, tBool, 2]
-        , inst opTypeVector [tBVec3, tBool, 3]
-        , inst opTypeVector [tBVec4, tBool, 4]
-        , inst opTypePointer [pInVec4, scInput, tVec4]
-        , inst opTypePointer [pInVec2, scInput, tVec2]
-        , inst opTypePointer [pOutVec4, scOutput, tVec4]
-        , inst opTypeStruct (uboStruct : uboMembers)
-        , inst opTypePointer [pUniformStruct, scUniform, uboStruct]
-        , inst opTypePointer [pUniformFloat, scUniform, tFloat]
-        , inst opTypePointer [pUniformInt, scUniform, tInt]
-        , inst opTypePointer [pUniformUInt, scUniform, tUInt]
-        , inst opTypePointer [pUniformVec2, scUniform, tVec2]
-        , inst opTypePointer [pUniformVec3, scUniform, tVec3]
-        , inst opTypePointer [pUniformVec4, scUniform, tVec4]
-        , inst opTypePointer [pFuncFloat, scFunction, tFloat]
-        , inst opTypePointer [pFuncInt, scFunction, tInt]
-        , inst opTypePointer [pFuncUInt, scFunction, tUInt]
-        , inst opTypePointer [pFuncBool, scFunction, tBool]
-        , inst opTypePointer [pFuncVec2, scFunction, tVec2]
-        , inst opTypePointer [pFuncVec3, scFunction, tVec3]
-        , inst opTypePointer [pFuncVec4, scFunction, tVec4]
-        ]
-          ++ texTypes
-
-      memberOffsetDecs =
-        [ inst opMemberDecorate [uboStruct, 0, decOffset, 0]
+        | otherwise = (Nothing, [], [], e15)
+      decs =
+        [ inst opDecorate [vColorVar, decLocation, 0]
+        , inst opDecorate [vUvVar, decLocation, 1]
+        , inst opDecorate [fragOutVar, decLocation, 0]
+        , inst opDecorate [uboStruct, decBlock]
+        , inst opMemberDecorate [uboStruct, 0, decOffset, 0]
         , inst opMemberDecorate [uboStruct, 1, decOffset, 16]
         , inst opMemberDecorate [uboStruct, 2, decOffset, 32]
         ]
           ++ [ inst opMemberDecorate [uboStruct, fromIntegral (3 + i), decOffset, fromIntegral (48 + ufOffset uf)]
              | (i, uf) <- zip [0 :: Int ..] (irUniforms ir)
              ]
-
-      decs =
-        [ inst opDecorate [vColorVar, decLocation, 0]
-        , inst opDecorate [vUvVar, decLocation, 1]
-        , inst opDecorate [fragOutVar, decLocation, 0]
-        , inst opDecorate [uboStruct, decBlock]
-        ]
-          ++ memberOffsetDecs
-          ++ [ inst opDecorate [uboVar, decDescriptorSet, 3]
-             , inst opDecorate [uboVar, decBinding, 0]
-             ]
+          ++ [inst opDecorate [uboVar, decDescriptorSet, 3], inst opDecorate [uboVar, decBinding, 0]]
           ++ texDecs
-
       globals =
         [ inst opVariable [pInVec4, vColorVar, scInput]
         , inst opVariable [pInVec2, vUvVar, scInput]
         , inst opVariable [pOutVec4, fragOutVar, scOutput]
-        , inst opVariable [pUniformStruct, uboVar, scUniform]
+        , inst opVariable [pUbo, uboVar, scUniform]
         ]
           ++ texGlobals
-
-      envBase =
-        SpvEnv
-          { seNextId = next0
-          , seExtGlsl = extGlsl
+      envFinal =
+        e16
+          { seExtGlsl = extGlsl
           , seMainId = mainId
           , seEntryLabel = entryLabel
-          , seTVoid = tVoid
-          , seTFnVoid = tFnVoid
-          , seTBool = tBool
-          , seTInt = tInt
-          , seTUInt = tUInt
-          , seTFloat = tFloat
-          , seTVec2 = tVec2
-          , seTVec3 = tVec3
-          , seTVec4 = tVec4
-          , seTBVec2 = tBVec2
-          , seTBVec3 = tBVec3
-          , seTBVec4 = tBVec4
-          , seUboStruct = uboStruct
           , seVColorVar = vColorVar
           , seVUvVar = vUvVar
           , seFragOutVar = fragOutVar
           , seUboVar = uboVar
           , seTexVar = mTexVar
-          , seTSampledImg = mSampledTy
-          , sePtrUniform =
-              Map.fromList
-                [ (GFloat, pUniformFloat)
-                , (GInt32, pUniformInt)
-                , (GUInt32, pUniformUInt)
-                , (GBool, pUniformUInt)
-                , (GVec2, pUniformVec2)
-                , (GVec3, pUniformVec3)
-                , (GVec4, pUniformVec4)
-                ]
-          , sePtrFunc =
-              Map.fromList
-                [ (TFloat, pFuncFloat)
-                , (TInt, pFuncInt)
-                , (TUInt, pFuncUInt)
-                , (TBool, pFuncBool)
-                , (TVec2, pFuncVec2)
-                , (TVec3, pFuncVec3)
-                , (TVec4, pFuncVec4)
-                ]
-          , seConsts = Map.empty
-          , seConstInsts = []
-          , seFuncVars = []
-          , seBody = []
           }
-   in (envBase, typeDecls, decs, globals)
+   in (envFinal, decs, globals)
+
+mapAccumEnv :: (SpvEnv -> a -> (b, SpvEnv)) -> SpvEnv -> [a] -> ([b], SpvEnv)
+mapAccumEnv _ e [] = ([], e)
+mapAccumEnv f e (x : xs) =
+  let (y, e1) = f e x
+      (ys, e2) = mapAccumEnv f e1 xs
+   in (y : ys, e2)
 
 -- ---------------------------------------------------------------------------
 -- SSA block emission
 
 data ScopeCtx = ScopeCtx
   { scFrames :: ![Vector (IRType, Word32)]
-  -- ^ Outer scope frames from depth 0 upwards.
   , scLoopVars :: !(Map Int Word32)
-  -- ^ Current induction variable SSA ID per active loop ID.
   , scLoopStates :: !(Map (Int, Int) (IRType, Word32))
-  -- ^ Current iteration accumulator SSA ID per (loopId, slot).
   , scLoopResults :: !(Map Int [(IRType, Word32)])
-  -- ^ Final accumulator SSA IDs keyed by OpLoop's NodeId index in current frame.
   }
 
 emitMain :: ShaderIR -> SpvEnv -> (Word32, SpvEnv)
 emitMain ir env0 =
-  let emptyScope = ScopeCtx [] Map.empty Map.empty Map.empty
-      (vals, env1) = emitBlock emptyScope (irNodes ir) env0
-      (_, outId) = vals V.! unNodeId (irOutput ir)
-   in (outId, env1)
+  let (vals, env1) = emitBlock (ScopeCtx [] Map.empty Map.empty Map.empty) (irNodes ir) env0
+   in (snd (vals V.! unNodeId (irOutput ir)), env1)
 
 emitBlock :: ScopeCtx -> Vector (IRType, ExprOp) -> SpvEnv -> (Vector (IRType, Word32), SpvEnv)
-emitBlock scope nodes env0 = go 0 IM.empty Map.empty env0
+emitBlock scope nodes = go 0 IM.empty Map.empty
   where
     !n = V.length nodes
     go !i !acc !loopRes !e
@@ -591,9 +383,7 @@ emitBlock scope nodes env0 = go 0 IM.empty Map.empty env0
            in case op of
                 OpLoop lb ->
                   let (resList, e1) = emitLoopSpv scope' i acc lb e
-                      firstVal = case resList of
-                        ((_, v) : _) -> v
-                        [] -> 0
+                      firstVal = case resList of ((_, v) : _) -> v; [] -> 0
                    in go (i + 1) (IM.insert i (ty, firstVal) acc) (Map.insert i resList loopRes) e1
                 _ ->
                   let (vid, e1) = emitOpSpv scope' acc ty op e
@@ -608,101 +398,78 @@ emitLoopSpv ::
   ([(IRType, Word32)], SpvEnv)
 emitLoopSpv scope outerCount curVals lb e0 =
   let lid = lbLoopId lb
-      -- Allocate function-scope variables for the loop counter and accumulators.
-      (iVar, e1) = emitFuncVar (sePtrFunc e0 Map.! TInt) e0
-      (accVars, e2) = allocAccVars (lbStateTypes lb) e1
-      (startConst, e3) = constInt (lbStart lb) e2
-      (endConst, e4) = constInt (lbEnd lb) e3
-      (oneConst, e5) = constInt 1 e4
-      -- Initialize counter and accumulators before branching to loop header.
-      e6 = emitBody (inst opStore [iVar, startConst]) e5
-      e7 =
+      (tInt, e1) = irTypeId TInt e0
+      (tBool, e2) = irTypeId TBool e1
+      (iVar, e3) = emitFuncVar TInt e2
+      (accVars, e4) = mapAccumEnv (flip emitFuncVar) e3 (lbStateTypes lb)
+      (startConst, e5) = constInt (lbStart lb) e4
+      (endConst, e6) = constInt (lbEnd lb) e5
+      (oneConst, e7) = constInt 1 e6
+      e8 =
         foldl'
           (\e (vPtr, initNid) -> emitBody (inst opStore [vPtr, snd (curVals IM.! unNodeId initNid)]) e)
-          e6
+          (emitBody (inst opStore [iVar, startConst]) e7)
           (zip accVars (lbInits lb))
-      (headerLbl, e8) = allocId e7
-      (bodyLbl, e9) = allocId e8
-      (contLbl, e10) = allocId e9
-      (mergeLbl, e11) = allocId e10
-      -- Branch to header.
-      e12 = emitBody (inst opBranch [headerLbl]) e11
-      -- Header: load i, check i < end, OpLoopMerge, conditional branch.
-      e13 = emitBody (inst opLabel [headerLbl]) e12
-      (iVal, e14) = emitLoad (seTInt e13) iVar e13
-      (condId, e15) = allocId e14
+      (headerLbl, e9) = allocId e8
+      (bodyLbl, e10) = allocId e9
+      (contLbl, e11) = allocId e10
+      (mergeLbl, e12) = allocId e11
+      -- Header
+      e13 = emitBody (inst opLabel [headerLbl]) . emitBody (inst opBranch [headerLbl]) $ e12
+      (iVal, e14) = emitLoad tInt iVar e13
+      (condId, e15) = emitRes opSLessThan tBool [iVal, endConst] e14
       e16 =
-        emitBody (inst opBranchConditional [condId, bodyLbl, mergeLbl])
+        emitBody (inst opLabel [bodyLbl])
+          . emitBody (inst opBranchConditional [condId, bodyLbl, mergeLbl])
           . emitBody (inst opLoopMerge [mergeLbl, contLbl, 0])
-          . emitBody (inst opSLessThan [seTBool e15, condId, iVal, endConst])
           $ e15
-      -- Body: load accumulators, emit body nodes, store updated accumulators.
-      e17 = emitBody (inst opLabel [bodyLbl]) e16
-      (loadedStates, e18) = loadAccVars (zip (lbStateTypes lb) accVars) e17
+      -- Body
+      (loadedStates, e17) = loadAccVars e16 (zip (lbStateTypes lb) accVars)
       outerVec = V.generate outerCount (curVals IM.!)
       innerScope =
         ScopeCtx
           { scFrames = scFrames scope ++ [outerVec]
           , scLoopVars = Map.insert lid iVal (scLoopVars scope)
-          , scLoopStates =
-              foldl'
-                (\m (slot, st) -> Map.insert (lid, slot) st m)
-                (scLoopStates scope)
-                (zip [0 :: Int ..] loadedStates)
+          , scLoopStates = foldl' (\m (slot, st) -> Map.insert (lid, slot) st m) (scLoopStates scope) (zip [0 :: Int ..] loadedStates)
           , scLoopResults = Map.empty
           }
-      (bodyVals, e19) = emitBlock innerScope (lbBodyNodes lb) e18
-      e20 =
-        foldl'
-          (\e (vPtr, nextNid) -> emitBody (inst opStore [vPtr, snd (bodyVals V.! unNodeId nextNid)]) e)
-          e19
-          (zip accVars (lbNextStates lb))
-      e21 = emitBody (inst opBranch [contLbl]) e20
-      -- Continue block: increment i and branch back to header.
-      e22 = emitBody (inst opLabel [contLbl]) e21
-      (iCur, e23) = emitLoad (seTInt e22) iVar e22
-      (iNext, e24) = allocId e23
-      e25 =
-        emitBody (inst opBranch [headerLbl])
+      (bodyVals, e18) = emitBlock innerScope (lbBodyNodes lb) e17
+      e19 =
+        emitBody (inst opLabel [contLbl])
+          . emitBody (inst opBranch [contLbl])
+          $ foldl'
+            (\e (vPtr, nextNid) -> emitBody (inst opStore [vPtr, snd (bodyVals V.! unNodeId nextNid)]) e)
+            e18
+            (zip accVars (lbNextStates lb))
+      -- Continue
+      (iCur, e20) = emitLoad tInt iVar e19
+      (iNext, e21) = emitRes opIAdd tInt [iCur, oneConst] e20
+      e22 =
+        emitBody (inst opLabel [mergeLbl])
+          . emitBody (inst opBranch [headerLbl])
           . emitBody (inst opStore [iVar, iNext])
-          . emitBody (inst opIAdd [seTInt e24, iNext, iCur, oneConst])
-          $ e24
-      -- Merge block: load final accumulator values.
-      e26 = emitBody (inst opLabel [mergeLbl]) e25
-      (finalStates, e27) = loadAccVars (zip (lbStateTypes lb) accVars) e26
-   in (finalStates, e27)
+          $ e21
+   in loadAccVars e22 (zip (lbStateTypes lb) accVars)
   where
-    allocAccVars [] e = ([], e)
-    allocAccVars (t : ts) e =
-      let (v, e') = emitFuncVar (sePtrFunc e Map.! t) e
-          (vs, e'') = allocAccVars ts e'
-       in (v : vs, e'')
-
-    loadAccVars [] e = ([], e)
-    loadAccVars ((t, vPtr) : rest) e =
-      let (val, e') = emitLoad (irTypeId e t) vPtr e
-          (vals, e'') = loadAccVars rest e'
-       in ((t, val) : vals, e'')
-
-emitLoad :: Word32 -> Word32 -> SpvEnv -> (Word32, SpvEnv)
-emitLoad tyId ptrId e =
-  let (resId, e1) = allocId e
-   in (resId, emitBody (inst opLoad [tyId, resId, ptrId]) e1)
+    loadAccVars = mapAccumEnv $ \e (t, vPtr) ->
+      let (tid, e1) = irTypeId t e
+          (val, e2) = emitLoad tid vPtr e1
+       in ((t, val), e2)
 
 emitUboMember :: Int32 -> GpuType -> SpvEnv -> (Word32, SpvEnv)
 emitUboMember memberIdx gt e0 =
-  let (idxConst, e1) = constInt memberIdx e0
-      ptrTy = sePtrUniform e1 Map.! gt
-      (ptrId, e2) = allocId e1
-      e3 = emitBody (inst opAccessChain [ptrTy, ptrId, seUboVar e2, idxConst]) e2
-      valTy = uboFieldTypeId e3 gt
-      (rawId, e4) = emitLoad valTy ptrId e3
+  let fieldIR = uboFieldIR gt
+      (idxConst, e1) = constInt memberIdx e0
+      (ptrTy, e2) = getType (TKPtr scUniform (TKIR fieldIR)) e1
+      (ptrId, e3) = emitRes opAccessChain ptrTy [seUboVar e2, idxConst] e2
+      (valTy, e4) = irTypeId fieldIR e3
+      (rawId, e5) = emitLoad valTy ptrId e4
    in case gt of
         GBool ->
-          let (zeroU, e5) = constWord (CKUInt 0) e4
-              (bId, e6) = allocId e5
-           in (bId, emitBody (inst opINotEqual [seTBool e6, bId, rawId, zeroU]) e6)
-        _ -> (rawId, e4)
+          let (zeroU, e6) = constWord (CKUInt 0) e5
+              (tBool, e7) = irTypeId TBool e6
+           in emitRes opINotEqual tBool [rawId, zeroU] e7
+        _ -> (rawId, e5)
 
 -- ---------------------------------------------------------------------------
 -- Individual instruction lowering
@@ -717,17 +484,13 @@ emitOpSpv scope vals ty op e0 = case op of
     SysRect -> emitUboMember 0 GVec4 e0
     SysUvRect -> emitUboMember 1 GVec4 e0
     SysMeta -> emitUboMember 2 GVec4 e0
-    SysVColor -> emitLoad (seTVec4 e0) (seVColorVar e0) e0
-    SysVUv -> emitLoad (seTVec2 e0) (seVUvVar e0) e0
+    SysVColor -> let (t4, e1) = irTypeId TVec4 e0 in emitLoad t4 (seVColorVar e1) e1
+    SysVUv -> let (t2, e1) = irTypeId TVec2 e0 in emitLoad t2 (seVUvVar e1) e1
   OpUniform idx gt -> emitUboMember (fromIntegral (3 + idx)) gt e0
-  OpOuterRef depth nid ->
-    let frame = scFrames scope !! depth
-     in (snd (frame V.! unNodeId nid), e0)
+  OpOuterRef depth nid -> (snd ((scFrames scope !! depth) V.! unNodeId nid), e0)
   OpLoopVar lid -> (scLoopVars scope Map.! lid, e0)
   OpLoopState lid slot -> (snd (scLoopStates scope Map.! (lid, slot)), e0)
-  OpLoopResult loopNid slot ->
-    let resList = scLoopResults scope Map.! unNodeId loopNid
-     in (snd (resList !! slot), e0)
+  OpLoopResult loopNid slot -> (snd ((scLoopResults scope Map.! unNodeId loopNid) !! slot), e0)
   OpLoop _ -> (0, e0)
   OpConstruct outTy args -> emitConstruct vals outTy args e0
   OpSwizzle src cs -> emitSwizzle vals ty src cs e0
@@ -735,58 +498,49 @@ emitOpSpv scope vals ty op e0 = case op of
   OpBinary bo a b -> emitBinary vals ty bo a b e0
   OpTernary to a b c -> emitTernary vals ty to a b c e0
   OpLength a ->
-    let (_, aId) = vals IM.! unNodeId a
-     in emitGlslExt (seTFloat e0) glslLength [aId] e0
+    let (tf, e1) = irTypeId TFloat e0
+     in emitExt tf glslLength [snd (vals IM.! unNodeId a)] e1
   OpNormalize a ->
-    let (_, aId) = vals IM.! unNodeId a
-     in emitGlslExt (irTypeId e0 ty) glslNormalize [aId] e0
+    let (tyId, e1) = irTypeId ty e0
+     in emitExt tyId glslNormalize [snd (vals IM.! unNodeId a)] e1
   OpSampleInput uvNid ->
-    case (seTexVar e0, seTSampledImg e0) of
-      (Just texVar, Just sampTy) ->
+    case seTexVar e0 of
+      Just texVar ->
         let (_, uvId) = vals IM.! unNodeId uvNid
-            (sampId, e1) = emitLoad sampTy texVar e0
-            (rawId, e2) = allocId e1
-            e3 = emitBody (inst opImageSampleImplicitLod [seTVec4 e2, rawId, sampId, uvId]) e2
+            (sampTy, e1) = getType TKSampledImage2D e0
+            (tF, e2) = irTypeId TFloat e1
+            (tV3, e3) = irTypeId TVec3 e2
+            (tV4, e4) = irTypeId TVec4 e3
+            (sampId, e5) = emitLoad sampTy texVar e4
+            (rawId, e6) = emitRes opImageSampleImplicitLod tV4 [sampId, uvId] e5
             -- Offscreen targets hold premultiplied RGBA; un-premultiply to straight alpha.
-            (aId, e4) = allocId e3
-            e5 = emitBody (inst opCompositeExtract [seTFloat e4, aId, rawId, 3]) e4
-            (epsId, e6) = constFloat 1.0e-5 e5
-            (denomId, e7) = emitGlslExt (seTFloat e6) glslFMax [aId, epsId] e6
-            (denom3Id, e8) = allocId e7
-            e9 = emitBody (inst opCompositeConstruct [seTVec3 e8, denom3Id, denomId, denomId, denomId]) e8
-            (rgbId, e10) = allocId e9
-            e11 = emitBody (inst opVectorShuffle [seTVec3 e10, rgbId, rawId, rawId, 0, 1, 2]) e10
-            (divId, e12) = allocId e11
-            e13 = emitBody (inst opFDiv [seTVec3 e12, divId, rgbId, denom3Id]) e12
-            (oneId, e14) = constFloat 1.0 e13
-            (one3Id, e15) = allocId e14
-            e16 = emitBody (inst opCompositeConstruct [seTVec3 e15, one3Id, oneId, oneId, oneId]) e15
-            (clampedId, e17) = emitGlslExt (seTVec3 e16) glslFMin [divId, one3Id] e16
-            (resId, e18) = allocId e17
-         in (resId, emitBody (inst opCompositeConstruct [seTVec4 e18, resId, clampedId, aId]) e18)
-      _ ->
-        let (z, e1) = constFloat 0 e0
-            (resId, e2) = allocId e1
-         in (resId, emitBody (inst opCompositeConstruct [seTVec4 e2, resId, z, z, z, z]) e2)
-
-emitGlslExt :: Word32 -> Word32 -> [Word32] -> SpvEnv -> (Word32, SpvEnv)
-emitGlslExt resTy extOp args e0 =
-  let (resId, e1) = allocId e0
-   in (resId, emitBody (inst opExtInst ([resTy, resId, seExtGlsl e1, extOp] ++ args)) e1)
+            (aId, e7) = emitRes opCompositeExtract tF [rawId, 3] e6
+            (epsId, e8) = constFloat 1.0e-5 e7
+            (denomId, e9) = emitExt tF glslFMax [aId, epsId] e8
+            (denom3Id, e10) = emitRes opCompositeConstruct tV3 [denomId, denomId, denomId] e9
+            (rgbId, e11) = emitRes opVectorShuffle tV3 [rawId, rawId, 0, 1, 2] e10
+            (divId, e12) = emitRes opFDiv tV3 [rgbId, denom3Id] e11
+            (oneId, e13) = constFloat 1.0 e12
+            (one3Id, e14) = emitRes opCompositeConstruct tV3 [oneId, oneId, oneId] e13
+            (clampedId, e15) = emitExt tV3 glslFMin [divId, one3Id] e14
+         in emitRes opCompositeConstruct tV4 [clampedId, aId] e15
+      Nothing ->
+        let (tV4, e1) = irTypeId TVec4 e0
+            (z, e2) = constFloat 0 e1
+         in emitRes opCompositeConstruct tV4 [z, z, z, z] e2
 
 -- | Flatten vector arguments to scalar components and handle scalar splat.
 emitConstruct :: IntMap (IRType, Word32) -> IRType -> [NodeId] -> SpvEnv -> (Word32, SpvEnv)
 emitConstruct vals outTy args e0 =
   let resolved = [vals IM.! unNodeId a | a <- args]
       !outComps = irTypeComps outTy
+      (tyId, e1) = irTypeId outTy e0
    in case resolved of
         [(TFloat, sId)] | outComps > 1 ->
-          let (resId, e1) = allocId e0
-           in (resId, emitBody (inst opCompositeConstruct (irTypeId e1 outTy : resId : replicate outComps sId)) e1)
+          emitRes opCompositeConstruct tyId (replicate outComps sId) e1
         _ ->
-          let (scalars, e1) = flattenScalars resolved e0
-              (resId, e2) = allocId e1
-           in (resId, emitBody (inst opCompositeConstruct (irTypeId e2 outTy : resId : scalars)) e2)
+          let (scalars, e2) = flattenScalars resolved e1
+           in emitRes opCompositeConstruct tyId scalars e2
   where
     flattenScalars [] e = ([], e)
     flattenScalars ((t, vid) : rest) e
@@ -794,151 +548,123 @@ emitConstruct vals outTy args e0 =
           let (rs, e') = flattenScalars rest e
            in (vid : rs, e')
       | otherwise =
-          let (cs, e1) = extractAll vid (irTypeComps t) e
-              (rs, e2) = flattenScalars rest e1
-           in (cs ++ rs, e2)
-
-    extractAll vid k e = go 0 e
-      where
-        go !j !st
-          | j >= k = ([], st)
-          | otherwise =
-              let (cid, st1) = allocId st
-                  st2 = emitBody (inst opCompositeExtract [seTFloat st1, cid, vid, fromIntegral j]) st1
-                  (more, st3) = go (j + 1) st2
-               in (cid : more, st3)
+          let (tF, e1) = irTypeId TFloat e
+              (cs, e2) = mapAccumEnv (\st j -> emitRes opCompositeExtract tF [vid, fromIntegral j] st) e1 [0 .. irTypeComps t - 1]
+              (rs, e3) = flattenScalars rest e2
+           in (cs ++ rs, e3)
 
 emitSwizzle :: IntMap (IRType, Word32) -> IRType -> NodeId -> [Int] -> SpvEnv -> (Word32, SpvEnv)
 emitSwizzle vals outTy src cs e0 =
   let (srcTy, srcId) = vals IM.! unNodeId src
+      (tyId, e1) = irTypeId outTy e0
    in case cs of
         [c]
           | irTypeComps srcTy == 1 -> (srcId, e0)
-          | otherwise ->
-              let (resId, e1) = allocId e0
-               in (resId, emitBody (inst opCompositeExtract [irTypeId e1 outTy, resId, srcId, fromIntegral c]) e1)
+          | otherwise -> emitRes opCompositeExtract tyId [srcId, fromIntegral c] e1
         _
-          | irTypeComps srcTy == 1 ->
-              let (resId, e1) = allocId e0
-               in (resId, emitBody (inst opCompositeConstruct (irTypeId e1 outTy : resId : replicate (length cs) srcId)) e1)
-          | otherwise ->
-              let (resId, e1) = allocId e0
-               in (resId, emitBody (inst opVectorShuffle ([irTypeId e1 outTy, resId, srcId, srcId] ++ map fromIntegral cs)) e1)
+          | irTypeComps srcTy == 1 -> emitRes opCompositeConstruct tyId (replicate (length cs) srcId) e1
+          | otherwise -> emitRes opVectorShuffle tyId (srcId : srcId : map fromIntegral cs) e1
 
 -- | Promote a scalar TFloat to match a target vector type via OpCompositeConstruct.
 splatTo :: IRType -> (IRType, Word32) -> SpvEnv -> (Word32, SpvEnv)
 splatTo targetTy (srcTy, srcId) e
   | srcTy == targetTy = (srcId, e)
   | srcTy == TFloat && irTypeComps targetTy > 1 =
-      let (resId, e1) = allocId e
-       in (resId, emitBody (inst opCompositeConstruct (irTypeId e1 targetTy : resId : replicate (irTypeComps targetTy) srcId)) e1)
+      let (tyId, e1) = irTypeId targetTy e
+       in emitRes opCompositeConstruct tyId (replicate (irTypeComps targetTy) srcId) e1
   | otherwise = (srcId, e)
 
--- | Common promoted type for a binary operand pair.
-commonVecTy :: IRType -> IRType -> IRType
-commonVecTy a b
-  | irTypeComps a >= irTypeComps b = a
-  | otherwise = b
+-- | Select signed-int, unsigned-int, or float SPIR-V opcode for @opTy@.
+numPick :: IRType -> Word32 -> Word32 -> Word32 -> Word32
+numPick TInt s _ _ = s
+numPick TUInt _ u _ = u
+numPick _ _ _ f = f
 
 emitUnary :: IntMap (IRType, Word32) -> IRType -> UnOp -> NodeId -> SpvEnv -> (Word32, SpvEnv)
 emitUnary vals ty uo a e0 =
   let (aTy, aId) = vals IM.! unNodeId a
-      tyId = irTypeId e0 ty
-      emit1 opcode =
-        let (resId, e1) = allocId e0
-         in (resId, emitBody (inst opcode [tyId, resId, aId]) e1)
+      (tyId, e1) = irTypeId ty e0
+      ext extOp = emitExt tyId extOp [aId] e1
+      core opcode = emitRes opcode tyId [aId] e1
    in case uo of
-        UNeg -> emit1 (if aTy == TInt || aTy == TUInt then opSNegate else opFNegate)
-        UAbs -> emitGlslExt tyId (if aTy == TInt then glslSAbs else glslFAbs) [aId] e0
-        UFloor -> emitGlslExt tyId glslFloor [aId] e0
-        UCeil -> emitGlslExt tyId glslCeil [aId] e0
-        UFract -> emitGlslExt tyId glslFract [aId] e0
-        USqrt -> emitGlslExt tyId glslSqrt [aId] e0
-        USin -> emitGlslExt tyId glslSin [aId] e0
-        UCos -> emitGlslExt tyId glslCos [aId] e0
-        UTan -> emitGlslExt tyId glslTan [aId] e0
-        UExp -> emitGlslExt tyId glslExp [aId] e0
-        ULog -> emitGlslExt tyId glslLog [aId] e0
-        ULog2 -> emitGlslExt tyId glslLog2 [aId] e0
-        USign -> emitGlslExt tyId (if aTy == TInt then glslSSign else glslFSign) [aId] e0
-        UNot -> emit1 opLogicalNot
-        UFloatToInt -> emit1 opConvertFToS
-        UIntToFloat -> emit1 opConvertSToF
+        UNeg -> core (numPick aTy opSNegate opSNegate opFNegate)
+        UAbs -> ext (if aTy == TInt then glslSAbs else glslFAbs)
+        USign -> ext (if aTy == TInt then glslSSign else glslFSign)
+        UNot -> core opLogicalNot
+        UFloatToInt -> core opConvertFToS
+        UIntToFloat -> core opConvertSToF
+        UFloor -> ext glslFloor
+        UCeil -> ext glslCeil
+        UFract -> ext glslFract
+        USqrt -> ext glslSqrt
+        USin -> ext glslSin
+        UCos -> ext glslCos
+        UTan -> ext glslTan
+        UExp -> ext glslExp
+        ULog -> ext glslLog
+        ULog2 -> ext glslLog2
 
 emitBinary :: IntMap (IRType, Word32) -> IRType -> BinOp -> NodeId -> NodeId -> SpvEnv -> (Word32, SpvEnv)
 emitBinary vals ty bo a b e0 =
   let av@(aTy, aRaw) = vals IM.! unNodeId a
       bv@(bTy, bRaw) = vals IM.! unNodeId b
-      opTy = commonVecTy aTy bTy
+      opTy = if irTypeComps aTy >= irTypeComps bTy then aTy else bTy
       (aId, e1) = splatTo opTy av e0
       (bId, e2) = splatTo opTy bv e1
-      tyId = irTypeId e2 ty
-      emit2 opcode =
-        let (resId, e3) = allocId e2
-         in (resId, emitBody (inst opcode [tyId, resId, aId, bId]) e3)
-      isInt = opTy == TInt
-      isUInt = opTy == TUInt
-      isBool = opTy == TBool
+      (tyId, e3) = irTypeId ty e2
+      core opcode = emitRes opcode tyId [aId, bId] e3
+      ext extOp = emitExt tyId extOp [aId, bId] e3
+      eqOp bOp iOp fOp = if opTy == TBool then bOp else numPick opTy iOp iOp fOp
    in case bo of
-        BAdd -> emit2 (if isInt || isUInt then opIAdd else opFAdd)
-        BSub -> emit2 (if isInt || isUInt then opISub else opFSub)
-        BMul -> emit2 (if isInt || isUInt then opIMul else opFMul)
-        BDiv -> emit2 (if isInt then opSDiv else if isUInt then opUDiv else opFDiv)
-        BMod -> emit2 opFMod
-        BMin -> emitGlslExt tyId (if isInt then glslSMin else if isUInt then glslUMin else glslFMin) [aId, bId] e2
-        BMax -> emitGlslExt tyId (if isInt then glslSMax else if isUInt then glslUMax else glslFMax) [aId, bId] e2
-        BPow -> emitGlslExt tyId glslPow [aId, bId] e2
-        BAtan2 -> emitGlslExt tyId glslAtan2 [aId, bId] e2
-        BStep -> emitGlslExt tyId glslStep [aId, bId] e2
-        BEq -> emit2 (if isBool then opLogicalEqual else if isInt || isUInt then opIEqual else opFOrdEqual)
-        BNeq -> emit2 (if isBool then opLogicalNotEqual else if isInt || isUInt then opINotEqual else opFOrdNotEqual)
-        BLt -> emit2 (if isInt then opSLessThan else if isUInt then opULessThan else opFOrdLessThan)
-        BLe -> emit2 (if isInt then opSLessThanEqual else if isUInt then opULessThanEqual else opFOrdLessThanEqual)
-        BGt -> emit2 (if isInt then opSGreaterThan else if isUInt then opUGreaterThan else opFOrdGreaterThan)
-        BGe -> emit2 (if isInt then opSGreaterThanEqual else if isUInt then opUGreaterThanEqual else opFOrdGreaterThanEqual)
-        BAnd -> emit2 opLogicalAnd
-        BOr -> emit2 opLogicalOr
+        BAdd -> core (numPick opTy opIAdd opIAdd opFAdd)
+        BSub -> core (numPick opTy opISub opISub opFSub)
+        BMul -> core (numPick opTy opIMul opIMul opFMul)
+        BDiv -> core (numPick opTy opSDiv opUDiv opFDiv)
+        BMod -> core opFMod
+        BMin -> ext (numPick opTy glslSMin glslUMin glslFMin)
+        BMax -> ext (numPick opTy glslSMax glslUMax glslFMax)
+        BPow -> ext glslPow
+        BAtan2 -> ext glslAtan2
+        BStep -> ext glslStep
+        BEq -> core (eqOp opLogicalEqual opIEqual opFOrdEqual)
+        BNeq -> core (eqOp opLogicalNotEqual opINotEqual opFOrdNotEqual)
+        BLt -> core (numPick opTy opSLessThan opULessThan opFOrdLessThan)
+        BLe -> core (numPick opTy opSLessThanEqual opULessThanEqual opFOrdLessThanEqual)
+        BGt -> core (numPick opTy opSGreaterThan opUGreaterThan opFOrdGreaterThan)
+        BGe -> core (numPick opTy opSGreaterThanEqual opUGreaterThanEqual opFOrdGreaterThanEqual)
+        BAnd -> core opLogicalAnd
+        BOr -> core opLogicalOr
         BDot ->
-          let (resId, e3) = allocId e0
-           in (resId, emitBody (inst opDot [seTFloat e3, resId, aRaw, bRaw]) e3)
-        BCross -> emitGlslExt tyId glslCross [aRaw, bRaw] e0
+          let (tF, eF) = irTypeId TFloat e0
+           in emitRes opDot tF [aRaw, bRaw] eF
+        BCross ->
+          let (tOut, eOut) = irTypeId ty e0
+           in emitExt tOut glslCross [aRaw, bRaw] eOut
 
 emitTernary :: IntMap (IRType, Word32) -> IRType -> TriOp -> NodeId -> NodeId -> NodeId -> SpvEnv -> (Word32, SpvEnv)
 emitTernary vals ty to a b c e0 =
   let av = vals IM.! unNodeId a
       bv = vals IM.! unNodeId b
       cv = vals IM.! unNodeId c
-      tyId = irTypeId e0 ty
+      (tyId, e1) = irTypeId ty e0
+      splatExt extOp =
+        let (aId, s1) = splatTo ty av e1
+            (bId, s2) = splatTo ty bv s1
+            (cId, s3) = splatTo ty cv s2
+         in emitExt tyId extOp [aId, bId, cId] s3
    in case to of
-        TMix ->
-          let (aId, e1) = splatTo ty av e0
-              (bId, e2) = splatTo ty bv e1
-              (cId, e3) = splatTo ty cv e2
-           in emitGlslExt tyId glslFMix [aId, bId, cId] e3
-        TClamp ->
-          let (aId, e1) = splatTo ty av e0
-              (bId, e2) = splatTo ty bv e1
-              (cId, e3) = splatTo ty cv e2
-              extOp = if ty == TInt then glslSClamp else if ty == TUInt then glslUClamp else glslFClamp
-           in emitGlslExt tyId extOp [aId, bId, cId] e3
-        TSmoothstep ->
-          let (aId, e1) = splatTo ty av e0
-              (bId, e2) = splatTo ty bv e1
-              (cId, e3) = splatTo ty cv e2
-           in emitGlslExt tyId glslSmoothStep [aId, bId, cId] e3
+        TMix -> splatExt glslFMix
+        TClamp -> splatExt (numPick ty glslSClamp glslUClamp glslFClamp)
+        TSmoothstep -> splatExt glslSmoothStep
         TSelect ->
           let (_, condRaw) = av
-              (bId, e1) = splatTo ty bv e0
-              (cId, e2) = splatTo ty cv e1
+              (bId, e2) = splatTo ty bv e1
+              (cId, e3) = splatTo ty cv e2
               -- SPIR-V 1.0 requires a boolean vector condition for vector OpSelect.
-              (condId, e3) = case ty of
-                TVec2 -> splatBool (seTBVec2 e2) 2 condRaw e2
-                TVec3 -> splatBool (seTBVec3 e2) 3 condRaw e2
-                TVec4 -> splatBool (seTBVec4 e2) 4 condRaw e2
-                _ -> (condRaw, e2)
-              (resId, e4) = allocId e3
-           in (resId, emitBody (inst opSelect [tyId, resId, condId, bId, cId]) e4)
-  where
-    splatBool bvTy n condRaw e =
-      let (vid, e1) = allocId e
-       in (vid, emitBody (inst opCompositeConstruct (bvTy : vid : replicate n condRaw)) e1)
+              (condId, e4)
+                | irTypeComps ty > 1 =
+                    let !n = irTypeComps ty
+                        (bvTy, s1) = getType (TKBVec n) e3
+                     in emitRes opCompositeConstruct bvTy (replicate n condRaw) s1
+                | otherwise = (condRaw, e3)
+           in emitRes opSelect tyId [condId, bId, cId] e4

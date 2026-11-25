@@ -62,12 +62,11 @@ import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Frame.Hit (nodeInteractionHit)
 import NanoUI.Internal.Layout.ScrollGeometry (padContentClip)
 import NanoUI.Internal.Shortcut qualified as Shortcut
-import NanoUI.Internal.Store (fieldGrid, findSpec, insertSlot, insertSpec, lookupSlot)
-import NanoUI.Internal.Store.Slots (slotDragPress)
+import NanoUI.Internal.Store (fieldGrid, insertSlot, lookupSlot)
 import NanoUI.Internal.Store.Types (GridState (..), Gesture (..))
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types
-import NanoUI.Internal.Widgets.Behavior (KeyNav (..), leftPress, pastDragThreshold, useKeyNav)
+import NanoUI.Internal.Widgets.Behavior (KeyNav (..), dragPressLive, pastDragThreshold, recordDragPress, useKeyNav)
 import NanoUI.Internal.Widgets.Cursor (withCursorShape)
 import NanoUI.Widgets.Custom
 import NanoUI.Internal.Widgets.Button (buttonWith')
@@ -408,7 +407,7 @@ paneGridCore cfg controlled given = do
   -- A gesture lasts only under the press it started with ('runGestures'),
   -- so one whose release the grid did not see is over.
   live <- case stored of
-    Just s | gsGesture s /= NoGesture -> (== findSpec slotDragPress 0 key store0) <$> liftIO (leftPress ctx)
+    Just s | gsGesture s /= NoGesture -> liftIO (dragPressLive ctx key store0)
     _ -> pure True
   let adopt
         | controlled = maybe True ((/= given) . gsTree) stored
@@ -885,7 +884,7 @@ runGestures wid env dividers rendered moved zone = do
       -- A gesture keeps the press it starts with, for 'paneGridCore' to end
       -- it once that press is gone.
       start g = do
-        liftIO (leftPress (geCtx env) >>= modifyStore (geCtx env) . insertSpec slotDragPress (geKey env))
+        liftIO (recordDragPress (geCtx env) (geKey env))
         setGesture True g
       -- diBand already includes the leeway; inflating it would steal presses
       -- from neighbouring panes.
@@ -904,7 +903,7 @@ runGestures wid env dividers rendered moved zone = do
       -- have clamped, so it moves with the pointer from the start.
       (Just d, _) -> start (Resize (diSplitId d) (clampRatio (geGutter env) d (diRatio d)) (mouseMain (diAxis d) mouse))
       (_, Just pane) -> do
-        liftIO (leftPress (geCtx env) >>= modifyStore (geCtx env) . insertSpec slotDragPress (geKey env))
+        liftIO (recordDragPress (geCtx env) (geKey env))
         let pid = rpPaneId pane
             rawTitle = pvTitle (rpView pane)
             dragTitle = if T.null rawTitle then pgTabTitle (geCfg env) pid else rawTitle

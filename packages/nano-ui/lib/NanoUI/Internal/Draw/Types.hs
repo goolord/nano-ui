@@ -349,8 +349,6 @@ data EffectSpan = EffectSpan
   -- ^ Maximum sample offset in logical pixels (X and Y).
   , esPasses :: !(SmallArray ShaderCall)
   -- ^ Shader passes applied in order to the offscreen texture.
-  , esSvgOpacity :: !(Maybe Float)
-  -- ^ Optional native opacity hint for SVG export.
   }
 
 -- | Unfinalized 'EffectSpan' recorded during painting before 'finishDraw'
@@ -365,7 +363,6 @@ data PendingEffectSpan = PendingEffectSpan
   , pesClip :: !Rect
   , pesMargin :: !V2
   , pesPasses :: !(SmallArray ShaderCall)
-  , pesSvgOpacity :: !(Maybe Float)
   }
 
 -- | Shared empty 'SmallArray' for frames without shader calls.

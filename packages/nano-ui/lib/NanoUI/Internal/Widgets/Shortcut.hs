@@ -51,7 +51,7 @@ keyIn happened k = do
   inp <- askInput
   if happened k inp
     then withContext $ \ctx ->
-      keyFree ctx (inputModifiers inp) k <&&> (if k == KeyEscape then not <$> escapeReserved ctx inp else pure True)
+      keyFree ctx (inputModifiers inp) k <&&> (if k == KeyEscape then not <$> escapeReserved ctx else pure True)
     else pure False
 
 -- | Whether the view may handle this key: no modal is open and the focused

@@ -5,6 +5,8 @@ module NanoUI.Internal.Widgets.Behavior
   ( DragAxis (..)
   , useDrag1D
   , leftPress
+  , dragPressLive
+  , recordDragPress
   , holdActiveWhile
   , Reorder (..)
   , useReorder
@@ -85,8 +87,9 @@ useDrag1D axis owner lo hi current track = do
   -- The drag keeps the point of the press that started it in a quiet slot
   -- (0 for none), and lasts only under that press: one released while this
   -- hook did not run does not come back with a later press.
-  held <- findSpec slotDragPress 0 key <$> liftIO (getStore ctx)
-  active0 <- if held == 0 then pure False else (== held) <$> liftIO (leftPress ctx)
+  store <- liftIO (getStore ctx)
+  let held = findSpec slotDragPress 0 key store
+  active0 <- liftIO (dragPressLive ctx key store)
   -- Hit-test against the clipped node so a track scrolled out of its
   -- viewport does not respond at its stale rect.
   let onTrack = findNodeByWidgetId ctx owner >>= maybe (pure (rectContains track (inputMousePos inp))) (\i -> nodeInteractionHit ctx i track (inputMousePos inp))
@@ -95,7 +98,7 @@ useDrag1D axis owner lo hi current track = do
       frac = if trackLen <= 0 then 0 else clamp01 ((mouse - origin) / trackLen)
   when (if active then not active0 else held /= 0) . liftIO $
     if active
-      then leftPress ctx >>= modifyStore ctx . insertSpec slotDragPress key
+      then recordDragPress ctx key
       else modifyStore ctx (deleteSpec slotDragPress key)
   pure (if active then lo + frac * (hi - lo) else current, active, active0)
 
@@ -104,6 +107,17 @@ useDrag1D axis owner lo hi current track = do
 -- lasts only under that press.
 leftPress :: Context -> IO Int
 leftPress ctx = maybe 0 (\PressPoint {ppPos = V2 x y} -> (fromIntegral (castFloatToWord32 x) `shiftL` 32 .|. fromIntegral (castFloatToWord32 y)) + 1) . M.lookup MouseLeft <$> readIORef (ctxPressPos ctx)
+
+-- | Whether the left-button press recorded under @key@ ('slotDragPress') is
+-- still the currently held press.
+dragPressLive :: Context -> Int -> WidgetStore -> IO Bool
+dragPressLive ctx key store =
+  let held = findSpec slotDragPress 0 key store
+   in if held == 0 then pure False else (== held) <$> leftPress ctx
+
+-- | Store the current left-button press token under @key@ ('slotDragPress').
+recordDragPress :: Context -> Int -> IO ()
+recordDragPress ctx key = leftPress ctx >>= modifyStore ctx . insertSpec slotDragPress key
 
 -- | Whether a press at @mouse@ on a track of widget @owner@ is covered
 -- ('pointerCovered'). A track wider than its owner (a colour picker's bar)
@@ -277,28 +291,33 @@ useInputMethod wid purpose caret = do
       requestInputMethod ctx wid (Just caret) purpose
       fieldComposition ctx wid
 
+-- | Run @act@ with the current input when @wid@ holds keyboard focus, keys
+-- arrived this frame, and only Shift (if any modifier) is held; otherwise
+-- return @fallback@.
+whenKeyNavFocused :: WidgetId -> a -> (Input -> NanoUI a) -> NanoUI a
+whenKeyNavFocused wid fallback act = do
+  inp <- askInput
+  if hashWidgetId wid == 0 || inputKeysNull (inputKeys inp) || not (shiftAtMost (inputModifiers inp))
+    then pure fallback
+    else do
+      eligible <- keyboardFocused wid
+      if not eligible then pure fallback else act inp
+
 -- | Arrow / Enter / Space while @wid@ is focused and eligible for input,
 -- bare or with Shift only ('shiftAtMost'); other modifiers leave them to
 -- shortcuts. Arrows repeat with key auto-repeat; Enter and Space count only
 -- on the initial press.
 useKeyNav :: WidgetId -> NanoUI KeyNav
-useKeyNav wid = do
-  inp <- askInput
-  let none = KeyNav False False False False False False
-  if hashWidgetId wid == 0 || inputKeysNull (inputKeys inp) || not (shiftAtMost (inputModifiers inp))
-    then pure none
-    else do
-      eligible <- keyboardFocused wid
-      if not eligible
-        then pure none
-        else pure KeyNav
-          { knUp = pressedIn KeyUp inp
-          , knDown = pressedIn KeyDown inp
-          , knLeft = pressedIn KeyLeft inp
-          , knRight = pressedIn KeyRight inp
-          , knEnter = pressedOnceIn KeyEnter inp
-          , knSpace = pressedOnceIn KeySpace inp
-          }
+useKeyNav wid =
+  whenKeyNavFocused wid (KeyNav False False False False False False) $ \inp ->
+    pure KeyNav
+      { knUp = pressedIn KeyUp inp
+      , knDown = pressedIn KeyDown inp
+      , knLeft = pressedIn KeyLeft inp
+      , knRight = pressedIn KeyRight inp
+      , knEnter = pressedOnceIn KeyEnter inp
+      , knSpace = pressedOnceIn KeySpace inp
+      }
 
 -- | Directional step from arrow keys: @1@ for Right or Up, @-1@ for Left or Down.
 {-# INLINE navStep #-}
@@ -352,18 +371,10 @@ useListNav scrollId count current rowStep =
 useListNavWith :: WidgetId -> Int -> Maybe Int -> ListNavScroll -> NanoUI ListNav
 useListNavWith scrollId count current scrollMode
   | count <= 0 = pure (ListNav Nothing False False)
-  | otherwise = do
+  | otherwise =
       let cur = clampSel <$> current
           clampSel i = if i < 0 then 0 else min (count - 1) i
-          none = ListNav cur False False
-      inp <- askInput
-      if hashWidgetId scrollId == 0 || inputKeysNull (inputKeys inp) || not (shiftAtMost (inputModifiers inp))
-        then pure none
-        else do
-          eligible <- keyboardFocused scrollId
-          if not eligible
-            then pure none
-            else do
+       in whenKeyNavFocused scrollId (ListNav cur False False) $ \inp -> do
               let home = pressedOnceIn KeyHome inp
                   end = pressedOnceIn KeyEnd inp
                   pgUp = pressedIn KeyPageUp inp
@@ -440,7 +451,7 @@ useDismissable owner panel opener = do
   inp <- askFrameInput
   withContext $ \ctx -> do
     route <- getsInteraction ctx isPointerRoute
-    reserved <- escapeReserved ctx inp
+    reserved <- escapeReserved ctx
     let onMenu = case route of
           RouteLayer _ -> False
           _ -> True

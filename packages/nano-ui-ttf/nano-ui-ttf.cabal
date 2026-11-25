@@ -63,6 +63,7 @@ library
         NanoUI.Ttf.Internal.Font
         NanoUI.Ttf.Internal.Header
         NanoUI.Ttf.Internal.Inter
+        NanoUI.Ttf.Internal.Support
     build-depends:
         base >=4.20 && <4.23,
         bytestring ^>=0.12,

@@ -85,7 +85,6 @@ compileIRToProgram ir =
     , spGlslEs300 = Just (emitGlslEs300 ir)
     , spSpirv = Just (emitSpirv ir)
     , spMsl = Just (emitMsl ir)
-    , spDxil = Nothing
     , spNeedsTex = irNeedsInput ir
     , spUniformLayout = irUniforms ir
     , spUniformBytes = irUniformBytes ir

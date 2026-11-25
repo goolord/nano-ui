@@ -43,7 +43,7 @@ import Data.Primitive.PrimArray (readPrimArray, writePrimArray)
 import Data.Proxy (Proxy (..))
 import Data.Typeable (Typeable, typeRep)
 import Data.Word (Word64)
-import NanoUI.Internal.Context (Context (..), markDirtyCovered)
+import NanoUI.Internal.Context (Context (..), markDirty)
 import NanoUI.Internal.Equality (eqByPtr, ptrEq)
 import NanoUI.Internal.Id.Cursor (takeVarKey)
 import NanoUI.Internal.Monad (NanoUI, askContext, liftIO, withContext)
@@ -192,7 +192,7 @@ modifyRoot cell@(Cell ref _) l f eq
 
 -- | A write outside a pass: count it, and ask for a frame to show it.
 noteOutsidePass :: Context -> IO ()
-noteOutsidePass ctx = countChange >> markDirtyCovered ctx
+noteOutsidePass ctx = countChange >> markDirty ctx
 
 -- | Record a changing write to the part @sig@ made by view code.
 noteWrite :: Context -> Cell s -> Sig -> IO ()
@@ -216,7 +216,7 @@ backwards ctx = do
   passNo <- frameSlot ctx passNoSlot
   if passNo <= 1
     then setFlag ctx flagRerun
-    else markDirtyCovered ctx
+    else markDirty ctx
 
 -- | How a widget bound to a Var draws it.
 data Binding
@@ -311,7 +311,7 @@ noteBound ctx cell mode sig before wsig = do
 requestRerun :: Context -> IO ()
 requestRerun ctx = do
   p <- frameSlot ctx passSlot
-  if p == 0 then markDirtyCovered ctx else backwards ctx
+  if p == 0 then markDirty ctx else backwards ctx
 
 -- | Start view pass @n@ of a frame. The first pass drops any requests left
 -- by a frame an exception cut short. No handler is installed per frame,

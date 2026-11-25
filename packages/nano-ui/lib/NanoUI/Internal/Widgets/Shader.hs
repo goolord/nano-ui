@@ -97,7 +97,6 @@ shaderConfigured' cfg sh u = do
           , sneCornerRadius = radius
           , sneFallback = fallback
           , sneTint = tint
-          , sneCpuEval = fmap ($ u) (shaderCpuEval sh)
           }
   addWidgetNode wid NodeShader T.empty 0 lay $ \arena idx -> do
     mixNodePaintHash arena idx paintH

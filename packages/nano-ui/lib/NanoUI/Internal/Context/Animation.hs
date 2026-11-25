@@ -23,7 +23,7 @@ import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 
 import NanoUI.Internal.Animation
-import NanoUI.Internal.Context.Core (damageFull, damageKey, getsDamage, markDirtyCovered)
+import NanoUI.Internal.Context.Core (damageFull, damageKey, getsDamage, markDirty)
 import NanoUI.Internal.Context.Types (AnimationState (..), Context (..), DamageState (..), PrevFrame (..), ScrollState (..), intKey)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena (getNodeRect, lookupNodeByKey)
@@ -299,7 +299,7 @@ settleKey ctx key val = do
     -- A zero-length tween on such a key settles here without running, so
     -- this is the frame that must repaint whole.
     repaintIfOrphan ctx key
-    markDirtyCovered ctx
+    markDirty ctx
 
 -- | Record a settled value; one near zero is kept as no entry, which reads as zero.
 restAt :: Int -> Float -> IntMap Float -> IntMap Float

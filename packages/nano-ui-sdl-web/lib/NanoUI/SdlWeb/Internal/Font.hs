@@ -28,14 +28,9 @@ module NanoUI.SdlWeb.Internal.Font
   , withSdlFontCache
   ) where
 
-import Control.Monad (forM, forM_, unless, when)
+import Control.Monad (forM, when)
 import Data.ByteString (ByteString)
-import Data.Char (isPrint, ord)
-import Data.Foldable (traverse_)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
-import qualified Data.IntMap.Strict as IM
-import Data.Text (Text)
-import qualified Data.Text as T
+import Data.IORef (IORef)
 import Data.Maybe (catMaybes)
 import Data.Word (Word8)
 import Foreign.C.Types (CBool (..), CFloat (..), CInt (..))
@@ -47,9 +42,7 @@ import NanoUI.Ttf.Internal.Font
   , FontHooks (..)
   , FontSource (..)
   , GlyphAtlas (..)
-  , SdlFont (..)
   , SdlFontCache (..)
-  , attachFallback
   , closeEvictedFonts
   , defaultFontHooks
   , destroyGlyphAtlas
@@ -62,66 +55,27 @@ import NanoUI.Ttf.Internal.Font
   , prepareGlyphAtlasForFrame
   , reloadSdlFontCache
   , sdlFontCacheSource
-  , ttfCloseFont
-  , ttfHasGlyph
   , withSdlFontCache
   )
 import NanoUI.Ttf.Internal.Font qualified as Ttf
+import NanoUI.Ttf.Internal.Support (CoveragePool, closeCoveragePool, ensurePoolCoverage, newCoveragePool)
 
--- | The fallback fonts: each one's bytes, which SDL_ttf reads for as long as
--- the session runs, a probe of each opened when a character first needs
--- it, and which fallback covers each character asked about so far.
-data WebFallbacks = WebFallbacks
-  { wfSources :: ![ByteString]
-  , wfProbes :: !(IORef (IM.IntMap (Ptr ())))
-  , wfChars :: !(IORef (IM.IntMap (Maybe Int)))
-  }
+-- | Fallback fonts loaded from bytes, backed by a lazy 'CoveragePool'.
+newtype WebFallbacks = WebFallbacks (CoveragePool ByteString)
 
 -- | Fallbacks from font files' bytes, tried in order.
 newWebFallbacks :: [ByteString] -> IO WebFallbacks
-newWebFallbacks sources = WebFallbacks sources <$> newIORef IM.empty <*> newIORef IM.empty
+newWebFallbacks sources = WebFallbacks <$> newCoveragePool (pure sources) (`openFontBytes` 12)
 
 -- | Font hooks that attach a fallback to a face for each character it
 -- lacks, as nano-ui-sdl does with the system's fonts, and close the probes
 -- before SDL_ttf shuts down.
 webFontHooks :: WebFallbacks -> FontHooks
-webFontHooks wf = defaultFontHooks {fhEnsureCoverage = ensureCoverage wf, fhOnTtfQuit = closeProbes wf}
-
-ensureCoverage :: WebFallbacks -> SdlFont -> Text -> IO ()
-ensureCoverage wf sf txt =
-  unless (null (wfSources wf) || T.isAscii txt) $
-    forM_ (T.unpack txt) $ \c ->
-      when (ord c >= 128 && isPrint c) $ do
-        has <- ttfHasGlyph (sfFont sf) (fromIntegral (ord c))
-        unless has $ fallbackFor wf (ord c) >>= traverse_ (uncurry (attachFallback sf))
-
--- | The first fallback with a glyph for a codepoint, and its probe.
-fallbackFor :: WebFallbacks -> Int -> IO (Maybe (Int, Ptr ()))
-fallbackFor wf cp =
-  IM.lookup cp <$> readIORef (wfChars wf) >>= \case
-    Just known -> traverse withProbe known
-    Nothing -> do
-      found <- search (zip [0 ..] (wfSources wf))
-      modifyIORef' (wfChars wf) (IM.insert cp (fst <$> found))
-      pure found
-  where
-    search [] = pure Nothing
-    search ((i, _) : rest) = do
-      (_, probe) <- withProbe i
-      has <- if probe == nullPtr then pure False else ttfHasGlyph probe (fromIntegral cp)
-      if has then pure (Just (i, probe)) else search rest
-    withProbe i =
-      IM.lookup i <$> readIORef (wfProbes wf) >>= \case
-        Just probe -> pure (i, probe)
-        Nothing -> do
-          probe <- openFontBytes (wfSources wf !! i) 12
-          modifyIORef' (wfProbes wf) (IM.insert i probe)
-          pure (i, probe)
-
-closeProbes :: WebFallbacks -> IO ()
-closeProbes wf = do
-  readIORef (wfProbes wf) >>= mapM_ (\p -> unless (p == nullPtr) (ttfCloseFont p))
-  writeIORef (wfProbes wf) IM.empty
+webFontHooks (WebFallbacks pool) =
+  defaultFontHooks
+    { fhEnsureCoverage = ensurePoolCoverage pool
+    , fhOnTtfQuit = closeCoveragePool pool
+    }
 
 -- | Bracket an action with SDL_ttf initialisation, closing the hooks'
 -- probes before it shuts down.

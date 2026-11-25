@@ -299,50 +299,24 @@ renderSvgClick tag w h pos ui =
 -- Distinct high-contrast surface probes used across the matrix so the reader
 -- can visually trace which Style record inside Theme paints each pixel.
 
+probeSurface :: ((Style -> Style) -> Theme -> Theme) -> (Color -> Style -> Style) -> Color -> Color -> Color -> Theme -> Theme
+probeSurface target fill bg fg bd =
+  target (fill bg . foreground fg . borderColor bd . borderWidth 2)
+
 probeButton :: Theme -> Theme
-probeButton =
-  buttonStyle
-    ( fillColor (colorRGBA 3 105 161 255)
-        . foreground (colorRGBA 224 242 254 255)
-        . borderColor (colorRGBA 56 189 248 255)
-        . borderWidth 2
-    )
+probeButton = probeSurface buttonStyle fillColor (colorRGBA 3 105 161 255) (colorRGBA 224 242 254 255) (colorRGBA 56 189 248 255)
 
 probeInput :: Theme -> Theme
-probeInput =
-  inputStyle
-    ( fillColor (colorRGBA 4 120 87 255)
-        . foreground (colorRGBA 209 250 229 255)
-        . borderColor (colorRGBA 52 211 153 255)
-        . borderWidth 2
-    )
+probeInput = probeSurface inputStyle fillColor (colorRGBA 4 120 87 255) (colorRGBA 209 250 229 255) (colorRGBA 52 211 153 255)
 
 probePanel :: Theme -> Theme
-probePanel =
-  panelStyle
-    ( background (colorRGBA 88 28 135 255)
-        . foreground (colorRGBA 243 232 255 255)
-        . borderColor (colorRGBA 192 132 252 255)
-        . borderWidth 2
-    )
+probePanel = probeSurface panelStyle background (colorRGBA 88 28 135 255) (colorRGBA 243 232 255 255) (colorRGBA 192 132 252 255)
 
 probePopup :: Theme -> Theme
-probePopup =
-  popupStyle
-    ( fillColor (colorRGBA 180 83 9 255)
-        . foreground (colorRGBA 254 243 199 255)
-        . borderColor (colorRGBA 251 191 36 255)
-        . borderWidth 2
-    )
+probePopup = probeSurface popupStyle fillColor (colorRGBA 180 83 9 255) (colorRGBA 254 243 199 255) (colorRGBA 251 191 36 255)
 
 probeWindow :: Theme -> Theme
-probeWindow =
-  windowStyle
-    ( background (colorRGBA 30 27 75 255)
-        . foreground (colorRGBA 224 231 255 255)
-        . borderColor (colorRGBA 129 140 248 255)
-        . borderWidth 2
-    )
+probeWindow = probeSurface windowStyle background (colorRGBA 30 27 75 255) (colorRGBA 224 231 255 255) (colorRGBA 129 140 248 255)
 
 probeAccent :: Theme -> Theme
 probeAccent =

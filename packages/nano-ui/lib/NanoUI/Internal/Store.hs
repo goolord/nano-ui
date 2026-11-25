@@ -27,9 +27,6 @@ module NanoUI.Internal.Store
   , insertSlot
   , deleteSlot
   , flagSlot
-  , setFlagSlot
-  , quietFlag
-  , setQuietFlag
   , SlotWrites (..)
   , slotWrite
   , slotWriteOr
@@ -264,21 +261,6 @@ deleteSlot field k = overField field (IM.delete k)
 {-# INLINE flagSlot #-}
 flagSlot :: Int -> WidgetStore -> Bool
 flagSlot k = intBool . findSlot fieldInt 0 k
-
--- | Raise a flag slot, or remove it.
-{-# INLINE setFlagSlot #-}
-setFlagSlot :: Int -> Bool -> WidgetStore -> WidgetStore
-setFlagSlot k on = if on then insertSlot fieldInt k 1 else deleteSlot fieldInt k
-
--- | 'flagSlot' over the bookkeeping slots ('fieldQuiet').
-{-# INLINE quietFlag #-}
-quietFlag :: Int -> WidgetStore -> Bool
-quietFlag k = intBool . findSlot fieldQuiet 0 k
-
--- | 'setFlagSlot' over the bookkeeping slots ('fieldQuiet').
-{-# INLINE setQuietFlag #-}
-setQuietFlag :: Int -> Bool -> WidgetStore -> WidgetStore
-setQuietFlag k on = if on then insertSlot fieldQuiet k 1 else deleteSlot fieldQuiet k
 
 -- | Slot writes that know whether they would change the store. Combine them
 -- with '<>' and run them with 'NanoUI.Internal.Context.writeSlots', which leaves the

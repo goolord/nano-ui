@@ -13,15 +13,13 @@ module NanoUI.SdlWeb.Internal.Render
   , snapDamage
   ) where
 
-import Control.Exception (finally)
 import Control.Monad (forM_, unless, when)
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Int (Int32)
-import Data.List (sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Primitive.ByteArray (ByteArray, copyByteArrayToAddr, sizeofByteArray)
-import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromListN)
+import Data.Primitive.SmallArray (indexSmallArray, sizeofSmallArray, smallArrayFromListN)
 import qualified Data.Text.Encoding as TE
 import qualified Data.Vector.Unboxed as U
 import Data.Word (Word64, Word8)
@@ -29,23 +27,27 @@ import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Marshal.Alloc (allocaBytes, free, mallocBytes, reallocBytes)
 import Foreign.Marshal.Array (allocaArray, pokeArray)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
-import Foreign.Storable (peekElemOff, pokeByteOff, pokeElemOff)
-import NanoUI (Rect (..), V2 (..), colorA, colorB, colorG, colorR, rectIntersect)
+import Foreign.Storable (peekElemOff, pokeElemOff)
+import NanoUI (Rect (..), colorA, colorB, colorG, colorR)
 import NanoUI.Backend
   ( AtlasUpload (..)
+  , Context
   , Damage (..)
   , DrawCmd (..)
   , DrawData (..)
-  , EffectSpan (..)
+  , EffectDriver (..)
+  , EffectPassDraw (..)
   , ShaderCall (..)
   , ShaderProgram (..)
+  , atlasChanges
   , atlasTextureId
+  , clipPixelEdges
   , cmdEffectiveClip
+  , execEffectSpans
   , snapDamage
-  , sysUniformBytes
   , textureGlyphPage
+  , withEffectUniforms
   )
-import NanoUI.Backend (Context, atlasChanges, clipPixelEdges)
 import NanoUI.SdlWeb.Internal.Font (GlyphAtlas, glyphAtlasSize, glyphPageUploads)
 import NanoUI.SdlWeb.Internal.Host (WebHost (..), commandRecordSize, imageAtlasSlot)
 
@@ -162,17 +164,22 @@ drawCommandsSlice scale (pw, ph) ox oy mDamage rawCmds lo hi = reverse (go lo []
           && dcFirst prev + dcCount prev == dcFirst c =
           prev {dcCount = dcCount prev + dcCount c} : rest
     push c acc = c : acc
-    toPixels r =
-      let (x0, y0, x1, y1) = clipPixelEdges scale r
-          cx0 = max 0 x0
-          cy0 = max 0 y0
-       in (cx0, cy0, min pw x1 - cx0, min ph y1 - cy0)
+    toPixels = toPixelScissor scale (pw, ph)
     slotOf tex
       | page >= 0 = page
       | tex == atlasTextureId = imageAtlasSlot
       | otherwise = -1
       where
         page = textureGlyphPage tex
+
+-- | Convert a logical clip rectangle into a clamped device-pixel scissor
+-- @(x, y, width, height)@ within a @(pw, ph)@ target.
+toPixelScissor :: Float -> (Int, Int) -> Rect -> (Int, Int, Int, Int)
+toPixelScissor scale (pw, ph) r =
+  let (x0, y0, x1, y1) = clipPixelEdges scale r
+      cx0 = max 0 x0
+      cy0 = max 0 y0
+   in (cx0, cy0, min pw x1 - cx0, min ph y1 - cy0)
 
 -- | Look up or lazily register a GLSL ES 300 shader program on the host,
 -- returning its 1-based slot (or 0 if unavailable or compilation failed).
@@ -207,28 +214,50 @@ renderDrawData host r scale (pw, ph) damage dd = do
       uBytes = drawUniformBytes dd
       uSize = sizeofByteArray uBytes
       spans = drawEffectSpans dd
+      uploadUniforms =
+        when (sizeofSmallArray calls > 0 && uSize > 0) $
+          allocaBytes uSize $ \uPtr -> do
+            copyByteArrayToAddr uPtr uBytes 0 uSize
+            whUploadUniforms host uPtr uSize
   whBeginFrame host full (unit (colorR clear) / 255) (unit (colorG clear) / 255) (unit (colorB clear) / 255) (unit (colorA clear) / 255) (realToFrac scale) pw ph
   if sizeofSmallArray spans == 0
     then do
       let cmds = drawCommands' scale (pw, ph) damage dd
       unless (null cmds) $ do
-        when (sizeofSmallArray calls > 0 && uSize > 0) $
-          allocaBytes uSize $ \uPtr -> do
-            copyByteArrayToAddr uPtr uBytes 0 uSize
-            whUploadUniforms host uPtr uSize
+        uploadUniforms
         withForeignPtr (drawVertices dd) $ \vp ->
           withForeignPtr (drawIndices dd) $ \ip ->
             submitCommands host r dd vp ip cmds
     else do
-      when (sizeofSmallArray calls > 0 && uSize > 0) $
-        allocaBytes uSize $ \uPtr -> do
-          copyByteArrayToAddr uPtr uBytes 0 uSize
-          whUploadUniforms host uPtr uSize
+      uploadUniforms
+      let rawCmds = drawCommands dd
       withForeignPtr (drawVertices dd) $ \vp ->
-        withForeignPtr (drawIndices dd) $ \ip ->
-          execWebRange
-            host r dd scale vp ip spans (drawCommands dd) uBytes
-            0 (-1) (pw, ph) 0 0 mDamage 0 (U.length (drawCommands dd))
+        withForeignPtr (drawIndices dd) $ \ip -> do
+          let drv =
+                EffectDriver
+                  { edScale = scale
+                  , edFlipY = True
+                  , edPreparePasses = \passes -> do
+                      let !n = sizeofSmallArray passes
+                      slots <- mapM (ensureShaderSlot host r . indexSmallArray passes) [0 .. n - 1]
+                      pure (if any (<= 0) slots then Nothing else Just (smallArrayFromListN n slots))
+                  , edAcquireTarget = acquireWebTarget host
+                  , edReleaseTarget = whReleaseTarget host
+                  , edBindTarget = \slot clr ox oy ->
+                      True <$ whBindTarget host slot clr (realToFrac ox) (realToFrac oy)
+                  , edFlush = pure ()
+                  , edEmitPlain = \_ cw ch ox oy curDmg from to ->
+                      submitCommands host r dd vp ip (drawCommandsSlice scale (cw, ch) ox oy curDmg rawCmds from to)
+                  , edAfterSpanContent = \_ -> pure ()
+                  , edCompositePass = \shSlot sc pd dstW dstH -> do
+                      let mScissor = fmap (toPixelScissor scale (dstW, dstH)) (epdClip pd)
+                          nonEmpty = case mScissor of
+                            Just (_, _, sw, sh) -> sw > 0 && sh > 0
+                            Nothing -> True
+                      when nonEmpty $
+                        compositeWebPass host shSlot mScissor sc uBytes pd
+                  }
+          execEffectSpans drv spans 0 (-1) (pw, ph) 0 0 mDamage 0 (U.length rawCmds)
 
 submitCommands :: WebHost -> Renderer -> DrawData -> Ptr Word8 -> Ptr Word8 -> [DrawCommand] -> IO ()
 submitCommands host r dd vp ip cmds =
@@ -261,162 +290,6 @@ submitCommands host r dd vp ip cmds =
       put 11 (0 :: Int)
     whDraw host vp (drawVertexCount dd) ip (drawIndexCount dd) buf n
 
-spanEffectiveClip :: Maybe Rect -> Rect -> Maybe (Maybe Rect)
-spanEffectiveClip mDamage clip@(Rect _ _ cw ch) =
-  let !open = cw >= 1e8 || ch >= 1e8
-   in case (mDamage, open) of
-        (Nothing, True) -> Just Nothing
-        (Nothing, False) -> Just (Just clip)
-        (Just dmg, True) -> Just (Just dmg)
-        (Just dmg, False) -> Just <$> rectIntersect dmg clip
-
-{-# NOINLINE execWebRange #-}
-execWebRange ::
-  WebHost ->
-  Renderer ->
-  DrawData ->
-  Float ->
-  Ptr Word8 ->
-  Ptr Word8 ->
-  SmallArray EffectSpan ->
-  U.Vector DrawCmd ->
-  ByteArray ->
-  Int ->
-  Int ->
-  (Int, Int) ->
-  Float ->
-  Float ->
-  Maybe Rect ->
-  Int ->
-  Int ->
-  IO ()
-execWebRange host r dd scale vp ip spans rawCmds uBytes parentId parentSlot parentSize@(parentW, parentH) parentOx parentOy parentDmg rangeStart rangeEnd =
-  go rangeStart directChildren
-  where
-    directChildren =
-      sortOn (\sp -> (esCmdStart sp, esId sp))
-        [ sp
-        | i <- [0 .. sizeofSmallArray spans - 1]
-        , let sp = indexSmallArray spans i
-        , esParent sp == parentId
-        , esCmdStart sp >= rangeStart
-        , esCmdEnd sp <= rangeEnd
-        ]
-
-    emitPlain from to =
-      when (to > from) $ do
-        let slice = drawCommandsSlice scale parentSize parentOx parentOy parentDmg rawCmds from to
-        submitCommands host r dd vp ip slice
-
-    go !cur [] = emitPlain cur rangeEnd
-    go !cur (sp : rest) = do
-      let !s = max cur (esCmdStart sp)
-          !e = min rangeEnd (esCmdEnd sp)
-      when (s > cur) (emitPlain cur s)
-      when (e > s) (runSpan sp s e)
-      go (max cur e) rest
-
-    runSpan sp s e = do
-      let Rect bx by bw bh = esBounds sp
-          V2 mx my = esMargin sp
-          expanded@(Rect ex ey ew eh) = Rect (bx - mx) (by - my) (bw + 2 * mx) (bh + 2 * my)
-          passes = esPasses sp
-          !nPasses = sizeofSmallArray passes
-          inDamage = case parentDmg of
-            Nothing -> True
-            Just dmg -> case rectIntersect dmg expanded of
-              Just _ -> True
-              Nothing -> False
-      when inDamage $ do
-        passSlots <-
-          if nPasses <= 0 || ew <= 0 || eh <= 0
-            then pure []
-            else mapM (ensureShaderSlot host r . indexSmallArray passes) [0 .. nPasses - 1]
-        if null passSlots || any (<= 0) passSlots
-          then
-            -- Graceful fallback when any pass lacks GLSL ES 300 or fails to compile.
-            execWebRange host r dd scale vp ip spans rawCmds uBytes (esId sp) parentSlot parentSize parentOx parentOy parentDmg s e
-          else do
-            let !px0 = floor (ex * scale) :: Int
-                !py0 = floor (ey * scale) :: Int
-                !px1 = ceiling ((ex + ew) * scale) :: Int
-                !py1 = ceiling ((ey + eh) * scale) :: Int
-                !pw = max 1 (px1 - px0)
-                !ph = max 1 (py1 - py0)
-                !ox = fromIntegral px0 / scale
-                !oy = fromIntegral py0 / scale
-                slotArr = smallArrayFromListN nPasses passSlots
-            (slot0, cap0W, cap0H) <- acquireWebTarget host pw ph
-            if slot0 < 0
-              then
-                execWebRange host r dd scale vp ip spans rawCmds uBytes (esId sp) parentSlot parentSize parentOx parentOy parentDmg s e
-              else do
-                let restoreParent = whBindTarget host parentSlot False (realToFrac parentOx) (realToFrac parentOy)
-                    runOffscreen = do
-                      whBindTarget host slot0 True (realToFrac ox) (realToFrac oy)
-                      execWebRange host r dd scale vp ip spans rawCmds uBytes (esId sp) slot0 (cap0W, cap0H) ox oy Nothing s e
-                      let !nodePx = bx * scale - fromIntegral px0
-                          !nodePy = by * scale - fromIntegral py0
-                          !nodePw = max 1.0e-4 (bw * scale)
-                          !nodePh = max 1.0e-4 (bh * scale)
-                          !destPx = fromIntegral px0 - parentOx * scale
-                          !destPy = fromIntegral py0 - parentOy * scale
-                          runPasses !srcSlot !srcCapW !srcCapH !dstSlot !dstCapW !dstCapH !passIdx
-                            | passIdx >= nPasses = pure ()
-                            | otherwise = do
-                                -- WebGL2 FBO textures are bottom-up: V=1 at top (y=0).
-                                let !u1 = fromIntegral pw / fromIntegral srcCapW
-                                    !v0 = 1.0 :: Float
-                                    !v1 = 1.0 - fromIntegral ph / fromIntegral srcCapH
-                                    !nodeU0 = nodePx / fromIntegral srcCapW
-                                    !nodeV0 = 1.0 - nodePy / fromIntegral srcCapH
-                                    !nodeUSpan = nodePw / fromIntegral srcCapW
-                                    !nodeVSpan = negate (nodePh / fromIntegral srcCapH)
-                                    sc = indexSmallArray passes passIdx
-                                    !shSlot = indexSmallArray slotArr passIdx
-                                if passIdx < nPasses - 1 && dstSlot >= 0
-                                  then do
-                                    whBindTarget host dstSlot True 0 0
-                                    compositeWebPass
-                                      host srcSlot shSlot True
-                                      0 0 (fromIntegral pw) (fromIntegral ph)
-                                      0 v0 u1 v1 Nothing
-                                      sc uBytes nodeU0 nodeV0 nodeUSpan nodeVSpan
-                                      (fromIntegral srcCapW) (fromIntegral srcCapH)
-                                    runPasses dstSlot dstCapW dstCapH srcSlot srcCapW srcCapH (passIdx + 1)
-                                  else do
-                                    whBindTarget host parentSlot False (realToFrac parentOx) (realToFrac parentOy)
-                                    forM_ (spanEffectiveClip parentDmg (esClip sp)) $ \mClip -> do
-                                      let shifted =
-                                            if parentOx == 0 && parentOy == 0
-                                              then mClip
-                                              else fmap (\(Rect x y w h) -> Rect (x - parentOx) (y - parentOy) w h) mClip
-                                          toPix clipR =
-                                            let (x0, y0, x1, y1) = clipPixelEdges scale clipR
-                                                cx0 = max 0 x0
-                                                cy0 = max 0 y0
-                                             in (cx0, cy0, min parentW x1 - cx0, min parentH y1 - cy0)
-                                          mScissor = fmap toPix shifted
-                                          nonEmpty = case mScissor of
-                                            Just (_, _, sw, sh) -> sw > 0 && sh > 0
-                                            Nothing -> True
-                                      when nonEmpty $
-                                        compositeWebPass
-                                          host srcSlot shSlot False
-                                          destPx destPy (fromIntegral pw) (fromIntegral ph)
-                                          0 v0 u1 v1 mScissor
-                                          sc uBytes nodeU0 nodeV0 nodeUSpan nodeVSpan
-                                          (fromIntegral srcCapW) (fromIntegral srcCapH)
-                      if nPasses > 1
-                        then do
-                          (slot1, cap1W, cap1H) <- acquireWebTarget host pw ph
-                          runPasses slot0 cap0W cap0H slot1 cap1W cap1H 0
-                            `finally` when (slot1 >= 0) (whReleaseTarget host slot1)
-                        else
-                          runPasses slot0 cap0W cap0H (-1) 0 0 0
-                runOffscreen
-                  `finally` (restoreParent >> whReleaseTarget host slot0)
-
 acquireWebTarget :: WebHost -> Int -> Int -> IO (Int, Int, Int)
 acquireWebTarget host minW minH =
   allocaArray 2 $ \capsPtr -> do
@@ -432,42 +305,21 @@ acquireWebTarget host minW minH =
 compositeWebPass ::
   WebHost ->
   Int ->
-  Int ->
-  Bool ->
-  Float -> Float -> Float -> Float ->
-  Float -> Float -> Float -> Float ->
   Maybe (Int, Int, Int, Int) ->
   ShaderCall ->
   ByteArray ->
-  Float -> Float -> Float -> Float ->
-  Float -> Float ->
+  EffectPassDraw ->
   IO ()
-compositeWebPass
-  host srcSlot shSlot blendCopy
-  dx dy dw dh
-  u0 v0 u1 v1 mScissor
-  sc uniformBytes
-  nodeU0 nodeV0 nodeUSpan nodeVSpan
-  targetW targetH = do
-    let !uOff = scUniformOffset sc
-        !uLen = max sysUniformBytes (min (scUniformLength sc) (max 0 (sizeofByteArray uniformBytes - uOff)))
-        !copyLen = min uLen (max 0 (sizeofByteArray uniformBytes - uOff))
-        (hasSc, sx, sy, sw, sh) = case mScissor of
-          Nothing -> (0 :: Int32, 0, 0, 0, 0)
-          Just (x, y, w, h) -> (1, fromIntegral x, fromIntegral y, fromIntegral w, fromIntegral h)
-    allocaArray 8 $ \rvPtr ->
-      allocaArray 5 $ \scPtr ->
-        allocaBytes uLen $ \uPtr -> do
-          pokeArray rvPtr [dx, dy, dw, dh, u0, v0, u1, v1]
-          pokeArray scPtr [hasSc, sx, sy, sw, sh]
-          when (copyLen > 0) $ copyByteArrayToAddr uPtr uniformBytes uOff copyLen
-          pokeByteOff uPtr 16 nodeU0
-          pokeByteOff uPtr 20 nodeV0
-          pokeByteOff uPtr 24 nodeUSpan
-          pokeByteOff uPtr 28 nodeVSpan
-          pokeByteOff uPtr 40 targetW
-          pokeByteOff uPtr 44 targetH
-          whCompositeEffect host srcSlot shSlot blendCopy rvPtr scPtr uPtr uLen
+compositeWebPass host shSlot mScissor sc uniformBytes pd = do
+  let (hasSc, sx, sy, sw, sh) = case mScissor of
+        Nothing -> (0 :: Int32, 0, 0, 0, 0)
+        Just (x, y, w, h) -> (1, fromIntegral x, fromIntegral y, fromIntegral w, fromIntegral h)
+  allocaArray 8 $ \rvPtr ->
+    allocaArray 5 $ \scPtr ->
+      withEffectUniforms sc uniformBytes pd $ \uPtr uLen -> do
+        pokeArray rvPtr [epdDstX pd, epdDstY pd, epdDstW pd, epdDstH pd, epdU0 pd, epdV0 pd, epdU1 pd, epdV1 pd]
+        pokeArray scPtr [hasSc, sx, sy, sw, sh]
+        whCompositeEffect host (epdSrcSlot pd) shSlot (epdIntermediate pd) rvPtr scPtr uPtr uLen
 
 -- | The command buffer, grown to hold at least @n@ commands.
 commandBuffer :: Renderer -> Int -> IO (Ptr Word8)

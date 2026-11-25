@@ -123,17 +123,13 @@ stateStripSection baseSvg = do
       ]
     stateStyleChip :: (Int, Text, Text, Text, Text) -> Html ()
     stateStyleChip (bit, name, probe, toneCls, tag) =
-      button_
-        [ type_ "button"
-        , class_ "style-chip"
-        , data_ "sbit" (showT bit)
+      styleChip
+        [ data_ "sbit" (showT bit)
         , data_ "probe" probe
         , onclick_ ("toggleStateStyle(" <> showT bit <> ")")
         ]
-        $ do
-          span_ [class_ "chip-check"] mempty
-          span_ [class_ "chip-name"] (toHtml name)
-          span_ [class_ ("chip-tag " <> toneCls)] (toHtml tag)
+        name
+        (Just (toneCls, tag))
 
 
 -- | A style toggle chip: checkbox square, label, and an optional impact tag.

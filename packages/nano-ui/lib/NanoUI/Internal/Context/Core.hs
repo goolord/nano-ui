@@ -12,7 +12,6 @@ module NanoUI.Internal.Context.Core
   , pointerHeldOffLayers
   -- Damage
   , markDirty
-  , markDirtyCovered
   , recordLayoutRead
   , settleLayoutReads
   , clearDirty
@@ -68,7 +67,7 @@ where
 import Control.Concurrent (myThreadId)
 import Control.Monad (forM_, unless, when, (<$!>))
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
-import Data.IORef (atomicModifyIORef', atomicWriteIORef, modifyIORef', readIORef, writeIORef)
+import Data.IORef (IORef, atomicModifyIORef', atomicWriteIORef, modifyIORef', readIORef, writeIORef)
 import Data.Primitive.Array (readArray)
 import Data.Primitive.PrimArray (readPrimArray)
 import Data.Primitive.PrimVar (readPrimVar)
@@ -223,12 +222,6 @@ markDirty ctx = do
   modifyDamage ctx (\ds -> ds {dsDirty = True})
   wakeOffLoop ctx
 
--- | 'markDirty', under the name the core uses where a store write's damage
--- covers what the frame changes.
-{-# INLINE markDirtyCovered #-}
-markDirtyCovered :: Context -> IO ()
-markDirtyCovered = markDirty
-
 -- | Record a layout read for key @k@ during view construction. After layout
 -- completes, 'settleLayoutReads' runs @stale@ to check whether the newly
 -- computed layout differs from the value read, and schedules a follow-up frame
@@ -248,7 +241,7 @@ settleLayoutReads ctx = do
   unless (IM.null pending) $ do
     modifyDamage ctx (\ds -> ds {dsLayoutReads = IM.empty})
     stale <- foldlM (\acc check -> (acc ||) <$> check) False pending
-    when stale (markDirtyCovered ctx)
+    when stale (markDirty ctx)
 
 -- | Clear the follow-up-frame request without clearing queued repaint bounds.
 -- The whole-window repaint a 'markDirty' queued stays for the next frame.
@@ -277,16 +270,23 @@ setWakeLoop ctx wake = setWakeLoopChecked ctx (True <$ wake)
 setWakeLoopChecked :: Context -> IO Bool -> IO ()
 setWakeLoopChecked ctx wake = writeIORef (ctxWakeLoop ctx) (Just wake)
 
+-- | Run @loopRef@ unless @pendingRef@ already marks a wake in flight.
+-- Resets @pendingRef@ when no callback is installed or the callback reports
+-- delivery failure, so a later wake is not swallowed.
+{-# INLINE triggerWake #-}
+triggerWake :: IORef Bool -> IORef (Maybe (IO Bool)) -> IO ()
+triggerWake pendingRef loopRef = do
+  wasPending <- atomicModifyIORef' pendingRef (True,)
+  unless wasPending $ do
+    delivered <- readIORef loopRef >>= fromMaybe (pure False)
+    unless delivered (atomicWriteIORef pendingRef False)
+
 -- | Run the wake action, unless an earlier wake ran it and the loop has not
 -- taken that one yet: the loop reads what both changed when it does. A wake
 -- the action did not deliver, or made with no action installed, leaves
 -- nothing pending, so a later wake is not swallowed waiting for it.
 wakeLoop :: Context -> IO ()
-wakeLoop ctx = do
-  pending <- atomicModifyIORef' (ctxWakePending ctx) (True,)
-  unless pending $ do
-    delivered <- readIORef (ctxWakeLoop ctx) >>= fromMaybe (pure False)
-    unless delivered (takeWakes ctx)
+wakeLoop ctx = triggerWake (ctxWakePending ctx) (ctxWakeLoop ctx)
 
 -- | 'wakeLoop' for a dirty mark. The thread running
 -- 'NanoUI.Runner.runSessionLoop' checks the dirty flag before waiting, so
@@ -314,13 +314,7 @@ wakeAction ctx =
       !loopRef = ctxWakeLoop ctx
    in do
         atomicWriteIORef wokenRef True
-        wasPending <- atomicModifyIORef' pendingRef (True,)
-        unless wasPending $
-          readIORef loopRef >>= \case
-            Nothing -> atomicWriteIORef pendingRef False
-            Just wake -> do
-              queued <- wake
-              unless queued (atomicWriteIORef pendingRef False)
+        triggerWake pendingRef loopRef
 
 -- | Wake the loop from any thread after changing state the view reads.
 -- Publish the change first. The next frame runs the view, and its diff
@@ -448,7 +442,7 @@ modifyStore ctx f = do
     )
     $ do
       forM_ changedKeys $ \k -> damageKey ctx k (DamageInflated defaultDamageSlop)
-      markDirtyCovered ctx
+      markDirty ctx
 
 -- | Run slot writes, unless every slot already holds its value: an idle
 -- widget then neither rebuilds the store nor has it diffed.
@@ -479,7 +473,7 @@ writeSlot field ctx owner k v = do
     _ -> do
       writeIORef (ctxStore ctx) $! insertSlot field k v st
       damageWidget ctx owner DamageSelf
-      markDirtyCovered ctx
+      markDirty ctx
 
 -- | Write a boolean at the owner's base integer key, with change detection.
 {-# INLINE writeStoreBool #-}
@@ -503,7 +497,7 @@ adoptSlot field ctx owner v = do
       writeIORef (ctxStore ctx) $! insertSpec (slotSeen field) k v (insertSlot field k v st)
       when (lookupSlot field k st /= Just v) $ do
         damageWidget ctx owner DamageSelf
-        markDirtyCovered ctx
+        markDirty ctx
       pure v
 
 -- | Remember the value a controlled widget returned this frame.

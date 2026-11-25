@@ -10,7 +10,6 @@ module NanoUI.Internal.Context.Overlay
   , pointerBlockedByModal
   , routedInput
   , floatingLayerAt
-  , seedFloatingPanel
   , beginModal
   , endModal
   , beginFrameModal
@@ -24,11 +23,11 @@ import Data.IntSet qualified as IS
 import Data.Maybe (isJust)
 
 import NanoUI.Internal.Context.Core
-import NanoUI.Internal.Context.Types (Context (..), InteractionState (..), OverlayState (..), PointerRoute (..), intKey)
-import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
+import NanoUI.Internal.Context.Types (Context (..), InteractionState (..), OverlayState (..), PointerRoute (..))
+import NanoUI.Internal.Id (hashWidgetId)
 import NanoUI.Internal.Input (DropEvent (..), DropType (..), Input (..), Key (KeyEscape), Pressable (..), offWindow, withoutPointer)
 import NanoUI.Internal.Store (anySelectOpen)
-import NanoUI.Internal.Types (Rect, V2, rectContains, rectNonEmpty)
+import NanoUI.Internal.Types (V2, rectContains)
 
 -- | Whether any widget has keyboard focus or a text-edit menu is open.
 -- This checks the focus id, not the focused node's type.
@@ -54,8 +53,8 @@ overlayConsumesQuit ctx inp = do
 -- box's list ('isFocusCombo') closes on it. The view's Escape consumers ask
 -- this, so none acts on the Escape such a menu takes, wherever it is
 -- declared.
-escapeReserved :: Context -> Input -> IO Bool
-escapeReserved ctx _ = do
+escapeReserved :: Context -> IO Bool
+escapeReserved ctx = do
   taken <- getsOverlay ctx osEscapeConsumed
   menuOrCombo <- getsInteraction ctx (\s -> isJust (isTextInputMenu s) || isFocusCombo s)
   dropdown <- anySelectOpen <$> getStore ctx
@@ -115,21 +114,6 @@ floatingLayerAt ctx mouse = do
   let rects = osPrevFloatingRects os
       hit k = maybe False (`rectContains` mouse) (IM.lookup k rects)
   pure (foldl' (\acc k -> if hit k then k else acc) 0 (osPrevFloatingOrder os))
-
--- | Record panel bounds at the front of the floating hit order
--- ('floatingLayerAt'). Empty bounds are ignored. The frame's damage pass
--- replaces the order with the panels it laid out, which the next frame
--- routes by, so a seed made while a view runs routes nothing.
-seedFloatingPanel :: Context -> WidgetId -> Rect -> IO ()
-seedFloatingPanel ctx wid rect
-  | not (rectNonEmpty rect) = pure ()
-  | otherwise = do
-      let k = intKey wid
-      modifyOverlay ctx $ \os ->
-        os
-          { osPrevFloatingRects = IM.insert k rect (osPrevFloatingRects os)
-          , osPrevFloatingOrder = filter (/= k) (osPrevFloatingOrder os) ++ [k]
-          }
 
 -- | Increment modal nesting depth and mark a modal active for this frame.
 beginModal :: Context -> IO ()

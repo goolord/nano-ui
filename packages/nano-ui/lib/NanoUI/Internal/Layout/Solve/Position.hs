@@ -12,7 +12,7 @@ import Data.IORef (IORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IM
 import Data.Maybe (fromMaybe, isJust)
-import Data.Primitive.PrimArray (copyMutablePrimArray, readPrimArray, writePrimArray)
+import Data.Primitive.PrimArray (copyMutablePrimArray, newPrimArray, readPrimArray, writePrimArray)
 import NanoUI.Internal.Font
 import NanoUI.Internal.Layout.ScrollGeometry
 import NanoUI.Internal.Id (WidgetId)
@@ -372,46 +372,73 @@ positionRowFromParent env@SolveEnv {seArena = na, seArrays = a} depth parent gap
 -- child with the tallest ascent touches the top.
 placeRowLine :: SolveEnv -> Int -> ItemsAlign -> IOArr Int -> IOArr Float -> Int -> Float -> Float -> Float -> Float -> IO ()
 placeRowLine env@SolveEnv {seArena = na, seArrays = a} !depth pItems idxSnap outSnap !k !gap !x0 !top !cross = do
-  -- A child is aligned at the height it is laid out at: its height at its
-  -- share of the width when that is not the width it measured at.
-  let lowestBaseline acc i = do
-        ci <- readPrimArray idxSnap i
-        ay <- effectiveAlignY a pItems ci
-        hTag <- readTagEnum a ci TagHSizing
-        if ay /= AlignBaseline || hTag == SizingGrow
-          then pure acc
-          else do
+  hasBaseline <- anyBaseline 0
+  if not hasBaseline
+    then goPlain 0 x0
+    else do
+      -- Compute each child's refit height and baseline once so pass 2 never
+      -- repeats rowChildHeightAt or childBaseline.
+      crossHs <- newPrimArray k
+      baselines <- newPrimArray k
+      let collect !acc !i = do
+            ci <- readPrimArray idxSnap i
             fw <- readPrimArray outSnap i
-            h <- childRowCrossSize na ci cross
-            steady <- readTagEnum a ci TagSteadyHeight
-            crossH <- if steady then pure h else fromMaybe h <$> rowChildHeightAt env ci fw
-            max acc <$> childBaseline env ci crossH
-  base <- foldUpTo k lowestBaseline 0
-  -- The cursor stays in raw floats, never snapped: rounding it re-compounds
-  -- error every child (1.667 -> 2.0 -> ...) so a shrink row overruns its
-  -- fixed width. Each child's far edge is the next one's raw origin, so
-  -- quantizeResultsA, which snaps edges, puts both on the same pixel.
-  let go !i !x = when (i < k) $ do
+            crossH <- childCrossH ci fw
+            writePrimArray crossHs i crossH
+            ay <- effectiveAlignY a pItems ci
+            hTag <- readTagEnum a ci TagHSizing
+            if ay == AlignBaseline && hTag /= SizingGrow
+              then do
+                b <- childBaseline env ci crossH
+                writePrimArray baselines i b
+                pure (max acc b)
+              else do
+                writePrimArray baselines i (-1)
+                pure acc
+      base <- foldUpTo k collect 0
+      let goBase !i !x = when (i < k) $ do
+            ci <- readPrimArray idxSnap i
+            fw <- readPrimArray outSnap i
+            crossH <- readPrimArray crossHs i
+            b <- readPrimArray baselines i
+            fy <-
+              if b >= 0
+                then pure (clamp top (top + max 0 (cross - crossH)) (top + base - b))
+                else (\ay -> alignY ay top cross crossH) <$> effectiveAlignY a pItems ci
+            positionNodeA env (depth + 1) ci (Rect x fy fw crossH)
+            placedW <- readGeom a ci GeomW
+            goBase (i + 1) (x + min fw placedW + gap)
+      goBase 0 x0
+  where
+    anyBaseline !i
+      | i >= k = pure False
+      | otherwise = do
           ci <- readPrimArray idxSnap i
-          fw <- readPrimArray outSnap i
-          -- Fit/fixed children keep content height. Only Grow/Percent eat `cross`.
-          crossH0 <- childRowCrossSize na ci cross
-          steady <- readTagEnum a ci TagSteadyHeight
-          crossH <- if steady then pure crossH0 else fromMaybe crossH0 <$> rowChildHeightAt env ci fw
           ay <- effectiveAlignY a pItems ci
           hTag <- readTagEnum a ci TagHSizing
-          fy <-
-            if ay == AlignBaseline && hTag /= SizingGrow
-              then (\b -> clamp top (top + max 0 (cross - crossH)) (top + base - b)) <$> childBaseline env ci crossH
-              else pure (alignY ay top cross crossH)
-          positionNodeA env (depth + 1) ci (Rect x fy fw crossH)
-          -- The next child starts at this one's far edge, or at its share's
-          -- when it came out wider (a minimum width past its share), so
-          -- the row keeps its length. A max width already caps its share
-          -- ('distributeScratch').
-          placedW <- readGeom a ci GeomW
-          go (i + 1) (x + min fw placedW + gap)
-  go 0 x0
+          if ay == AlignBaseline && hTag /= SizingGrow then pure True else anyBaseline (i + 1)
+    -- A child is aligned at the height it is laid out at: its height at its
+    -- share of the width when that is not the width it measured at.
+    childCrossH ci fw = do
+      crossH0 <- childRowCrossSize na ci cross
+      steady <- readTagEnum a ci TagSteadyHeight
+      if steady then pure crossH0 else fromMaybe crossH0 <$> rowChildHeightAt env ci fw
+    -- The cursor stays in raw floats, never snapped: rounding it re-compounds
+    -- error every child (1.667 -> 2.0 -> ...) so a shrink row overruns its
+    -- fixed width. Each child's far edge is the next one's raw origin, so
+    -- quantizeResultsA, which snaps edges, puts both on the same pixel.
+    goPlain !i !x = when (i < k) $ do
+      ci <- readPrimArray idxSnap i
+      fw <- readPrimArray outSnap i
+      crossH <- childCrossH ci fw
+      ay <- effectiveAlignY a pItems ci
+      positionNodeA env (depth + 1) ci (Rect x (alignY ay top cross crossH) fw crossH)
+      -- The next child starts at this one's far edge, or at its share's
+      -- when it came out wider (a minimum width past its share), so
+      -- the row keeps its length. A max width already caps its share
+      -- ('distributeScratch').
+      placedW <- readGeom a ci GeomW
+      goPlain (i + 1) (x + min fw placedW + gap)
 
 positionGrid ::
   SolveEnv ->

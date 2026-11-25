@@ -17,7 +17,6 @@ module NanoUI.Internal.Uniforms
   ( V3 (..)
   , V4 (..)
   , GpuType (..)
-  , gpuTypeAlign
   , gpuTypeSize
   , alignUp
   , UniformField (..)
@@ -90,18 +89,6 @@ data GpuType
   | GVec3
   | GVec4
   deriving (Eq, Ord, Show, Enum, Bounded)
-
--- | Std140 base alignment in bytes for a primitive GPU type.
-{-# INLINE gpuTypeAlign #-}
-gpuTypeAlign :: GpuType -> Int
-gpuTypeAlign gt = case gt of
-  GFloat -> 4
-  GInt32 -> 4
-  GUInt32 -> 4
-  GBool -> 4
-  GVec2 -> 8
-  GVec3 -> 16
-  GVec4 -> 16
 
 -- | Std140 byte size for a primitive GPU type.
 {-# INLINE gpuTypeSize #-}

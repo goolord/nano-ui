@@ -31,10 +31,9 @@
 -- 8       treeHasKids
 -- 9       treeExpanded
 -- 10      treeOdd
--- 16-17   headerSortMark    table header ('buttonTable')
+-- 16-17   headerSortMark    table header ('buttonKind' = ButtonTable)
 -- 20-22   buttonTone        plain toggle button: tone plus one
--- 24-31   button type flags row, choice, content, menu bar, menu, close,
---                           tab, table (one bit each, in that order)
+-- 24-27   buttonKind        ButtonKind enum (0 plain .. 8 row)
 -- 32-63   labelFont         NodeButton, NodeSelect: a text font packing
 -- 0       containerInert    NodeContainer
 -- 1       containerClip
@@ -83,15 +82,7 @@ module NanoUI.Internal.StyleBits
   , buttonVisual
   , buttonVariant
   , buttonTone
-  , buttonRow
-  , buttonChoice
-  , buttonContent
-  , buttonMenuBar
-  , buttonMenu
-  , buttonClose
-  , buttonTab
-  , buttonTable
-  , buttonTypeFlags
+  , buttonKind
   , tabStyle
   , tabOrient
   , treeDepth
@@ -269,50 +260,11 @@ buttonVariant = BitField 0 2
 buttonTone :: BitField
 buttonTone = BitField 20 3
 
-{-# INLINE buttonRow #-}
-buttonRow :: BitField
-buttonRow = BitField 24 1
-
-{-# INLINE buttonChoice #-}
-buttonChoice :: BitField
-buttonChoice = BitField 25 1
-
-{-# INLINE buttonContent #-}
-buttonContent :: BitField
-buttonContent = BitField 26 1
-
-{-# INLINE buttonMenuBar #-}
-buttonMenuBar :: BitField
-buttonMenuBar = BitField 27 1
-
-{-# INLINE buttonMenu #-}
-buttonMenu :: BitField
-buttonMenu = BitField 28 1
-
-{-# INLINE buttonClose #-}
-buttonClose :: BitField
-buttonClose = BitField 29 1
-
-{-# INLINE buttonTab #-}
-buttonTab :: BitField
-buttonTab = BitField 30 1
-
-{-# INLINE buttonTable #-}
-buttonTable :: BitField
-buttonTable = BitField 31 1
-
--- | The one-bit type flags of a button, as 'styleLayouts' lists them.
-buttonTypeFlags :: [(String, BitField)]
-buttonTypeFlags =
-  [ ("buttonRow", buttonRow)
-  , ("buttonChoice", buttonChoice)
-  , ("buttonContent", buttonContent)
-  , ("buttonMenuBar", buttonMenuBar)
-  , ("buttonMenu", buttonMenu)
-  , ("buttonClose", buttonClose)
-  , ("buttonTab", buttonTab)
-  , ("buttonTable", buttonTable)
-  ]
+-- | The 'NanoUI.Internal.WidgetText.ButtonKind' enum packed in bits 24-27
+-- (0 plain .. 8 tree row).
+{-# INLINE buttonKind #-}
+buttonKind :: BitField
+buttonKind = BitField 24 4
 
 -- | A tab header's tab style (0-3).
 {-# INLINE tabStyle #-}
@@ -468,4 +420,4 @@ styleLayouts =
   , ("NodeColorPicker", [("pickerPart", pickerPart)])
   ]
   where
-    button own = own <> buttonTypeFlags <> [("labelFont", labelFont)]
+    button own = own <> [("buttonKind", buttonKind), ("labelFont", labelFont)]

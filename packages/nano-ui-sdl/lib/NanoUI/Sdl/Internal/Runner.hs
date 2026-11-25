@@ -17,7 +17,7 @@ import Data.Maybe (isJust, isNothing)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
 import NanoUI.Backend
-import NanoUI.Internal.Context (markDirtyCovered, withFramePaint)
+import NanoUI.Internal.Context (withFramePaint)
 import NanoUI.Internal.Monad (askContext)
 import NanoUI.Internal.Debug (CoreDebugSnapshot (..), noteDebugFrame, noteDebugSkip, refreshDebugSnapshot)
 import NanoUI.Sdl.Internal.Chrome.Types (ChromeState (..), defaultWindowChrome)
@@ -340,4 +340,4 @@ requestDisplay field new = do
   ctx <- askContext
   withSdlEnv () $ \env -> do
     cur <- readIORef (field env)
-    when (cur /= new) $ writeIORef (field env) new >> markDirtyCovered ctx
+    when (cur /= new) $ writeIORef (field env) new >> markDirty ctx

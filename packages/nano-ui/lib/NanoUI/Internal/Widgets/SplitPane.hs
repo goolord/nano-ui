@@ -11,7 +11,6 @@ module NanoUI.Internal.Widgets.SplitPane
   , treeSize
   , treeMaxId
   , paneExist
-  , subtreeMin
   , MinTree (..)
   , buildMinTree
   , minTreeDims
@@ -107,11 +106,6 @@ treeMaxId = foldGrid id (\gid pids _ -> foldl' max gid pids) (\sid _ _ a b -> ma
 -- | Does a pane with the given id exist?
 paneExist :: GridNode -> Word64 -> Bool
 paneExist t p = foldGrid (== p) (\_ pids _ -> elem p pids) (\_ _ _ a b -> a || b) t
-
--- | Minimum (width, height) that must be reserved for a subtree under a
--- @minSize@ per-pane floor and @spacing@ between every split level.
-subtreeMin :: Float -> Float -> GridNode -> (Float, Float)
-subtreeMin minSize spacing = minTreeDims . buildMinTree minSize spacing
 
 -- | Cached bottom-up subtree minimum extents so tree traversals read each
 -- split's child minima in O(1).

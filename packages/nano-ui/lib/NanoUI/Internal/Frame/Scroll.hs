@@ -15,6 +15,7 @@ where
 import Control.Monad (forM, forM_, join, unless, when)
 import Data.Foldable (find)
 import Data.Functor ((<&>))
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Hit (overlayHitAllowed, overlayHitRoot, passesPointer)
@@ -426,6 +427,7 @@ probeScrollBarHover ctx@Context {ctxNodeArena = na} inp = do
       | heldIn MouseLeft inp || not (rectContains (Rect 0 0 winW winH) mouse) -> pure Nothing
       | otherwise -> do
           top <- overlayHitRoot ctx mouse
+          hitRef <- newIORef Nothing
           let candidate idx = do
                 nt <- getNodeType na idx
                 let isScroll = isScrollNode nt
@@ -462,12 +464,14 @@ probeScrollBarHover ctx@Context {ctxNodeArena = na} inp = do
                             else do
                               ont <- getNodeType na owner
                               inside <$> (childPaintClip ctx owner ont =<< getNodeRect na owner)
-                  <&&> (isJust <$> barAt idx)
                   <&&> overlayHitAllowed ctx top idx
-              barAt idx = do
-                wid <- getWidgetId na idx
-                barWhere wid (\(_, l, _) -> onScrollBar mouse l) <$> scrollBarsFor ctx idx wid
-          findClassNodeM na PointerNodes candidate >>= maybe (pure Nothing) barAt
+                  <&&> do
+                    wid <- getWidgetId na idx
+                    hit <- barWhere wid (\(_, l, _) -> onScrollBar mouse l) <$> scrollBarsFor ctx idx wid
+                    writeIORef hitRef hit
+                    pure (isJust hit)
+          _ <- findClassNodeM na PointerNodes candidate
+          readIORef hitRef
   where
     mouse = inputMousePos inp
     Size winW winH = inputWindowSize inp

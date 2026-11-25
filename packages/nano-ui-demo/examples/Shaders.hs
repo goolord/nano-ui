@@ -36,14 +36,14 @@ data WaveGlowParams = WaveGlowParams
 -- never recompiles the GPU program.
 waveGlow :: Shader 'Surface WaveGlowParams
 waveGlow = surfaceShader $ \u ctx ->
-  let p = ctx.uv *^ floatE 2.0 - vec2 (floatE 1.0) (floatE 1.0)
+  let p = ctx.uv *^ 2.0 - vec2 1.0 1.0
       r = vLength p
-      band = floatE 0.5 + floatE 0.5 * sin (r * floatE 10.0 - u.wgPhase + p.x * floatE 3.0)
+      band = 0.5 + 0.5 * sin (r * 10.0 - u.wgPhase + p.x * 3.0)
       col = mix u.wgColorA u.wgColorB band
-      half = ctx.size *^ floatE 0.5
+      half = ctx.size *^ 0.5
       d = sdRoundedBox (ctx.pos - half) half ctx.cornerRadius
-      aa = floatE 0.75 / maxE ctx.scale (floatE 1.0)
-      mask = floatE 1.0 - smoothstep (negate aa) aa d
+      aa = 0.75 / maxE ctx.scale 1.0
+      mask = 1.0 - smoothstep (negate aa) aa d
    in vec4_31 col.rgb (col.a * mask)
 
 -- | Fused single-pass ColorEffect: desaturate then tint without an extra

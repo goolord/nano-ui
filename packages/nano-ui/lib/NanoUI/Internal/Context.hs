@@ -22,7 +22,6 @@ module NanoUI.Internal.Context
   , pointerHeldOffLayers
   -- Damage
   , markDirty
-  , markDirtyCovered
   , recordLayoutRead
   , settleLayoutReads
   , clearDirty
@@ -138,7 +137,6 @@ module NanoUI.Internal.Context
   , registerHoverZone
   , hoverZoneCrossed
   , registerDrawing
-  , lookupDrawing
   , lookupDrawingAt
   , cachedDrawingOps
   , cachedWidgetLayout
@@ -176,7 +174,6 @@ module NanoUI.Internal.Context
   , pointerBlockedByModal
   , routedInput
   , floatingLayerAt
-  , seedFloatingPanel
   , beginModal
   , endModal
   , beginFrameModal
@@ -660,7 +657,7 @@ setExplainLayout ctx on = do
   when (cur /= on) $ do
     writeIORef (ctxExplain ctx) initialExplainState {esOn = on}
     damageFull ctx
-    markDirtyCovered ctx
+    markDirty ctx
 
 -- | Whether the layout overlay is on ('setExplainLayout').
 {-# INLINE getExplainLayout #-}

@@ -26,17 +26,12 @@ module NanoUI.SdlWeb.Internal.Session
 import Control.Exception (bracket, finally)
 import Control.Monad (forM_, unless, when)
 import Data.ByteString (ByteString)
-import qualified Data.ByteString as BS
-import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import GHC.TypeLits (symbolSing)
 import System.IO (hPutStrLn, stderr)
 import Data.Maybe (isJust)
 import Data.Text (Text)
-import qualified Data.Text.Encoding as TE
-import Data.Word (Word8)
 import Foreign.Marshal.Alloc (allocaBytes)
-import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( Appearance (..)
@@ -84,11 +79,11 @@ import NanoUI.Backend
   , askBackendSession
   , setBackendSession
   )
-import NanoUI.Internal.Context (Context, markDirtyCovered, retainedFrameStale, setDrawSnapScale, withFramePaint)
+import NanoUI.Internal.Context (Context, retainedFrameStale, setDrawSnapScale, withFramePaint)
 import NanoUI.Internal.Debug (CoreDebugSnapshot (..), noteDebugFrame, noteDebugSkip, refreshDebugSnapshot)
 import NanoUI.Monad (askContext, liftIO)
 import NanoUI.Runner (DebugSamplerRef, SessionDriver (..), newDebugSampler, pacingMsFor, runSessionLoop, shouldRedrawFrame)
-import NanoUI.Backend (clearMeasureCache, damageFull, newPixelContext, withClipboard, withTheme)
+import NanoUI.Backend (newPixelContext, withClipboard, withTheme)
 import NanoUI.SdlWeb.Internal.Debug (SdlWebDebugSnapshot (..))
 import NanoUI.SdlWeb.Internal.Font
 import NanoUI.SdlWeb.Internal.Fonts (FontOrigin (..), findFontFamilies, knownFontFamilies, loadFontBytes, rendererName, searchCandidates)
@@ -96,6 +91,7 @@ import NanoUI.SdlWeb.Internal.Host
 import NanoUI.SdlWeb.Internal.Input
 import NanoUI.SdlWeb.Internal.Render
 import NanoUI.Ttf.Internal.Font (beginTtfFrame, ttfFrameDropped)
+import NanoUI.Ttf.Internal.Support (syncSdlFontCache)
 
 -- | A font for the web runners. The browser has no font directories: a
 -- font other than the bundled Inter is an installed family the browser hands
@@ -276,9 +272,9 @@ runWebSession host opts frame = do
           installWindowHost ctx1 (webWindowSettings opts) $
             defaultWindowHost
               { hostCapabilities = noWindowCapabilities {wcTitle = True}
-              , hostSetTitle = withUtf8 (whSetTitle host)
+              , hostSetTitle = \t -> withUtf8 t (whSetTitle host)
               }
-          withUtf8 (whSetTitle host) (wsTitle (webWindowSettings opts))
+          withUtf8 (wsTitle (webWindowSettings opts)) (whSetTitle host)
           (ctx2, inp0) <- syncWeb env ctx1 (applyPointerLeave emptyInput)
           let draw c inp force = drawWeb env c inp force (frame c inp)
               drv =
@@ -317,45 +313,40 @@ serviceCode :: Maybe WebFontService -> Int
 serviceCode = \case Nothing -> 0; Just Fontsource -> 1
 
 -- | The font source for a 'WebFont', loading an installed family or a URL
--- through the page. One that cannot be loaded is the bundled Inter, with a
--- warning on the console.
-resolveWebFont :: WebHost -> WebFont -> IO FontSource
-resolveWebFont host = \case
-  WebFontInter -> pure embeddedFontSource
-  WebFontBytes bytes label -> pure (FontFromMemory bytes label)
-  WebFontInstalled family -> load InstalledFamily family
-  WebFontUrl url -> load FontUrl url
-  WebFontSearch names -> search (concatMap searchCandidates names)
-  where
-    load origin name =
-      loadFontBytes host origin name >>= \case
-        Just bytes -> pure (FontFromMemory bytes name)
-        Nothing -> do
-          hPutStrLn stderr ("nano-ui-sdl-web: could not load the font " <> show name <> "; using Inter")
-          pure embeddedFontSource
-    search [] = pure embeddedFontSource
-    search (name : rest) =
-      loadFontBytes host FamilyByName name >>= \case
-        Just bytes -> pure (FontFromMemory bytes name)
-        Nothing -> search rest
-
--- | A fallback font's bytes: none for the bundled Inter, which is the UI
--- font's own fallback already, or for a font that will not load.
-loadFallback :: WebHost -> WebFont -> IO [ByteString]
-loadFallback host = \case
-  WebFontInter -> pure []
-  WebFontBytes bytes _ -> pure [bytes]
+-- | Resolve a 'WebFont' into raw font bytes and its display label, or 'Nothing'
+-- for 'WebFontInter' or when loading failed (logging @warnPrefix@ on failure).
+loadWebFontBytes :: WebHost -> String -> WebFont -> IO (Maybe (ByteString, String))
+loadWebFontBytes host warnPrefix = \case
+  WebFontInter -> pure Nothing
+  WebFontBytes bytes label -> pure (Just (bytes, label))
   WebFontInstalled family -> load InstalledFamily family
   WebFontUrl url -> load FontUrl url
   WebFontSearch names -> firstOf (concatMap searchCandidates names)
   where
-    firstOf [] = pure []
-    firstOf (name : rest) =
-      loadFontBytes host FamilyByName name >>= maybe (firstOf rest) (pure . pure)
     load origin name =
       loadFontBytes host origin name >>= \case
-        Just bytes -> pure [bytes]
-        Nothing -> [] <$ hPutStrLn stderr ("nano-ui-sdl-web: could not load the fallback font " <> show name)
+        Just bytes -> pure (Just (bytes, name))
+        Nothing -> Nothing <$ hPutStrLn stderr (warnPrefix <> show name)
+    firstOf [] = pure Nothing
+    firstOf (name : rest) =
+      loadFontBytes host FamilyByName name >>= \case
+        Just bytes -> pure (Just (bytes, name))
+        Nothing -> firstOf rest
+
+-- | A UI font as a font source, fetching an installed family or a URL
+-- through the page. One that cannot be loaded is the bundled Inter, with a
+-- warning on the console.
+resolveWebFont :: WebHost -> WebFont -> IO FontSource
+resolveWebFont host wf =
+  maybe embeddedFontSource (uncurry FontFromMemory)
+    <$> loadWebFontBytes host "nano-ui-sdl-web: could not load the font (using Inter): " wf
+
+-- | A fallback font's bytes: none for the bundled Inter, which is the UI
+-- font's own fallback already, or for a font that will not load.
+loadFallback :: WebHost -> WebFont -> IO [ByteString]
+loadFallback host wf =
+  maybe [] (pure . fst)
+    <$> loadWebFontBytes host "nano-ui-sdl-web: could not load the fallback font " wf
 
 -- | Ask for a UI font. The session loads and applies it before the next
 -- frame, which this asks for: the glyph atlas, metrics and text all change
@@ -368,7 +359,7 @@ setSdlWebUiFont font = do
   ctx <- askContext
   askBackendSession webSession >>= mapM_ (\env -> liftIO $ do
     cur <- readIORef (weFontRequest env)
-    unless (cur == font) $ writeIORef (weFontRequest env) font >> markDirtyCovered ctx)
+    unless (cur == font) $ writeIORef (weFontRequest env) font >> markDirty ctx)
 
 -- | The session's frame statistics, canvas, font and renderer, refreshed at
 -- most four times a second; 'Nothing' outside a browser session. Asking
@@ -480,13 +471,8 @@ syncWeb env ctx inp = do
             then resolveWebFont (weHost env) requested
             else sdlFontCacheSource (weFonts env)
         writeIORef (weFontApplied env) requested
-        reloadSdlFontCache (weFonts env) source
-        c <- withWebFonts env ctx
-        clearMeasureCache ctx
-        -- Glyphs change under rects and texts that may not: repaint all.
-        damageFull ctx
-        markDirty ctx
-        pure c
+        let attachClip c = withClipboard c (readClipboard (weHost env)) (writeClipboard (weHost env))
+        syncSdlFontCache (weFonts env) ctx source attachClip
       else pure ctx
   backing <- readIORef (weBacking env)
   unless (backing == (pw, ph)) $ do
@@ -557,23 +543,13 @@ syncCursor :: WebEnv -> Context -> Input -> IO ()
 syncCursor env ctx inp =
   uiCursorKind ctx inp >>= syncCursorKind (weCursor env) shown (setCss . cssCursor)
   where
-    setCss = withUtf8 (whSetCursor (weHost env))
+    setCss txt = withUtf8 txt (whSetCursor (weHost env))
     -- Hiding is a cursor of its own in CSS; showing again sets the kind next.
     shown visible = unless visible (setCss (cssCursor UiCursorHidden))
 
 -- | The clipboard text the page last saw: its length first, then the bytes.
 readClipboard :: WebHost -> IO (Maybe Text)
-readClipboard host = do
-  len <- whClipboardRead host nullPtr 0
-  if len < 0
-    then pure Nothing
-    else allocaBytes (max 1 len) $ \buf -> do
-      n <- whClipboardRead host buf len
-      if n < 0 then pure Nothing else Just . TE.decodeUtf8Lenient <$> BS.packCStringLen (castPtr buf, min n len)
+readClipboard host = readHostText (whClipboardRead host)
 
 writeClipboard :: WebHost -> Text -> IO Bool
-writeClipboard host txt = True <$ withUtf8 (whClipboardWrite host) txt
-
--- | Pass text to the page as UTF-8 bytes and their length.
-withUtf8 :: (Ptr Word8 -> Int -> IO ()) -> Text -> IO ()
-withUtf8 f txt = unsafeUseAsCStringLen (TE.encodeUtf8 txt) $ \(p, n) -> f (castPtr p) n
+writeClipboard host txt = True <$ withUtf8 txt (whClipboardWrite host)

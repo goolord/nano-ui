@@ -74,10 +74,8 @@ module NanoUI.Internal.Layout.Arena.Types
   , setScrollContentW
   , parentIsRow
   , getAlignX
-  , getAlignY
   , readAlignX
   , readAlignY
-  , getItemsAlign
   , readItemsAlign
   , effectiveAlignX
   , effectiveAlignY
@@ -992,20 +990,10 @@ readAlignY a idx = do
 getAlignX :: NodeArena -> NodeIdx -> IO AlignX
 getAlignX na idx = arenaArrays na >>= \a -> readAlignX a idx
 
--- | Vertical alignment requested by the node.
-{-# INLINE getAlignY #-}
-getAlignY :: NodeArena -> NodeIdx -> IO AlignY
-getAlignY na idx = arenaArrays na >>= \a -> readAlignY a idx
-
 -- | Read a container's cross-axis 'ItemsAlign' default.
 {-# INLINE readItemsAlign #-}
 readItemsAlign :: NodeArenaArrays -> NodeIdx -> IO ItemsAlign
 readItemsAlign a idx = readTagEnum a idx TagItemsAlign
-
--- | Cross-axis 'ItemsAlign' default requested by the container.
-{-# INLINE getItemsAlign #-}
-getItemsAlign :: NodeArena -> NodeIdx -> IO ItemsAlign
-getItemsAlign na idx = arenaArrays na >>= \a -> readItemsAlign a idx
 
 -- | Effective horizontal alignment of child @idx@ inside a column with
 -- cross-axis default @pItems@. An explicit or non-default child alignment

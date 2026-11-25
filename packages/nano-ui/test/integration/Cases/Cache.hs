@@ -3,6 +3,7 @@ module Cases.Cache (tests) where
 
 import Spec
 import Control.Exception (evaluate)
+import Data.Bits (shiftL)
 import Data.ByteString qualified as BS
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (castPtr)
@@ -147,7 +148,8 @@ header ctx ax x y = liftIO $ do
     (fixedWH 200 30 defaultLayout) {layoutAlignX = ax}
   setWidgetId na i (WidgetId 123)
   setNodeText na i "Header"
-  setStyleIdx na i 0x80000000
+  -- ButtonTable = 3 in bits 24-27 (SB.buttonKind).
+  setStyleIdx na i (3 `shiftL` 24)
 
 -- | At each snap scale a new alignment places afresh, and a moved parent
 -- reuses the text cache yet draws as a cold placement.

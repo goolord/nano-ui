@@ -60,6 +60,18 @@ module NanoUI.Backend
   , DrawCmd (..)
   , ShaderCall (..)
   , EffectSpan (..)
+  , EffectPassDraw (..)
+  , EffectDriver (..)
+  , spanEffectiveClip
+  , execEffectSpans
+  , withEffectUniforms
+  , IntGenCache
+  , newIntGenCache
+  , intGenCacheStartFrame
+  , intGenCacheLookup
+  , intGenCacheTouch
+  , intGenCacheInsert
+  , intGenCacheSize
   , emptyShaderCalls
   , emptyEffectSpans
   , emptyUniformBytes
@@ -431,7 +443,23 @@ import NanoUI.Internal.Frame.Cursor (uiCursorKind)
 import NanoUI.Internal.Damage (clipPixelEdges, damagePieces, pixelEdges, snapDamage)
 import NanoUI.Internal.Frame.TextArea (TextInputArea (..), textInputArea)
 import NanoUI.Internal.Draw hiding (setDrawPixelScale)
+import NanoUI.Internal.EffectDriver
+  ( EffectDriver (..)
+  , EffectPassDraw (..)
+  , execEffectSpans
+  , spanEffectiveClip
+  , withEffectUniforms
+  )
 import NanoUI.Internal.Font
+import NanoUI.Internal.GenCache
+  ( IntGenCache
+  , intGenCacheInsert
+  , intGenCacheLookup
+  , intGenCacheSize
+  , intGenCacheStartFrame
+  , intGenCacheTouch
+  , newIntGenCache
+  )
 import NanoUI.Internal.Id
 import NanoUI.Internal.Input
 import NanoUI.Internal.Monad

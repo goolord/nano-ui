@@ -412,11 +412,15 @@ tableHeaderPadX = 2 * tableCellInset + tableSortLane
 tableSortMarkOf :: Word64 -> Int
 tableSortMarkOf = SB.getField SB.headerSortMark
 
--- Type flags live in bits 24-31 so visual style and tab index stay in the
--- low bits ("NanoUI.Internal.StyleBits").
+-- Button kind lives in bits 24-27 as a 4-bit enum ("NanoUI.Internal.StyleBits")
+-- so visual style and tab index stay in the low bits.
+{-# INLINE packButtonKind #-}
+packButtonKind :: ButtonKind -> Word64
+packButtonKind = SB.packField SB.buttonKind . fromEnum
+
 {-# INLINE buttonFlagClose #-}
 buttonFlagClose :: Word64
-buttonFlagClose = SB.fieldMask SB.buttonClose
+buttonFlagClose = packButtonKind ButtonClose
 
 -- | Visual style of a title-bar close button: its cross sits against the
 -- box's right edge, so it lines up with the panel padding the way the title
@@ -432,45 +436,46 @@ buttonCloseTab = 2
 
 {-# INLINE buttonFlagTab #-}
 buttonFlagTab :: Word64
-buttonFlagTab = SB.fieldMask SB.buttonTab
+buttonFlagTab = packButtonKind ButtonTab
 
 {-# INLINE buttonFlagTable #-}
 buttonFlagTable :: Word64
-buttonFlagTable = SB.fieldMask SB.buttonTable
+buttonFlagTable = packButtonKind ButtonTable
 
 -- Flat menu row / menu-bar entry: transparent at rest, hover highlight, and an
 -- accent marker on hover. Rendered by 'menuItemVisualStyle'.
 {-# INLINE buttonFlagMenu #-}
 buttonFlagMenu :: Word64
-buttonFlagMenu = SB.fieldMask SB.buttonMenu
+buttonFlagMenu = packButtonKind ButtonMenu
 
 -- Flat menu-bar title: same flat/hover/open fill as a menu row, but centered
 -- text and no hover accent marker (that marker belongs to drop-down rows).
 {-# INLINE buttonFlagMenuBar #-}
 buttonFlagMenuBar :: Word64
-buttonFlagMenuBar = SB.fieldMask SB.buttonMenuBar
+buttonFlagMenuBar = packButtonKind ButtonMenuBar
 
 -- | A button whose content is a view of its own ('NanoUI.buttonContent'),
 -- padded as a labelled button is.
 {-# INLINE buttonFlagContent #-}
 buttonFlagContent :: Word64
-buttonFlagContent = SB.fieldMask SB.buttonContent
+buttonFlagContent = packButtonKind ButtonContent
 
 -- | A checkbox, or with visual style 1 a radio option: no fill, border or
 -- padding, its box or ring before its label, checked while its value is over
 -- a half.
 {-# INLINE buttonFlagChoice #-}
 buttonFlagChoice :: Word64
-buttonFlagChoice = SB.fieldMask SB.buttonChoice
+buttonFlagChoice = packButtonKind ButtonChoice
 
 -- | A tree row: square and borderless, its stripe's fill, or the accent's
 -- tint while its value is over a half. Its style packs the rest
 -- ('treeEncodeStyle').
 {-# INLINE buttonFlagRow #-}
 buttonFlagRow :: Word64
-buttonFlagRow = SB.fieldMask SB.buttonRow
+buttonFlagRow = packButtonKind ButtonRow
 
--- | Mutually exclusive visual role of a 'NodeButton' decoded from its style flags.
+-- | Mutually exclusive visual role of a 'NodeButton' decoded from its packed
+-- 'SB.buttonKind' field.
 data ButtonKind
   = ButtonPlain
   | ButtonClose
@@ -483,20 +488,10 @@ data ButtonKind
   | ButtonRow
   deriving (Eq, Show, Enum, Bounded)
 
--- | Decode a button's visual role from its packed style flags. Inlined so
--- case analysis compiles to direct bit-test jumps with zero allocation.
+-- | Decode a button's visual role from its packed 'SB.buttonKind' field.
 {-# INLINE buttonKindOf #-}
 buttonKindOf :: Word64 -> ButtonKind
-buttonKindOf si
-  | hasFlag buttonFlagClose si = ButtonClose
-  | hasFlag buttonFlagTab si = ButtonTab
-  | hasFlag buttonFlagTable si = ButtonTable
-  | hasFlag buttonFlagMenu si = ButtonMenu
-  | hasFlag buttonFlagMenuBar si = ButtonMenuBar
-  | hasFlag buttonFlagContent si = ButtonContent
-  | hasFlag buttonFlagChoice si = ButtonChoice
-  | hasFlag buttonFlagRow si = ButtonRow
-  | otherwise = ButtonPlain
+buttonKindOf = decodeStyleEnum SB.buttonKind ButtonPlain
 
 -- | Marks a @NodeContainer@ whose widgets are for display: the pointer passes
 -- through them to the widget they are drawn in
@@ -578,7 +573,7 @@ tabHeaderPadX = 12
 -- strip.
 {-# INLINE tabLabelAtStart #-}
 tabLabelAtStart :: Word64 -> Bool
-tabLabelAtStart si = hasFlag buttonFlagTab si && snd (tabDecodeStyle si) >= 2
+tabLabelAtStart si = buttonKindOf si == ButtonTab && snd (tabDecodeStyle si) >= 2
 
 -- | What a tab strip's container paints under its children.
 data TabChrome

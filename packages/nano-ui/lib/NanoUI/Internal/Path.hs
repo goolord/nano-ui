@@ -1719,9 +1719,16 @@ transformOp tol t@(Transform a b c d _ _) op
       let (x0', y0') = applyTransform t x0 y0
           (x1', y1') = applyTransform t x1 y1
        in [mk x0' y0' x1' y1' (w * k) col]
-    points pts = generatePrimArray (sizeofPrimArray pts) $ \i ->
-      let (x, y) = applyTransform t (indexPrimArray pts (i - i `mod` 2)) (indexPrimArray pts (i - i `mod` 2 + 1))
-       in if even i then x else y
+    points pts = runPrimArray $ do
+      let !n = sizeofPrimArray pts
+      out <- newPrimArray n
+      let go !i = when (i + 1 < n) $ do
+            let (x, y) = applyTransform t (indexPrimArray pts i) (indexPrimArray pts (i + 1))
+            writePrimArray out i x
+            writePrimArray out (i + 1) y
+            go (i + 2)
+      go 0
+      pure out
     -- The rect's transformed corners, clockwise from the top left.
     corners (Rect x y w h) = [applyTransform t px py | (px, py) <- [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]]
     -- The bounding box of the rect's transformed corners.

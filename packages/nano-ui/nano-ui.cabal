@@ -158,8 +158,10 @@ library
         NanoUI.Internal.Context.Scroll
         NanoUI.Internal.Damage
         NanoUI.Internal.Draw
+        NanoUI.Internal.EffectDriver
         NanoUI.Internal.Font
         NanoUI.Internal.Font.Types
+        NanoUI.Internal.GenCache
         NanoUI.Internal.Metrics
         NanoUI.Internal.Frame
         NanoUI.Internal.Frame.Cursor

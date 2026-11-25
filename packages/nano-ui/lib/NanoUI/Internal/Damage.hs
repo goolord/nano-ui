@@ -533,9 +533,9 @@ writeDamage ctx inp snap mayReuse layoutFloats = do
   -- this frame repaint whole, and a floating change did too or, on a frame
   -- that only scrolled, damaged each moved panel where it was and is, so
   -- their pixels are not waiting on the next frame.
-  when modalFlip (markDirtyCovered ctx)
+  when modalFlip (markDirty ctx)
   when (floatingChanged && not (IM.null (fsFloatingRects snap) && not (IM.null newFloatingRects))) $
-    markDirtyCovered ctx
+    markDirty ctx
   -- A popup placed by its anchor's last rect ('NanoUI.respRect') is a frame
   -- behind an anchor this frame moved (a widget last had the anchor's rect
   -- and now has another), and nothing else may ask for the frame that
@@ -552,7 +552,7 @@ writeDamage ctx inp snap mayReuse layoutFloats = do
           _ -> pure False
   unless (ptrEq oldRects newRects) $
     findClassNodeM (ctxNodeArena ctx) FloatingNodes anchorMoved >>= \found ->
-      when (isJust found) (markDirtyCovered ctx)
+      when (isJust found) (markDirty ctx)
 
 -- | Whether 'updatePrevRects' left every map of @old@ as it was. Compared by
 -- map, not by record: GHC may rebuild a record passed unboxed.

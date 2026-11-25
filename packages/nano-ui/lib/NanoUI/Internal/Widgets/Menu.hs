@@ -29,7 +29,7 @@ import NanoUI.Internal.Store (findSpec, insertSpec)
 import NanoUI.Internal.Store.Slots (setFlagSpec, slotMenuOpen, slotMenuPos)
 import NanoUI.Internal.Style (Layout (..), Padding (..), defaultLayout, fillW, fixedH, fontMuted, gap, grow, maxH, minW, padXY, tight, windowMargin)
 import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), Size (..), V2 (..))
-import NanoUI.Internal.WidgetText (buttonFlagMenu, buttonFlagMenuBar, hasFlag)
+import NanoUI.Internal.WidgetText (ButtonKind (..), buttonFlagMenu, buttonFlagMenuBar, buttonKindOf)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx)
 import NanoUI.Internal.Widgets.Layout (columnWith, labelEx, rowWith, scrollWith, separator)
 import NanoUI.Internal.Layout.Arena (NodeType (..), getNodeType, getStyleIdx)
@@ -104,7 +104,7 @@ pressedMenuRow ctx = do
   case M.lookup MouseLeft presses of
     Just PressPoint {ppOwner = Just row} ->
       withWidgetNode ctx row False $ \idx ->
-        ((== NodeButton) <$> getNodeType na idx) <&&> (hasFlag buttonFlagMenu <$> getStyleIdx na idx)
+        ((== NodeButton) <$> getNodeType na idx) <&&> ((== ButtonMenu) . buttonKindOf <$> getStyleIdx na idx)
     _ -> pure False
 
 -- | A menu row with an optional shortcut hint after the label. A disabled

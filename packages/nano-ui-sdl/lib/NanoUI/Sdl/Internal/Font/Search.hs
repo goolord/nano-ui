@@ -16,11 +16,12 @@ import Control.Exception (IOException, SomeException, catch, throwIO, try)
 import Control.Monad (filterM, mfilter, void)
 import Data.Containers.ListUtils (nubOrd)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
-import Data.Char (isDigit, isLower, isSpace, isUpper, toLower)
+import Data.Char (isDigit, isLower, isUpper, toLower)
 import Data.List (elemIndex, find, isInfixOf, isPrefixOf, partition, sort, sortOn, stripPrefix, tails)
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import Data.Ord (Down (..))
 import qualified Data.Set as Set
+import NanoUI.Ttf.Internal.Support (expandGenericFamily, normalizeFamily)
 import System.Directory (canonicalizePath, doesDirectoryExist, getHomeDirectory, listDirectory)
 import System.Environment (lookupEnv)
 import System.FilePath (isAbsolute, splitSearchPath, takeBaseName, takeDirectory, takeExtension, (</>))
@@ -33,7 +34,7 @@ import System.IO.Unsafe (unsafePerformIO)
 searchFonts :: [String] -> IO (Maybe FilePath)
 searchFonts names = listToMaybe <$> searchFontFamilies (concatMap families names)
   where
-    families name = maybe [name] (concatMap families) (expandGeneric (normalize name))
+    families name = maybe [name] (concatMap families) (expandGenericFamily (normalizeFamily name))
 
 -- | The file for each family that is installed, in the order asked, reading
 -- the font directories once.
@@ -274,36 +275,6 @@ familyAliases "kohinoordevanagari" = ["kohinoor"]
 familyAliases _ = []
 
 -- | Expand a generic CSS family into concrete families to search in order.
-expandGeneric :: String -> Maybe [String]
-expandGeneric "monospace" =
-  Just
-    [ "DejaVu Sans Mono"
-    , "Liberation Mono"
-    , "Ubuntu Mono"
-    , "Noto Sans Mono"
-    , "Consolas"
-    , "Courier New"
-    ]
-expandGeneric "sansserif" =
-  Just
-    [ "DejaVu Sans"
-    , "Liberation Sans"
-    , "Noto Sans"
-    , "Open Sans"
-    , "Helvetica Neue"
-    ]
-expandGeneric "serif" =
-  Just
-    [ "DejaVu Serif"
-    , "Liberation Serif"
-    , "Noto Serif"
-    , "Times New Roman"
-    ]
-expandGeneric _ = Nothing
-
--- | Fold case, drop whitespace and separators, so family \/ file names can be
--- compared loosely ("DejaVu Sans Mono" vs @DejaVuSansMono.ttf@).
+-- Shared with @nano-ui-sdl-web@ via "NanoUI.Ttf.Internal.Support".
 normalize :: String -> String
-normalize =
-  map toLower
-    . filter (\c -> not (isSpace c) && c /= '-' && c /= '_')
+normalize = normalizeFamily

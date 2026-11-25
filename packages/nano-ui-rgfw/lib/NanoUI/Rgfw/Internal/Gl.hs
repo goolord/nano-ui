@@ -32,22 +32,23 @@ module NanoUI.Rgfw.Internal.Gl
   , glBufferStrides
   ) where
 
-import Control.Exception (bracket, finally)
+import Control.Exception (bracket)
 import Control.Monad (foldM, forM_, void, when)
 import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Int (Int32)
-import Data.List (sortOn)
+import qualified Data.IntMap.Strict as IM
 import Data.Maybe (fromMaybe, isJust)
 import Data.Primitive.ByteArray (ByteArray, copyByteArrayToAddr, sizeofByteArray)
 import Data.Primitive.PrimArray (indexPrimArray)
-import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromList)
+import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BSI
 import qualified Data.ByteString.Unsafe as BSU
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text.Foreign as TF
+import qualified Data.Vector.Unboxed as U
 import Data.Word (Word32, Word64, Word8)
 import Foreign.C.Types (CChar)
 import Foreign.ForeignPtr (withForeignPtr)
@@ -55,7 +56,7 @@ import Foreign.Marshal.Alloc (alloca, allocaBytes, callocBytes, free, reallocByt
 import Foreign.Marshal.Utils (copyBytes)
 import Foreign.Ptr (Ptr, nullPtr, plusPtr)
 import Foreign.Storable (peek, pokeByteOff)
-import NanoUI (Color (..), Rect (..), RgbaPixels, V2 (..), rectInflate, rgbaPixels)
+import NanoUI (Color (..), Rect (..), RgbaPixels, rectInflate, rgbaPixels)
 import NanoUI.Backend (Damage (..), roundHalfUp)
 import NanoUI.Rgfw.Internal.Context (TextSpan, paintInLayerOrder)
 import NanoUI.Rgfw.Internal.Font.Cozette
@@ -70,16 +71,18 @@ import NanoUI.Backend
   , Context
   , DrawCmd (..)
   , DrawData (..)
+  , EffectDriver (..)
+  , EffectPassDraw (..)
   , EffectSpan (..)
   , Layer (..)
   , ShaderCall (..)
   , ShaderProgram (..)
   , atlasChanges
   , atlasTextureId
-  , drawCmdElems
+  , execEffectSpans
   , forDrawCmdsInLayer_
-  , sysUniformBytes
   , vertexSize
+  , withEffectUniforms
   )
 
 -- | Opaque C renderer state (cbits/nano_ui_gl.c).
@@ -209,9 +212,9 @@ renderArenaGl ::
   IO ()
 renderArenaGl r font !scale !fbW !fbH damage pieces drawData baseSpans overlaySpans = do
   let !h = glHandle r
-      (!full, textBoxes) = case damage of
-        DamageFull -> (1, [(0, 0, fbW, fbH)])
-        DamageClip rect -> (0, map (damageBox scale fbW fbH) (if null pieces then [rect] else pieces))
+      (!full, mDamage, textBoxes) = case damage of
+        DamageFull -> (1, Nothing, [(0, 0, fbW, fbH)])
+        DamageClip rect -> (0, Just rect, map (damageBox scale fbW fbH) (if null pieces then [rect] else pieces))
       (!bgR, !bgG, !bgB, _) = colorFloats (drawClear drawData)
   began <- c_begin h (fromIntegral fbW) (fromIntegral fbH) scale bgR bgG bgB full
   when (began == 0) $ fail "nano-ui-rgfw: retained framebuffer setup failed"
@@ -232,7 +235,7 @@ renderArenaGl r font !scale !fbW !fbH damage pieces drawData baseSpans overlaySp
         (c_drawText h 0 (fromIntegral nBase))
         (c_drawText h (fromIntegral nBase) (fromIntegral (nAll - nBase)))
     else
-      renderArenaGlWithEffects r h atlas font scale fbW fbH textBoxes drawData effectSpans baseSpans overlaySpans
+      renderArenaGlWithEffects r h atlas font scale fbW fbH mDamage textBoxes drawData effectSpans baseSpans overlaySpans
   c_present h
 
 -- | Render a frame containing Tier 2 subtree effects into pooled offscreen
@@ -247,13 +250,14 @@ renderArenaGlWithEffects ::
   Float ->
   Int ->
   Int ->
+  Maybe Rect ->
   [(Int, Int, Int, Int)] ->
   DrawData ->
   SmallArray EffectSpan ->
   [TextSpan] ->
   [TextSpan] ->
   IO ()
-renderArenaGlWithEffects r h atlas font !scale !fbW !fbH textBoxes drawData effectSpans baseSpans overlaySpans = do
+renderArenaGlWithEffects r h atlas font !scale !fbW !fbH mDamage textBoxes drawData effectSpans baseSpans overlaySpans = do
   let nSpans = sizeofSmallArray effectSpans
       allSpans = [indexSmallArray effectSpans i | i <- [0 .. nSpans - 1]]
       isBaseLayer l = l == LayerBackground || l == LayerContent
@@ -270,15 +274,22 @@ renderArenaGlWithEffects r h atlas font !scale !fbW !fbH textBoxes drawData effe
          in case matches of
               [] -> 0
               xs -> maximum xs
-      taggedBase = [(ownerOf True s, s) | s <- baseSpans]
-      taggedOver = [(ownerOf False s, s) | s <- overlaySpans]
-      rootBase = [s | (0, s) <- taggedBase]
-      rootOver = [s | (0, s) <- taggedOver]
+      -- Partition spans into root vs. per-effect buckets in one linear pass.
+      partitionSpans isBase =
+        foldr
+          (\s (roots, byId) ->
+            let !eid = ownerOf isBase s
+             in if eid == 0
+                  then (s : roots, byId)
+                  else (roots, IM.insertWith (++) eid [s] byId))
+          ([], IM.empty)
+      (rootBase, baseById) = partitionSpans True baseSpans
+      (rootOver, overById) = partitionSpans False overlaySpans
+      spansById = IM.unionWith (++) baseById overById
       effectIds = [esId sp | sp <- allSpans]
-      spansForId eid = [s | (k, s) <- taggedBase, k == eid] ++ [s | (k, s) <- taggedOver, k == eid]
       totalVerts =
         ((spanChars rootBase + spanChars rootOver) * length textBoxes
-          + sum [spanChars (spansForId eid) | eid <- effectIds])
+          + IM.foldl' (\acc ss -> acc + spanChars ss) 0 spansById)
           * 6
   buf <- ensureTextCapacity r totalVerts
   let writeBoxes boxes spans n0 = foldM (\n tb -> foldM (writeSpanQuads atlas font tb buf) n spans) n0 boxes
@@ -286,179 +297,56 @@ renderArenaGlWithEffects r h atlas font !scale !fbW !fbH textBoxes drawData effe
   nRootOver <- writeBoxes textBoxes rootOver nRootBase
   (spanRanges, nFinal) <-
     foldM
-      (\(acc, n0) eid -> do
-        n1 <- writeBoxes [(0, 0, fbW, fbH)] (spansForId eid) n0
-        pure ((eid, (n0, n1 - n0)) : acc, n1))
-      ([], nRootOver)
+      (\(acc, n0) eid ->
+        case IM.lookup eid spansById of
+          Nothing -> pure (acc, n0)
+          Just ss -> do
+            n1 <- writeBoxes [(0, 0, fbW, fbH)] ss n0
+            pure (IM.insert eid (n0, n1 - n0) acc, n1))
+      (IM.empty, nRootOver)
       effectIds
   c_uploadText h buf (fromIntegral nFinal)
-  let cmds = smallArrayFromList (drawCmdElems drawData)
+  let rawCmds = drawCommands drawData
       offsets = drawLayerOffsets drawData
       shaderCalls = drawShaderCalls drawData
       uBytes = drawUniformBytes drawData
       drawSpanText eid =
-        case lookup eid spanRanges of
+        case IM.lookup eid spanRanges of
           Just (startV, cntV) | cntV > 0 -> c_drawText h (fromIntegral startV) (fromIntegral cntV)
           _ -> pure ()
+      drv =
+        EffectDriver
+          { edScale = scale
+          , edFlipY = True
+          , edPreparePasses = \passes ->
+              pure $
+                if all (\i -> isJust (spGlsl150 (scProgram (indexSmallArray passes i)))) [0 .. sizeofSmallArray passes - 1]
+                  then Just passes
+                  else Nothing
+          , edAcquireTarget = acquireGlTarget h
+          , edReleaseTarget = c_releaseTarget h . fromIntegral
+          , edBindTarget = \slot clr ox oy ->
+              (/= 0) <$> c_bindTarget h (fromIntegral slot) (if clr then 1 else 0) ox oy
+          , edFlush = pure ()
+          , edEmitPlain = \_ cw ch ox oy _ from to ->
+              let loop !i = when (i < to) (drawCmd h scale cw ch ox oy shaderCalls uBytes (U.unsafeIndex rawCmds i) >> loop (i + 1))
+               in loop from
+          , edAfterSpanContent = drawSpanText
+          , edCompositePass = \_ sc pd dstW dstH ->
+              case epdClip pd of
+                Nothing -> compositeGlPass h sc uBytes pd (0, 0, 0, 0, 0)
+                Just clipR ->
+                  forM_ (physClip scale dstW dstH clipR) $ \(sx0, sy0, sx1, sy1) ->
+                    compositeGlPass h sc uBytes pd (1, sx0, sy0, sx1, sy1)
+          }
       renderLayer layer =
         let !lo = indexPrimArray offsets (fromEnum layer)
             !hi = indexPrimArray offsets (fromEnum layer + 1)
-         in execGlRange h scale fbW fbH effectSpans cmds shaderCalls uBytes drawSpanText 0 (-1) fbW fbH 0 0 lo hi
+         in execEffectSpans drv effectSpans 0 (-1) (fbW, fbH) 0 0 mDamage lo hi
   paintInLayerOrder
     renderLayer
     (c_drawText h 0 (fromIntegral nRootBase))
     (c_drawText h (fromIntegral nRootBase) (fromIntegral (nRootOver - nRootBase)))
-
-execGlRange ::
-  Ptr NanoUiGl ->
-  Float ->
-  Int ->
-  Int ->
-  SmallArray EffectSpan ->
-  SmallArray DrawCmd ->
-  SmallArray ShaderCall ->
-  ByteArray ->
-  (Int -> IO ()) ->
-  Int ->
-  Int ->
-  Int ->
-  Int ->
-  Float ->
-  Float ->
-  Int ->
-  Int ->
-  IO ()
-execGlRange h !scale !fbW !fbH spans cmds shaderCalls uBytes drawSpanText parentId parentSlot parentW parentH parentOx parentOy rangeStart rangeEnd =
-  go rangeStart directChildren
-  where
-    directChildren =
-      sortOn (\sp -> (esCmdStart sp, esId sp))
-        [ sp
-        | i <- [0 .. sizeofSmallArray spans - 1]
-        , let sp = indexSmallArray spans i
-        , esParent sp == parentId
-        , esCmdStart sp >= rangeStart
-        , esCmdEnd sp <= rangeEnd
-        ]
-
-    emitPlain from to = loop from
-      where
-        loop !i
-          | i >= to = pure ()
-          | otherwise = do
-              drawCmd h scale parentW parentH parentOx parentOy shaderCalls uBytes (indexSmallArray cmds i)
-              loop (i + 1)
-
-    go !cur [] = emitPlain cur rangeEnd
-    go !cur (sp : rest) = do
-      let !s = max cur (esCmdStart sp)
-          !e = min rangeEnd (esCmdEnd sp)
-      when (s > cur) (emitPlain cur s)
-      when (e > s) (runSpan sp s e)
-      go (max cur e) rest
-
-    runSpan sp s e = do
-      let Rect bx by bw bh = esBounds sp
-          V2 mx my = esMargin sp
-          !ex = bx - mx
-          !ey = by - my
-          !ew = bw + 2 * mx
-          !eh = bh + 2 * my
-          passes = esPasses sp
-          !nPasses = sizeofSmallArray passes
-          passesSupported = all (\i -> isJust (spGlsl150 (scProgram (indexSmallArray passes i)))) [0 .. nPasses - 1]
-      if nPasses <= 0 || ew <= 0 || eh <= 0 || not passesSupported
-        then do
-          execGlRange h scale fbW fbH spans cmds shaderCalls uBytes drawSpanText (esId sp) parentSlot parentW parentH parentOx parentOy s e
-          drawSpanText (esId sp)
-        else do
-          let !px0 = floor (ex * scale) :: Int
-              !py0 = floor (ey * scale) :: Int
-              !px1 = ceiling ((ex + ew) * scale) :: Int
-              !py1 = ceiling ((ey + eh) * scale) :: Int
-              !pw = max 1 (px1 - px0)
-              !ph = max 1 (py1 - py0)
-              !ox = fromIntegral px0 / scale
-              !oy = fromIntegral py0 / scale
-          (slot0, cap0W, cap0H) <- acquireGlTarget h pw ph
-          if slot0 < 0
-            then do
-              execGlRange h scale fbW fbH spans cmds shaderCalls uBytes drawSpanText (esId sp) parentSlot parentW parentH parentOx parentOy s e
-              drawSpanText (esId sp)
-            else do
-              let restoreParent = void $ c_bindTarget h (fromIntegral parentSlot) 0 parentOx parentOy
-                  runOffscreen = do
-                    okBind <- c_bindTarget h (fromIntegral slot0) 1 ox oy
-                    when (okBind /= 0) $ do
-                      execGlRange h scale fbW fbH spans cmds shaderCalls uBytes drawSpanText (esId sp) slot0 cap0W cap0H ox oy s e
-                      drawSpanText (esId sp)
-                      let !nodePx = bx * scale - fromIntegral px0
-                          !nodePy = by * scale - fromIntegral py0
-                          !nodePw = max 1.0e-4 (bw * scale)
-                          !nodePh = max 1.0e-4 (bh * scale)
-                          !destPx = fromIntegral px0 - parentOx * scale
-                          !destPy = fromIntegral py0 - parentOy * scale
-                          runPasses !srcSlot !srcCapW !srcCapH !dstSlot !dstCapW !dstCapH !passIdx
-                            | passIdx >= nPasses = pure ()
-                            | otherwise = do
-                                -- OpenGL FBO textures have V=1 at top-left (y=0) and V=0 at bottom.
-                                let !u1 = fromIntegral pw / fromIntegral srcCapW
-                                    !v0 = 1.0 :: Float
-                                    !v1 = 1.0 - fromIntegral ph / fromIntegral srcCapH
-                                    !nodeU0 = nodePx / fromIntegral srcCapW
-                                    !nodeV0 = 1.0 - nodePy / fromIntegral srcCapH
-                                    !nodeUSpan = nodePw / fromIntegral srcCapW
-                                    !nodeVSpan = negate (nodePh / fromIntegral srcCapH)
-                                    sc = indexSmallArray passes passIdx
-                                if passIdx < nPasses - 1 && dstSlot >= 0
-                                  then do
-                                    okDst <- c_bindTarget h (fromIntegral dstSlot) 1 0 0
-                                    when (okDst /= 0) $ do
-                                      compositeGlPass
-                                        h srcSlot
-                                        0 0 (fromIntegral pw) (fromIntegral ph)
-                                        0 v0 u1 v1
-                                        0 0 0 0 0 1
-                                        sc uBytes
-                                        nodeU0 nodeV0 nodeUSpan nodeVSpan
-                                        (fromIntegral srcCapW) (fromIntegral srcCapH)
-                                      runPasses dstSlot dstCapW dstCapH srcSlot srcCapW srcCapH (passIdx + 1)
-                                  else do
-                                    okPar <- c_bindTarget h (fromIntegral parentSlot) 0 parentOx parentOy
-                                    when (okPar /= 0) $ do
-                                      let Rect cx cy cw ch = esClip sp
-                                          !clipOpen = cw >= 1e8 || ch >= 1e8
-                                      if clipOpen
-                                        then
-                                          compositeGlPass
-                                            h srcSlot
-                                            destPx destPy (fromIntegral pw) (fromIntegral ph)
-                                            0 v0 u1 v1
-                                            0 0 0 0 0 0
-                                            sc uBytes
-                                            nodeU0 nodeV0 nodeUSpan nodeVSpan
-                                            (fromIntegral srcCapW) (fromIntegral srcCapH)
-                                        else
-                                          case physClip scale parentW parentH (Rect (cx - parentOx) (cy - parentOy) cw ch) of
-                                            Nothing -> pure ()
-                                            Just (sx0, sy0, sx1, sy1) ->
-                                              compositeGlPass
-                                                h srcSlot
-                                                destPx destPy (fromIntegral pw) (fromIntegral ph)
-                                                0 v0 u1 v1
-                                                1 sx0 sy0 sx1 sy1 0
-                                                sc uBytes
-                                                nodeU0 nodeV0 nodeUSpan nodeVSpan
-                                                (fromIntegral srcCapW) (fromIntegral srcCapH)
-                      if nPasses > 1
-                        then do
-                          (slot1, cap1W, cap1H) <- acquireGlTarget h pw ph
-                          runPasses slot0 cap0W cap0H slot1 cap1W cap1H 0
-                            `finally` when (slot1 >= 0) (c_releaseTarget h (fromIntegral slot1))
-                        else
-                          runPasses slot0 cap0W cap0H (-1) 0 0 0
-              runOffscreen
-                `finally` (restoreParent >> c_releaseTarget h (fromIntegral slot0))
 
 acquireGlTarget :: Ptr NanoUiGl -> Int -> Int -> IO (Int, Int, Int)
 acquireGlTarget h minW minH =
@@ -474,44 +362,25 @@ acquireGlTarget h minW minH =
 
 {-# NOINLINE compositeGlPass #-}
 compositeGlPass ::
-  Ptr NanoUiGl -> Int ->
-  Float -> Float -> Float -> Float ->
-  Float -> Float -> Float -> Float ->
-  Int32 -> Int -> Int -> Int -> Int ->
-  Int32 ->
-  ShaderCall -> ByteArray ->
-  Float -> Float -> Float -> Float ->
-  Float -> Float ->
+  Ptr NanoUiGl ->
+  ShaderCall ->
+  ByteArray ->
+  EffectPassDraw ->
+  (Int32, Int, Int, Int, Int) ->
   IO ()
-compositeGlPass
-  h srcSlot
-  dx dy dw dh
-  u0 v0 u1 v1
-  hasSc sx0 sy0 sx1 sy1
-  blendCopy sc uniformBytes
-  nodeU0 nodeV0 nodeUSpan nodeVSpan
-  targetW targetH =
+compositeGlPass h sc uniformBytes pd (hasSc, sx0, sy0, sx1, sy1) =
   case spGlsl150 (scProgram sc) of
     Nothing -> pure ()
     Just src -> do
       let srcUtf8 = TE.encodeUtf8 src
-          !uOff = scUniformOffset sc
-          !uLen = max sysUniformBytes (min (scUniformLength sc) (max 0 (sizeofByteArray uniformBytes - uOff)))
-          !copyLen = min uLen (max 0 (sizeofByteArray uniformBytes - uOff))
+          blendCopy = if epdIntermediate pd then 1 else 0 :: Int32
       BSU.unsafeUseAsCStringLen srcUtf8 $ \(srcPtr, srcLen) ->
-        allocaBytes uLen $ \uPtr -> do
-          when (copyLen > 0) $ copyByteArrayToAddr uPtr uniformBytes uOff copyLen
-          pokeByteOff uPtr 16 nodeU0
-          pokeByteOff uPtr 20 nodeV0
-          pokeByteOff uPtr 24 nodeUSpan
-          pokeByteOff uPtr 28 nodeVSpan
-          pokeByteOff uPtr 40 targetW
-          pokeByteOff uPtr 44 targetH
+        withEffectUniforms sc uniformBytes pd $ \uPtr uLen ->
           void $
             c_compositeEffect
-              h (fromIntegral srcSlot)
-              dx dy dw dh
-              u0 v0 u1 v1
+              h (fromIntegral (epdSrcSlot pd))
+              (epdDstX pd) (epdDstY pd) (epdDstW pd) (epdDstH pd)
+              (epdU0 pd) (epdV0 pd) (epdU1 pd) (epdV1 pd)
               hasSc (fromIntegral sx0) (fromIntegral sy0) (fromIntegral sx1) (fromIntegral sy1)
               blendCopy (scHash sc) srcPtr (fromIntegral srcLen)
               uPtr (fromIntegral uLen)

@@ -42,13 +42,13 @@ data PulseParams = PulseParams
 -- ANCHOR: custom_surface
 pulseRing :: Shader 'Surface PulseParams
 pulseRing = surfaceShader $ \u ctx ->
-  let centered = ctx.uv *^ floatE 2.0 - vec2 (floatE 1.0) (floatE 1.0)
+  let centered = ctx.uv *^ 2.0 - vec2 1.0 1.0
       dist = vLength centered
-      wave = floatE 0.5 + floatE 0.5 * sin (dist * u.ppRings - u.ppPhase)
-      half = ctx.size *^ floatE 0.5
+      wave = 0.5 + 0.5 * sin (dist * u.ppRings - u.ppPhase)
+      half = ctx.size *^ 0.5
       edge = sdRoundedBox (ctx.pos - half) half ctx.cornerRadius
-      aa = floatE 0.75 / maxE ctx.scale (floatE 1.0)
-      mask = floatE 1.0 - smoothstep (negate aa) aa edge
+      aa = 0.75 / maxE ctx.scale 1.0
+      mask = 1.0 - smoothstep (negate aa) aa edge
    in vec4_31 (u.ppColor.rgb *^ wave) (u.ppColor.a * mask)
 -- ANCHOR_END: custom_surface
 
@@ -71,14 +71,14 @@ dimmedPanel body =
 boxAverage5 :: Shader 'LayerEffect Float
 boxAverage5 =
   layerEffectM (\step -> V2 (2 * abs step) (2 * abs step)) $ \u ctx layer -> do
-    step <- bind (maxE (uVal u) (floatE 0.0))
-    zero <- bind (vec4 (floatE 0.0) (floatE 0.0) (floatE 0.0) (floatE 0.0))
+    step <- bind (maxE (uVal u) 0.0)
+    zero <- bind (vec4 0.0 0.0 0.0 0.0)
     acc <- forRange (-2) 3 zero $ \iy rowAcc ->
       forRange (-2) 3 rowAcc $ \ix colAcc -> do
         let offset = vec2 (intToFloat ix * step) (intToFloat iy * step)
             sample = sampleLayer layer (ctx.pos + offset)
         pure (colAcc + sample)
-    pure (acc *^ floatE (1.0 / 25.0))
+    pure (acc *^ (1.0 / 25.0))
 -- ANCHOR_END: blur_loop
 
 -- ANCHOR: capabilities

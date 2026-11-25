@@ -27,7 +27,7 @@ import NanoUI.Internal.Layout.ScrollGeometry (padContentClip, padTextClipRect, s
 import NanoUI.Internal.Frame.Select (collectDropdownSpans)
 import NanoUI.Internal.Frame.SpanArena (SpanArena, pushSpans, resetSpanArena, spanArenaToList)
 import NanoUI.Internal.Frame.TextArea (textAreaTextPlacements)
-import NanoUI.Internal.Frame.TextInput (fieldEditLine, fieldTextColor, nodeTextColor, nodeTextFieldGeom, syncTextInputScroll, tagTextInputClippedSpans)
+import NanoUI.Internal.Frame.TextInput (fieldEditLine, fieldTextColor, nodeTextColor, nodeTextFieldGeom, syncTextInputScroll)
 import NanoUI.Internal.Input (Input)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (findAncestorMaxW, textWrapCap)
@@ -118,10 +118,7 @@ collectClippedSpans ctx@Context {ctxFontMetrics = fm} idx clip arena = do
               else do
                 -- The text clip paint uses ('nodeTextFieldGeom').
                 (_, fieldClip) <- nodeTextFieldGeom ctx idx x y w h
-                pure $
-                  if hasFlag textInputFlagNumeric si
-                    then maybe [] (`tagClippedSpans` spans) (rectIntersect clipHere fieldClip)
-                    else tagTextInputClippedSpans clipHere fieldClip spans
+                pure (maybe [] (`tagClippedSpans` spans) (rectIntersect clipHere fieldClip))
           -- The document lives in the text area's buffer: its rows in view,
           -- clipped as paint clips them, short of the scrollbars.
           NodeTextArea -> do
@@ -377,7 +374,7 @@ cachedWidgetLabel ctx nt idx labelAlign w h = do
   si <- getStyleIdx (ctxNodeArena ctx) idx
   txt <- displayText ctx nt idx
   ax <-
-    if nt == NodeButton && hasFlag buttonFlagTable si
+    if nt == NodeButton && buttonKindOf si == ButtonTable
       then getAlignX (ctxNodeArena ctx) idx
       else pure labelAlign
   let ntTag = fromEnum nt

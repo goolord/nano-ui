@@ -39,7 +39,6 @@ module NanoUI.Internal.Types
   , rectUnion
   , rectIntersect
   , rectFullyInside
-  , rectOverlapArea
   , rectInflate
   , rectArea
   , Damage (..)
@@ -368,12 +367,6 @@ rectFullyInside (Rect ix iy iw ih) (Rect ox oy ow oh) =
     && iy >= oy
     && ix + iw <= ox + ow
     && iy + ih <= oy + oh
-
--- | Shared area, or zero when there is no positive-area intersection.
-{-# INLINE rectOverlapArea #-}
-rectOverlapArea :: Rect -> Rect -> Float
-rectOverlapArea a b =
-  maybe 0 rectArea (rectIntersect a b)
 
 -- | Extend every edge by the margin. A negative margin shrinks the rectangle.
 {-# INLINE rectInflate #-}

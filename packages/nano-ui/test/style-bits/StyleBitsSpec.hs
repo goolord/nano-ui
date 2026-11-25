@@ -38,6 +38,6 @@ labelFontProblems =
 flagProblems :: [String]
 flagProblems =
   [ name <> " is a flag but " <> show (bfWidth f) <> " bits wide"
-  | (name, f) <- buttonTypeFlags <> [("inputSearch", inputSearch), ("inputSelectable", inputSelectable), ("inputPassword", inputPassword), ("inputNumeric", inputNumeric)]
+  | (name, f) <- [("inputSearch", inputSearch), ("inputSelectable", inputSelectable), ("inputPassword", inputPassword), ("inputNumeric", inputNumeric)]
   , bfWidth f /= 1
   ]

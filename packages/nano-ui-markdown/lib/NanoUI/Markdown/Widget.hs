@@ -15,8 +15,6 @@ import Control.Monad (unless, void, when, zipWithM, (>=>))
 import Data.Char (isSpace)
 import Data.Foldable (asum)
 import Data.Hashable (Hashable, hash)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
-import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -97,7 +95,17 @@ import NanoUI
   , whenM
   , withKey
   )
-import NanoUI.Backend (Layout (..), colorToWord32)
+import NanoUI.Backend
+  ( IntGenCache
+  , Layout (..)
+  , colorToWord32
+  , intGenCacheInsert
+  , intGenCacheLookup
+  , intGenCacheSize
+  , intGenCacheStartFrame
+  , intGenCacheTouch
+  , newIntGenCache
+  )
 import NanoUI.Widgets.Custom (checkboxBoxSize, drawCheckbox)
 import NanoUI.Internal.Context (frameNumber, intKey)
 import NanoUI.Internal.Monad (nextId, liftIO, withContext)
@@ -196,8 +204,8 @@ markdownWith f cache =
 
 -- | 'markdown' with a configuration.
 markdownConfigured :: MarkdownCache -> MarkdownConfig -> MarkdownDoc -> NanoUI (Maybe Text)
-markdownConfigured cache cfg doc = do
-  withContext (frameNumber >=> startFrame cache)
+markdownConfigured cache@(MarkdownCache genCache) cfg doc = do
+  withContext (frameNumber >=> intGenCacheStartFrame genCache)
   theme <- uiTheme
   size <- uiFontSize
   -- Pin the body size (the backend default if unset, or scaled if a relative
@@ -304,83 +312,39 @@ keptInlines :: Env -> [Span] -> NanoUI [Inline]
 keptInlines env xs = do
   wid <- nextId
   liftIO $ do
-    let MarkdownCache ref = envCache env
-    kept@Kept {keptCur = cur, keptOld = old} <- readIORef ref
-    let k = intKey wid
-        found = maybe (IM.lookup k old) Just (IM.lookup k cur)
-    case found of
+    let MarkdownCache cache = envCache env
+        k = intKey wid
+    intGenCacheLookup cache k >>= \case
       Just e@(KeptEntry ys theme link codeBg code pieces)
         | ptrEq xs ys
         , eqByPtr (envTheme env) theme
         , mdLinkColor cfg == link
         , mdInlineCodeBackground cfg == codeBg
-        , ptrEq (mdInlineCode cfg) code -> do
-            -- Found only in the older generation: carry it into this one.
-            pieces <$ writeIORef ref (if IM.member k cur then counted kept else keep kept k e)
+        , ptrEq (mdInlineCode cfg) code ->
+            pieces <$ intGenCacheTouch cache k e
       _ -> do
         let pieces = inlines env xs
             e = KeptEntry xs (envTheme env) (mdLinkColor cfg) (mdInlineCodeBackground cfg) (mdInlineCode cfg) pieces
-        pieces <$ writeIORef ref (keep kept k e)
+        pieces <$ intGenCacheInsert cache k e
   where
     cfg = envCfg env
-    counted kept = kept {keptCount = keptCount kept + 1}
-    -- Past the bound, the newer generation becomes the older one, dropping
-    -- blocks no frame drew since the last turn. The bound becomes twice the
-    -- most blocks a frame drew since then, not twice what churn filled it
-    -- with, so a long-lived cache holds about four frames' worth.
-    keep kept k e
-      | IM.size (keptCur kept) < keptBoundNow kept = (counted kept) {keptCur = IM.insert k e (keptCur kept)}
-      | otherwise =
-          (counted kept)
-            { keptBoundNow = max keptBound (2 * max (keptCount kept) (keptMost kept))
-            , keptMost = 0
-            , keptCur = IM.singleton k e
-            , keptOld = keptCur kept
-            }
 
 -- | Pieces 'keptInlines' made, by widget key, in two generations.
-newtype MarkdownCache = MarkdownCache (IORef Kept)
+newtype MarkdownCache = MarkdownCache (IntGenCache KeptEntry)
 
 -- | Allocate once during component setup. The cache retains only typed
 -- inline data; paragraph layout and interaction state remain in the UI
 -- context. It holds a few frames' worth of blocks, whatever the document's
 -- history, and documents drawn together may share it.
 newMarkdownCache :: IO MarkdownCache
-newMarkdownCache = MarkdownCache <$> newIORef (Kept keptBound (-1) 0 0 IM.empty IM.empty)
+newMarkdownCache = MarkdownCache <$> newIntGenCache 1024
 
 -- | Blocks the cache holds, for diagnostics.
 markdownCacheSize :: MarkdownCache -> IO Int
-markdownCacheSize (MarkdownCache ref) = do
-  Kept {keptCur = cur, keptOld = old} <- readIORef ref
-  pure (IM.size (IM.union cur old))
-
-data Kept = Kept
-  { keptBoundNow :: !Int
-  -- ^ Entries the newer generation takes before it turns.
-  , keptFrame :: !Int
-  -- ^ The frame 'keptCount' counts ('frameNumber').
-  , keptCount :: !Int
-  -- ^ Blocks drawn in that frame, by every document sharing the cache.
-  , keptMost :: !Int
-  -- ^ The most blocks an earlier frame drew since the generations turned.
-  , keptCur :: !(IM.IntMap KeptEntry)
-  , keptOld :: !(IM.IntMap KeptEntry)
-  }
-
--- | Begin counting a new frame's blocks, unless another document (or view
--- pass) already did this frame.
-startFrame :: MarkdownCache -> Int -> IO ()
-startFrame (MarkdownCache ref) frame = modifyIORef' ref $ \kept ->
-  if keptFrame kept == frame
-    then kept
-    else kept {keptFrame = frame, keptCount = 0, keptMost = max (keptCount kept) (keptMost kept)}
+markdownCacheSize (MarkdownCache cache) = intGenCacheSize cache
 
 -- | Spans, what styled them, and their pieces.
 data KeptEntry = KeptEntry [Span] !Theme !(Maybe Color) !(Maybe Color) (Layout -> Layout) [Inline]
-
--- | Entries a generation holds before the older one is dropped.
-keptBound :: Int
-keptBound = 1024
 
 -- | Spans as rich-text pieces. Every piece inside a link targets its
 -- destination; an image's alt text targets its enclosing link, else its

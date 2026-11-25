@@ -23,17 +23,11 @@ module NanoUI.Sdl.Internal.Font
   ) where
 
 import Control.Exception (IOException, catch)
-import Control.Monad (forM, forM_, unless, when)
+import Control.Monad (forM, when)
 import Data.ByteString qualified as BS
 import Data.ByteString.Short qualified as SBS
-import Data.Char (isPrint, ord)
-import Data.Foldable (traverse_)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
-import Data.IntMap.Strict qualified as IM
 import Data.Map.Strict qualified as Map
-import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromList)
-import Data.Text (Text)
-import Data.Text qualified as T
 import Foreign.C.Types (CBool (..), CFloat (..))
 import Foreign.Ptr (Ptr, nullPtr)
 import GHC.Foreign qualified as GHC
@@ -44,9 +38,7 @@ import NanoUI.Ttf.Internal.Font
   , FontHooks (..)
   , FontSource (..)
   , GlyphAtlas (..)
-  , SdlFont (..)
   , SdlFontCache (..)
-  , attachFallback
   , closeEvictedFonts
   , destroyGlyphAtlas
   , destroySdlFontCache
@@ -59,12 +51,12 @@ import NanoUI.Ttf.Internal.Font
   , sdlFontCacheMonoSource
   , sdlFontCacheSource
   , ttfCloseFont
-  , ttfHasGlyph
   , ttfIsBoldOf
   , ttfOpenFont
   , withSdlFontCache
   )
 import NanoUI.Ttf.Internal.Font qualified as Ttf
+import NanoUI.Ttf.Internal.Support (CoveragePool, closeCoveragePool, ensurePoolCoverage, newCoveragePool)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import System.IO.Unsafe (unsafePerformIO)
 import System.Info (os)
@@ -106,10 +98,10 @@ newSdlFontCache sans mono ga basePt scaleRef = do
 desktopHooks :: FontHooks
 desktopHooks =
   FontHooks
-    { fhEnsureCoverage = ensureCoverage
+    { fhEnsureCoverage = ensurePoolCoverage desktopCoveragePool
     , fhBoldSource = \_ _ -> pure Nothing
     , fhPathEncoding = sdlPathEncoding
-    , fhOnTtfQuit = closeCoverageProbes
+    , fhOnTtfQuit = closeCoveragePool desktopCoveragePool
     }
 
 -- | The encoding of paths SDL takes and gives: UTF-8 (with roundtrip) on
@@ -138,57 +130,16 @@ findBoldFace boldFacesRef src getRegular = case src of
     firstM _ [] = pure Nothing
     firstM p (x : xs) = p x >>= \ok -> if ok then pure (Just x) else firstM p xs
 
--- | Open fallback fonts covering characters this face lacks.
-ensureCoverage :: SdlFont -> Text -> IO ()
-ensureCoverage sf txt =
-  unless (T.isAscii txt) $
-    forM_ (T.unpack txt) $ \c ->
-      when (ord c >= 128 && isPrint c) $ do
-        has <- ttfHasGlyph (sfFont sf) (fromIntegral (ord c))
-        unless has $ coverageSourceFor c >>= traverse_ (uncurry (attachFallback sf))
-
-data Coverage = Coverage
-  { covSources :: !(SmallArray SBS.ShortByteString)
-  , covProbes :: !(IM.IntMap (Ptr ()))
-  , covChars :: !(IM.IntMap (Maybe Int))
-  }
-
-{-# NOINLINE coverageRef #-}
-coverageRef :: IORef (Maybe Coverage)
-coverageRef = unsafePerformIO (newIORef Nothing)
-
-coverageSourceFor :: Char -> IO (Maybe (Int, Ptr ()))
-coverageSourceFor c = do
-  cov <- readIORef coverageRef >>= maybe findSources pure
-  let cp = ord c
-      search probes i
-        | i >= sizeofSmallArray (covSources cov) = pure (Nothing, probes)
-        | otherwise = do
-            let open = SBS.useAsCString (indexSmallArray (covSources cov) i) (`ttfOpenFont` 12)
-            probe <- maybe open pure (IM.lookup i probes)
-            has <- if probe == nullPtr then pure False else ttfHasGlyph probe (fromIntegral cp)
-            let probes' = IM.insert i probe probes
-            if has then pure (Just i, probes') else search probes' (i + 1)
-  (source, probes) <- case IM.lookup cp (covChars cov) of
-    Just known -> pure (known, covProbes cov)
-    Nothing -> do
-      found@(first, opened) <- search (covProbes cov) 0
-      found <$ writeIORef coverageRef (Just cov {covProbes = opened, covChars = IM.insert cp first (covChars cov)})
-  pure (source >>= \i -> (i,) <$> IM.lookup i probes)
+{-# NOINLINE desktopCoveragePool #-}
+desktopCoveragePool :: CoveragePool SBS.ShortByteString
+desktopCoveragePool =
+  unsafePerformIO $
+    newCoveragePool findSources (\path -> SBS.useAsCString path (`ttfOpenFont` 12))
   where
     findSources = do
       files <- searchFontFamilies coverageFamilies `catch` \(_ :: IOException) -> pure []
       enc <- sdlPathEncoding
-      sources <- forM files $ \path -> GHC.withCStringLen enc path (fmap SBS.toShort . BS.packCStringLen)
-      pure (Coverage (smallArrayFromList sources) IM.empty IM.empty)
-
-closeCoverageProbes :: IO ()
-closeCoverageProbes =
-  readIORef coverageRef >>= \case
-    Nothing -> pure ()
-    Just cov -> do
-      forM_ (covProbes cov) $ \probe -> unless (probe == nullPtr) (ttfCloseFont probe)
-      writeIORef coverageRef (Just cov {covProbes = IM.empty, covChars = IM.empty})
+      forM files $ \path -> GHC.withCStringLen enc path (fmap SBS.toShort . BS.packCStringLen)
 
 coverageFamilies :: [String]
 coverageFamilies =

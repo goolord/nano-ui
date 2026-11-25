@@ -86,7 +86,7 @@ explainFrame ctx@Context {ctxNodeArena = na} inp = do
   when (hover /= prevHover) $ do
     mapM_ (damageRect ctx) (prevHover >>= highlight)
     mapM_ (damageRect ctx) (hover >>= highlight)
-    markDirtyCovered ctx
+    markDirty ctx
   modifyIORef' (ctxExplain ctx) (\es -> es {esLayers = layers, esHover = hover})
 
 -- | The 'esLayers' key for the page's outlines. It cannot be 0, since node 0

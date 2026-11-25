@@ -10,7 +10,6 @@ module NanoUI.Internal.Draw.Arena
   , setDrawSnapScale
   , getDrawSnapScale
   , setDrawPixelScale
-  , getDrawPixelScale
   , setDrawSquareGeometry
   , setDrawExternalText
   , setDrawClear
@@ -206,10 +205,6 @@ getDrawSnapScale da = readIORef (daSnapScale da)
 {-# INLINE setDrawPixelScale #-}
 setDrawPixelScale :: DrawArena -> Float -> IO ()
 setDrawPixelScale da s = writeIORef (daPixelScale da) (if s > 0 then s else 1.0)
-
-{-# INLINE getDrawPixelScale #-}
-getDrawPixelScale :: DrawArena -> IO Float
-getDrawPixelScale da = readIORef (daPixelScale da)
 
 -- | Square geometry for hosts that draw flat, axis-aligned fills, such as the
 -- RGFW backend. Rounded rects, circles and their strokes lower to
@@ -442,7 +437,9 @@ switchShader da sh = do
 -- | Append one shader call's 48-byte system header and user std140 uniform
 -- bytes into the draw arena, returning its 1-based 'ShaderCall' index.
 {-# NOINLINE allocShaderCall #-}
-allocShaderCall ::
+-- | Pack system + user uniforms for @pass@ into 'daUniformBuf' and return the
+-- resulting 'ShaderCall' without appending it to 'daShaderCalls'.
+packShaderCall ::
   DrawArena ->
   PackedShaderPass ->
   Rect ->
@@ -451,8 +448,8 @@ allocShaderCall ::
   Float ->
   Float ->
   Float ->
-  IO Int32
-allocShaderCall da pass nodeRect uvRect scale radius tw th = do
+  IO ShaderCall
+packShaderCall da pass nodeRect uvRect scale radius tw th = do
   let userBytes = pspUniforms pass
       !userLen = sizeofByteArray userBytes
       !totalLen = alignUp 16 (sysUniformBytes + userLen)
@@ -470,13 +467,26 @@ allocShaderCall da pass nodeRect uvRect scale radius tw th = do
   pokeSysUniforms nodeRect uvRect scale radius tw th buf off
   when (userLen > 0) $ copyByteArray buf (off + sysUniformBytes) userBytes 0 userLen
   writeIORef (daUniformLen da) (off + totalLen)
-  let !call =
-        ShaderCall
-          { scHash = pspHash pass
-          , scProgram = pspProgram pass
-          , scUniformOffset = off
-          , scUniformLength = totalLen
-          }
+  pure
+    ShaderCall
+      { scHash = pspHash pass
+      , scProgram = pspProgram pass
+      , scUniformOffset = off
+      , scUniformLength = totalLen
+      }
+
+allocShaderCall ::
+  DrawArena ->
+  PackedShaderPass ->
+  Rect ->
+  Rect ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  IO Int32
+allocShaderCall da pass nodeRect uvRect scale radius tw th = do
+  !call <- packShaderCall da pass nodeRect uvRect scale radius tw th
   idx <- (+ 1) <$> readIORef (daShaderCallCount da)
   writeIORef (daShaderCallCount da) idx
   modifyIORef' (daShaderCalls da) (call :)
@@ -530,11 +540,11 @@ beginEffectSpan da bounds margin = do
   modifyIORef' (daEffectStack da) (esid :)
   pure (EffectSpanToken esid parent layer rawStart bounds clip margin)
 
--- | Close an open effect span, allocating one 'ShaderCall' per pass in
--- @passes@ and recording the span for 'finishDraw'.
+-- | Close an open effect span, packing one 'ShaderCall' per pass in @passes@
+-- and recording the span for 'finishDraw'.
 {-# NOINLINE endEffectSpan #-}
-endEffectSpan :: DrawArena -> EffectSpanToken -> [PackedShaderPass] -> Maybe Float -> IO ()
-endEffectSpan da tok passes svgOpacity = do
+endEffectSpan :: DrawArena -> EffectSpanToken -> [PackedShaderPass] -> IO ()
+endEffectSpan da tok passes = do
   flushCmd da
   rawEnd <- getCount da cmdCountSlot
   writeIORef (daNoMergeBefore da) rawEnd
@@ -544,13 +554,8 @@ endEffectSpan da tok passes svgOpacity = do
       V2 mx my = estMargin tok
       tw = bw + 2 * mx
       th = bh + 2 * my
-  calls <- forM passes $ \pass -> do
-    callIdx <- allocShaderCall da pass bounds (Rect 0 0 1 1) scale 0 tw th
-    -- Read back the ShaderCall just pushed at head of daShaderCalls.
-    headCall <- readIORef (daShaderCalls da)
-    pure $ case headCall of
-      (c : _) -> c
-      [] -> ShaderCall (pspHash pass) (pspProgram pass) 0 (fromIntegral callIdx)
+  calls <- forM passes $ \pass ->
+    packShaderCall da pass bounds (Rect 0 0 1 1) scale 0 tw th
   let !pes =
         PendingEffectSpan
           { pesId = estId tok
@@ -562,7 +567,6 @@ endEffectSpan da tok passes svgOpacity = do
           , pesClip = estClip tok
           , pesMargin = estMargin tok
           , pesPasses = smallArrayFromList calls
-          , pesSvgOpacity = svgOpacity
           }
   modifyIORef' (daEffectSpans da) (pes :)
 
@@ -588,14 +592,12 @@ finishDraw da = do
         pure (cs, offs, emptyEffectSpans)
       else finishWithEffects pieces arr0 count0 (reverse pendingEffects)
   callCount <- readIORef (daShaderCallCount da)
-  (shaderCalls, uniformBytes) <-
+  shaderCalls <-
     if callCount == 0
-      then pure (emptyShaderCalls, emptyUniformBytes)
-      else do
-        calls <- reverse <$> readIORef (daShaderCalls da)
-        uLen <- readIORef (daUniformLen da)
-        uBytes <- freezeUniformPrefix da uLen
-        pure (smallArrayFromList calls, uBytes)
+      then pure emptyShaderCalls
+      else smallArrayFromList . reverse <$> readIORef (daShaderCalls da)
+  uLen <- readIORef (daUniformLen da)
+  uniformBytes <- if uLen <= 0 then pure emptyUniformBytes else freezeUniformPrefix da uLen
   clear <- readIORef (daClear da)
   pure
     DrawData
@@ -654,22 +656,7 @@ finishWithEffects pieces arr0 count0 pending = do
                 v <- readPrimArray before (i * layers + l)
                 writePrimArray before ((i + 1) * layers + l) v
               cmd <- UM.unsafeRead arr0 i
-              let !cx0 = cmdClipX cmd
-                  !cy0 = cmdClipY cmd
-                  !cx1 = cx0 + cmdClipW cmd
-                  !cy1 = cy0 + cmdClipH cmd
-                  piece m' j = do
-                    let !o = j * 4
-                        !x0 = max cx0 (indexPrimArray pieces o)
-                        !y0 = max cy0 (indexPrimArray pieces (o + 1))
-                        !x1 = min cx1 (indexPrimArray pieces (o + 2))
-                        !y1 = min cy1 (indexPrimArray pieces (o + 3))
-                    if x1 <= x0 || y1 <= y0
-                      then pure m'
-                      else do
-                        UM.unsafeWrite dest m' cmd {cmdClipX = x0, cmdClipY = y0, cmdClipW = x1 - x0, cmdClipH = y1 - y0}
-                        pure (m' + 1)
-              mNext <- foldUpTo k piece m
+              mNext <- cutCmdAt pieces k dest m cmd
               let !emitted = mNext - m
                   !l = fromEnum (cmdLayer cmd)
               when (emitted > 0) $ do
@@ -697,9 +684,31 @@ finishWithEffects pieces arr0 count0 pending = do
         , esClip = pesClip pes
         , esMargin = pesMargin pes
         , esPasses = pesPasses pes
-        , esSvgOpacity = pesSvgOpacity pes
         }
   pure (cmds, offsets, smallArrayFromList spans)
+
+-- | Emit one copy of @cmd@ into @dest@ starting at @m@ for each disjoint clip
+-- piece in @pieces@ (count @k@) that intersects @cmd@'s clip, returning the
+-- next free index in @dest@.
+{-# INLINE cutCmdAt #-}
+cutCmdAt :: PrimArray Float -> Int -> U.MVector RealWorld DrawCmd -> Int -> DrawCmd -> IO Int
+cutCmdAt pieces !k dest !m cmd =
+  let !cx0 = cmdClipX cmd
+      !cy0 = cmdClipY cmd
+      !cx1 = cx0 + cmdClipW cmd
+      !cy1 = cy0 + cmdClipH cmd
+      piece m' j = do
+        let !o = j * 4
+            !x0 = max cx0 (indexPrimArray pieces o)
+            !y0 = max cy0 (indexPrimArray pieces (o + 1))
+            !x1 = min cx1 (indexPrimArray pieces (o + 2))
+            !y1 = min cy1 (indexPrimArray pieces (o + 3))
+        if x1 <= x0 || y1 <= y0
+          then pure m'
+          else do
+            UM.unsafeWrite dest m' cmd {cmdClipX = x0, cmdClipY = y0, cmdClipW = x1 - x0, cmdClipH = y1 - y0}
+            pure (m' + 1)
+   in foldUpTo k piece m
 
 -- | Each command once per piece its clip meets, clipped to that piece, in
 -- command order. Pieces are disjoint, so the order among one command's
@@ -707,31 +716,9 @@ finishWithEffects pieces arr0 count0 pending = do
 cutCmdsToPieces ::
   PrimArray Float -> U.MVector RealWorld DrawCmd -> Int -> IO (U.MVector RealWorld DrawCmd, Int)
 cutCmdsToPieces pieces src n = do
-  let
-    k = sizeofPrimArray pieces `quot` 4
+  let !k = sizeofPrimArray pieces `quot` 4
   dest <- UM.unsafeNew (max 1 (n * k))
-  let
-    cutCmd m i = do
-      cmd <- UM.unsafeRead src i
-      let
-        cx0 = cmdClipX cmd
-        cy0 = cmdClipY cmd
-        cx1 = cx0 + cmdClipW cmd
-        cy1 = cy0 + cmdClipH cmd
-        piece m' j = do
-          let
-            o = j * 4
-            x0 = max cx0 (indexPrimArray pieces o)
-            y0 = max cy0 (indexPrimArray pieces (o + 1))
-            x1 = min cx1 (indexPrimArray pieces (o + 2))
-            y1 = min cy1 (indexPrimArray pieces (o + 3))
-          if x1 <= x0 || y1 <= y0
-            then pure m'
-            else do
-              UM.unsafeWrite dest m' cmd {cmdClipX = x0, cmdClipY = y0, cmdClipW = x1 - x0, cmdClipH = y1 - y0}
-              pure (m' + 1)
-      foldUpTo k piece m
-  m <- foldUpTo n cutCmd 0
+  m <- foldUpTo n (\m' i -> UM.unsafeRead src i >>= cutCmdAt pieces k dest m') 0
   pure (dest, m)
 
 -- | Stable counting sort by layer, with cumulative offsets into the sorted

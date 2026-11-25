@@ -158,7 +158,7 @@ takeEscape = do
   if not (pressedOnceIn KeyEscape inp)
     then pure False
     else withContext $ \ctx -> do
-      reserved <- escapeReserved ctx inp
+      reserved <- escapeReserved ctx
       blocked <- pointerBlockedByModal ctx
       let ours = not reserved && not blocked
       when ours (markEscapeConsumed ctx)

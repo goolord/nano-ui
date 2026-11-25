@@ -153,7 +153,7 @@ paintWidget env@PaintEnv {peContext = ctx} idx nt rect@(Rect _ ry _ rh) = do
   -- text-field context menu painter: the hover fill and the accent marker
   -- span the panel width instead of the (padded) node rect.
   menuRowRect <-
-    if nt == NodeButton && hasFlag buttonFlagMenu si
+    if nt == NodeButton && buttonKindOf si == ButtonMenu
       then do
         let na = peNodeArena env
         panel <- walkFloatingAncestors na idx $ \p pnt ->
@@ -329,7 +329,7 @@ paintWidgetForeground env idx nt style si (Rect x y w h) = do
   (fm, native, _) <- resolveFontFor ctx nt fontSize si
   let !font = nodeFontBits nt si
       !widgetFg = labelColor (peTheme env) style font mFontColor
-      sortMark = if nt == NodeButton && hasFlag buttonFlagTable si then tableSortMarkOf si else 0
+      sortMark = if nt == NodeButton && buttonKindOf si == ButtonTable then tableSortMarkOf si else 0
   -- Table sort arrow: pinned inside the cell inset to the edge the label
   -- does not align to, the right edge for a left-aligned label and the left
   -- for a right-aligned one, in the lane the header keeps there

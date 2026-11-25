@@ -2,7 +2,9 @@
 -- a diagram.
 module NanoUI.Plot.Chrome
   ( chartDiagram
+  , chartDiagramWithTicks
   , chartMargins
+  , chartTicks
   , Margins (..)
   , seriesDomains
   , seriesPoints
@@ -109,8 +111,12 @@ chartMargins fm chart = ccMargins (chartChrome fm (snd (seriesDomains chart)) ch
 
 -- | Chrome for a chart whose y domain the caller has already computed.
 chartChrome :: FontMetrics -> Domain -> Chart -> ChartChrome
-chartChrome fm yDom chart =
-  let yLabels = map snd (niceTickLabels 6 yDom)
+chartChrome fm yDom = chartChromeWith fm (niceTickLabels 6 yDom)
+
+-- | Chrome for a chart whose y ticks the caller has already computed.
+chartChromeWith :: FontMetrics -> [(Double, T.Text)] -> Chart -> ChartChrome
+chartChromeWith fm yTicks chart =
+  let yLabels = map snd yTicks
       maxYW = maximum (0 : map (textWidth fm) yLabels)
       lh = fmLineHeight fm
       yTitleW = maybe 0 (textWidth fm) (chartYTitle chart)
@@ -207,16 +213,34 @@ seriesDomains chart = (xDom, fit yBounds)
       | Domain lo hi <- xBounds, lo > hi = slotDom
       | otherwise = mergeDomains slotDom (fit xBounds)
 
+-- | Compute X and Y axis tick labels once for a chart and its 'seriesDomains'.
+chartTicks :: (Domain, Domain) -> Chart -> ([(Double, T.Text)], [(Double, T.Text)])
+chartTicks (xDom, yDom) chart =
+  ( case [labels | Series {seriesData = CategoryY labels _} <- chartSeries chart] of
+      labels : _ -> zip [0 ..] (toList labels)
+      [] -> niceTickLabels 6 xDom
+  , niceTickLabels 6 yDom
+  )
+
 -- | Draw a chart from its 'seriesDomains' and each series' 'seriesPoints'.
 chartDiagram :: FontMetrics -> Theme -> PlotStyle -> (Domain, Domain) -> [U.Vector (Double, Double)] -> Chart -> Diagram B
-chartDiagram fm theme ps (xDom, yDom) points chart =
-  let chrome = chartChrome fm yDom chart
+chartDiagram fm theme ps domains points chart =
+  chartDiagramWithTicks fm theme ps domains (chartTicks domains chart) points chart
+
+-- | Draw a chart using precomputed '(xTicks, yTicks)' from 'chartTicks' so
+-- callers that also measure tick labels avoid recomputing them.
+chartDiagramWithTicks ::
+  FontMetrics ->
+  Theme ->
+  PlotStyle ->
+  (Domain, Domain) ->
+  ([(Double, T.Text)], [(Double, T.Text)]) ->
+  [U.Vector (Double, Double)] ->
+  Chart ->
+  Diagram B
+chartDiagramWithTicks fm theme ps (xDom, yDom) (xTicks, yTicks) points chart =
+  let chrome = chartChromeWith fm yTicks chart
       m = ccMargins chrome
-      -- A category series names its slots; other x axes are numbered.
-      xTicks = case [labels | Series {seriesData = CategoryY labels _} <- chartSeries chart] of
-        labels : _ -> zip [0 ..] (toList labels)
-        [] -> niceTickLabels 6 xDom
-      yTicks = niceTickLabels 6 yDom
       tickPad = ccTickPad chrome
       xTickPad = ccXTickPad chrome
       toX = domainToPlot xDom

@@ -96,7 +96,7 @@ useDrag (DragHandle ref) sources = do
     -- releasing on a plain click below threshold needs no full-window damage.
     when (isJust result || maybe False (\(DragState _ _ h) -> h) old) $ do
       damageFull ctx
-      markDirtyCovered ctx
+      markDirty ctx
   pure result
 
 -- | Insertion slot in an ordered row or column, bounded by its visible

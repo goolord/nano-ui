@@ -27,12 +27,20 @@ module NanoUI.SdlWeb.Internal.Host
     -- * Canvas facts
   , CanvasInfo (..)
   , queryCanvas
+    -- * Host UTF-8 helpers
+  , withUtf8
+  , readHostText
   ) where
 
+import qualified Data.ByteString as BS
+import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Data.Int (Int32)
+import Data.Text (Text)
+import qualified Data.Text.Encoding as TE
 import Data.Word (Word8)
+import Foreign.Marshal.Alloc (allocaBytes)
 import Foreign.Marshal.Array (allocaArray, peekArray)
-import Foreign.Ptr (Ptr)
+import Foreign.Ptr (Ptr, castPtr, nullPtr)
 #if defined(wasm32_HOST_ARCH)
 import Control.Exception (evaluate)
 import Control.Monad (void)
@@ -179,6 +187,25 @@ queryCanvas host = allocaArray 5 $ \p -> do
   peekArray 5 p >>= \case
     [w, h, ratio, focused, scheme] -> pure (CanvasInfo w h (if ratio > 0 then ratio else 1) (focused /= 0) (round scheme))
     _ -> pure (CanvasInfo 0 0 1 False 0)
+
+-- | Pass text to a host callback as UTF-8 bytes and their byte length.
+withUtf8 :: Text -> (Ptr Word8 -> Int -> IO a) -> IO a
+withUtf8 t k = unsafeUseAsCStringLen (TE.encodeUtf8 t) $ \(p, n) -> k (castPtr p) n
+
+-- | Read a UTF-8 string from a two-call host getter (first call queries the
+-- byte length; a negative result means unavailable).
+readHostText :: (Ptr Word8 -> Int -> IO Int) -> IO (Maybe Text)
+readHostText fetch = do
+  len <- fetch nullPtr 0
+  if len < 0
+    then pure Nothing
+    else if len == 0
+      then pure (Just "")
+      else allocaBytes len $ \buf -> do
+        n <- fetch buf len
+        if n < 0
+          then pure Nothing
+          else Just . TE.decodeUtf8Lenient <$> BS.packCStringLen (castPtr buf, min n len)
 
 -- | Whether 'browserHost' reaches a browser: a @wasm32@ build.
 browserAvailable :: Bool

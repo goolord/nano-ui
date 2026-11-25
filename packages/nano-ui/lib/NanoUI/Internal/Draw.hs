@@ -26,7 +26,6 @@ module NanoUI.Internal.Draw
   , setDrawSnapScale
   , getDrawSnapScale
   , setDrawPixelScale
-  , getDrawPixelScale
   , setDrawSquareGeometry
   , setDrawClear
   , getDrawClear

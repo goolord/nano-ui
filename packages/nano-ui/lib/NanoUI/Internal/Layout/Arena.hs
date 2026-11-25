@@ -80,10 +80,8 @@ module NanoUI.Internal.Layout.Arena
   , getPadding
   , parentIsRow
   , getAlignX
-  , getAlignY
   , readAlignX
   , readAlignY
-  , getItemsAlign
   , readItemsAlign
   , effectiveAlignX
   , effectiveAlignY

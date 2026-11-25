@@ -11,9 +11,7 @@
 -- collide.
 module NanoUI.Internal.Store.Slots
   ( -- * Text fields
-    slotCursor
-  , slotAnchor
-  , slotTextInputScroll
+    slotTextInputScroll
   , slotTextChanged
   , slotTextHistory
   , slotTextMode
@@ -95,16 +93,6 @@ setFlagSpec :: SlotSpec Bool -> Int -> Bool -> WidgetStore -> WidgetStore
 setFlagSpec spec k on = if on then insertSpec spec k True else deleteSpec spec k
 
 -- Text fields ----------------------------------------------------------------
-
--- | A single-line field's caret, as a character index ('fieldSelection').
-{-# INLINE slotCursor #-}
-slotCursor :: SlotSpec Int
-slotCursor = slotSpec SlotCursor fieldInt
-
--- | A single-line field's selection anchor ('fieldSelection').
-{-# INLINE slotAnchor #-}
-slotAnchor :: SlotSpec Int
-slotAnchor = slotSpec SlotAnchor fieldInt
 
 -- | A single-line field's horizontal text scroll.
 {-# INLINE slotTextInputScroll #-}

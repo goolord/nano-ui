@@ -10,7 +10,6 @@ module NanoUI.Internal.Font
   , wrapTextLinesIO
   , truncateTextIO
   , truncateTextMiddleIO
-  , truncateTextStartIO
   , truncateTextWithIO
   , truncateTextPure
   ) where
@@ -226,10 +225,6 @@ truncateTextIO = truncateTextEndM
 -- | Truncate @txt@ in the middle (@"prefix...suffix"@) if it exceeds @maxW@.
 truncateTextMiddleIO :: (Text -> IO Float) -> Float -> Text -> IO Text
 truncateTextMiddleIO = truncateTextMiddleM
-
--- | Truncate @txt@ at the start (@"...suffix"@) if it exceeds @maxW@.
-truncateTextStartIO :: (Text -> IO Float) -> Float -> Text -> IO Text
-truncateTextStartIO = truncateTextStartM
 
 -- | Truncate @txt@ according to an explicit 'TextEllipsis' mode.
 truncateTextWithIO :: TextEllipsis -> (Text -> IO Float) -> Float -> Text -> IO Text

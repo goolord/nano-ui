@@ -2,7 +2,7 @@
 module Cases.Table (tests) where
 
 import Spec
-import Data.Bits ((.&.))
+import Data.Bits ((.&.), shiftR)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
 import Data.List (nub, sort, sortOn)
@@ -583,7 +583,8 @@ headerButtonRects ctx = do
 isHeaderButton :: NodeArena -> NodeIdx -> IO Bool
 isHeaderButton na i = do
   nt <- getNodeType na i
-  if nt == NodeButton then (\si -> si .&. 0x80000000 /= 0) <$> getStyleIdx na i else pure False
+  -- ButtonTable = 3 in bits 24-27 (SB.buttonKind).
+  if nt == NodeButton then (\si -> (si `shiftR` 24) .&. 0xF == 3) <$> getStyleIdx na i else pure False
 
 -- | Bottom edge of the table pane: from the first header button, walk up to
 -- the enclosing panel and return its bottom Y.

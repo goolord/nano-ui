@@ -16,14 +16,15 @@ module NanoUI.SdlWeb.Internal.Fonts
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BSI
-import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Data.List (nub)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Foreign.Marshal.Alloc (allocaBytes)
-import Foreign.Ptr (castPtr, nullPtr)
-import NanoUI.SdlWeb.Internal.Host (WebHost (..))
+import Foreign.Ptr (castPtr)
+import NanoUI.SdlWeb.Internal.Host (WebHost (..), readHostText, withUtf8)
+import NanoUI.Ttf.Internal.Support (expandGenericFamily, normalizeFamily)
 
 -- | Where 'loadFontBytes' finds a font.
 data FontOrigin
@@ -58,8 +59,7 @@ findFontFamilies host = do
 loadFontBytes :: WebHost -> FontOrigin -> String -> IO (Maybe ByteString)
 loadFontBytes host origin name = do
   let kind = case origin of InstalledFamily -> 0; FontUrl -> 1; FamilyByName -> 2
-  n <- unsafeUseAsCStringLen (TE.encodeUtf8 (T.pack name)) $ \(p, len) ->
-    whLoadFont host kind (castPtr p) len
+  n <- withUtf8 (T.pack name) (whLoadFont host kind)
   if n <= 0
     then pure Nothing
     else Just <$> BSI.create n (whTakeFontBytes host)
@@ -67,31 +67,15 @@ loadFontBytes host origin name = do
 -- | The font families known so far: the installed ones the user has let
 -- the browser list, then the font service's catalogue, without repeats.
 knownFontFamilies :: WebHost -> IO [String]
-knownFontFamilies host = do
-  n <- whFontFamilies host nullPtr 0
-  if n <= 0
-    then pure []
-    else allocaBytes n $ \buf -> do
-      m <- whFontFamilies host buf n
-      names <- TE.decodeUtf8Lenient <$> BS.packCStringLen (castPtr buf, min n m)
-      pure (filter (not . null) (map T.unpack (T.lines names)))
+knownFontFamilies host =
+  maybe [] (filter (not . null) . map T.unpack . T.lines) <$> readHostText (whFontFamilies host)
 
 -- | The families a search tries for a name: the name itself, or for the
 -- generic CSS families (@sans-serif@, @serif@, @monospace@) the same common
 -- families nano-ui-sdl's search tries.
 searchCandidates :: String -> [String]
-searchCandidates name = case filter (`notElem` (" -_" :: String)) (T.unpack (T.toLower (T.pack name))) of
-  "sansserif" -> ["DejaVu Sans", "Liberation Sans", "Noto Sans", "Open Sans", "Helvetica Neue"]
-  "serif" -> ["DejaVu Serif", "Liberation Serif", "Noto Serif", "Times New Roman"]
-  "monospace" -> ["DejaVu Sans Mono", "Liberation Mono", "Ubuntu Mono", "Noto Sans Mono", "Consolas", "Courier New"]
-  _ -> [name]
+searchCandidates name = fromMaybe [name] (expandGenericFamily (normalizeFamily name))
 
 -- | The WebGL renderer's description, as the browser gives it.
 rendererName :: WebHost -> IO Text
-rendererName host = do
-  n <- whRendererInfo host nullPtr 0
-  if n <= 0
-    then pure "WebGL2"
-    else allocaBytes n $ \buf -> do
-      m <- whRendererInfo host buf n
-      TE.decodeUtf8Lenient <$> BS.packCStringLen (castPtr buf, min n m)
+rendererName host = fromMaybe "WebGL2" <$> readHostText (whRendererInfo host)

@@ -30,7 +30,7 @@ import NanoUI.Internal.Layout.Arena (NodeType (..), addNodeFromLayout, flowChild
 import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, uiTheme, withContext)
 import NanoUI.Internal.Style (Direction (..), Layout (..), LayoutModifier, Style (..), Theme (..), defaultLayout, gap, inheritFont, tight)
 import NanoUI.Internal.Types (Color)
-import NanoUI.Internal.WidgetText (buttonFlagContent, containerFlagButtonGroup)
+import NanoUI.Internal.WidgetText (ButtonKind (..), buttonFlagContent, buttonKindOf, containerFlagButtonGroup)
 import NanoUI.Internal.Widgets.Adornment (Adornments, adornButton, adornmentRow, icon, leading)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx)
 import NanoUI.Internal.Widgets.Node (Response, currentParent, respClicked, respId, withContainerNode, withWidgetChildren)
@@ -144,7 +144,8 @@ buttonContentWith' f content = do
 -- @flags@, as a table's header passes them.
 buttonContentStyled :: Float -> Word64 -> Layout -> NanoUI () -> NanoUI Response
 buttonContentStyled styleIx flags lay content = do
-  resp <- buttonStyledEx True "" styleIx lay (flags .|. buttonFlagContent)
+  let kindFlags = if buttonKindOf flags == ButtonPlain then flags .|. buttonFlagContent else flags
+  resp <- buttonStyledEx True "" styleIx lay kindFlags
   theme <- uiTheme
   -- The content is the button's one child, which lays out and paints as an
   -- adornment beside an empty label does.

@@ -26,9 +26,8 @@ import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import Data.Word (Word8)
-import Foreign.Ptr (Ptr, castPtr)
-import NanoUI.SdlWeb.Internal.Host (WebHost (..), browserAvailable, browserHost)
+import Foreign.Ptr (castPtr)
+import NanoUI.SdlWeb.Internal.Host (WebHost (..), browserAvailable, browserHost, withUtf8)
 
 -- | A file type to offer, as nano-ui-sdl's dialogs take it.
 data FileFilter = FileFilter
@@ -114,9 +113,6 @@ decodePicked buf
 -- and its extension list.
 filterLines :: [FileFilter] -> Text
 filterLines = T.intercalate "\n" . map (\f -> filterName f <> "\t" <> filterPattern f)
-
-withUtf8 :: Text -> (Ptr Word8 -> Int -> IO a) -> IO a
-withUtf8 t k = unsafeUseAsCStringLen (TE.encodeUtf8 t) $ \(p, n) -> k (castPtr p) n
 
 -- | Let the user choose files, and read them; 'Nothing' when they
 -- cancelled, or outside a browser. Run it from a task a press starts.

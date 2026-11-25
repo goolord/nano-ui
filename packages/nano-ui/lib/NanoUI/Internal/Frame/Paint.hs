@@ -97,17 +97,7 @@ paintNodeWithEnv :: PaintEnv -> NodeIdx -> IO ()
 paintNodeWithEnv env idx = do
   Rect x y w h <- getNodeRect (peNodeArena env) idx
   Rect cx cy cw ch <- currentClip (peDrawArena env)
-  let !l = max (x - paintOverhang) cx
-      !t = max (y - paintOverhang) cy
-      !r = min (x + w + paintOverhang) (cx + cw)
-      !b = min (y + h + paintOverhang) (cy + ch)
-      -- An opaque floating panel covers the clipped rect, or there are damage
-      -- pieces and it meets none of them.
-      occluded = anyRun (peOccluders env) $ \x0 y0 x1 y1 -> l >= x0 && t >= y0 && r <= x1 && b <= y1
-      missesPieces =
-        sizeofPrimArray (pePieces env) > 0
-          && not (anyRun (pePieces env) $ \x0 y0 x1 y1 -> l < x1 && t < y1 && r > x0 && b > y0)
-  if w <= 0 || h <= 0 || r <= l || b <= t || occluded || missesPieces
+  if w <= 0 || h <= 0 || not (rectVisible env x y w h paintOverhang paintOverhang cx cy cw ch)
     then
       if peHasEffects env && w > 0 && h > 0
         then paintSkippedWithEffects env idx x y w h cx cy cw ch
@@ -121,12 +111,7 @@ paintNodeWithEnv env idx = do
                 walkChildrenWithOccluders env idx
     else do
       nt <- getNodeType (peNodeArena env) idx
-      scope <- (.&. complement 2) <$> getNodeScope (peNodeArena env) idx
-      if scope == peScope env
-        then lowerNodeVisible env idx nt (Rect x y w h)
-        else do
-          theme <- scopeTheme (peContext env) scope
-          lowerNodeVisible env {peTheme = theme, peScope = scope} idx nt (Rect x y w h)
+      lowerScoped env idx nt (Rect x y w h)
 
 -- | Handle a culled node on frames that contain Tier 2 shader effect
 -- containers: re-check effect containers using their bleed margin
@@ -147,24 +132,8 @@ paintSkippedWithEffects env idx !x !y !w !h !cx !cy !cw !ch = do
               let V2 mx my = seeMargin entry
                   !ox = max paintOverhang mx
                   !oy = max paintOverhang my
-                  !l = max (x - ox) cx
-                  !t = max (y - oy) cy
-                  !r = min (x + w + ox) (cx + cw)
-                  !b = min (y + h + oy) (cy + ch)
-                  occluded = anyRun (peOccluders env) $ \x0 y0 x1 y1 -> l >= x0 && t >= y0 && r <= x1 && b <= y1
-                  missesPieces =
-                    sizeofPrimArray (pePieces env) > 0
-                      && not (anyRun (pePieces env) $ \x0 y0 x1 y1 -> l < x1 && t < y1 && r > x0 && b > y0)
-              if r > l && b > t && not occluded && not missesPieces
-                then do
-                  scope <- (.&. complement 2) <$> getNodeScope (peNodeArena env) idx
-                  let !rect = Rect x y w h
-                  if scope == peScope env
-                    then lowerNodeVisible env idx nt rect
-                    else do
-                      theme <- scopeTheme (peContext env) scope
-                      lowerNodeVisible env {peTheme = theme, peScope = scope} idx nt rect
-                  pure True
+              if rectVisible env x y w h ox oy cx cy cw ch
+                then lowerScoped env idx nt (Rect x y w h) >> pure True
                 else pure False
             Nothing -> pure False
         else pure False
@@ -172,6 +141,34 @@ paintSkippedWithEffects env idx !x !y !w !h !cx !cy !cw !ch = do
       pinnedBelow <- hasPinnedBelow (peNodeArena env) idx
       when (pinnedBelow && not (hasFlag containerFlagClip si)) $
         walkChildrenWithOccluders env idx
+
+-- | Whether a node's box expanded by @(ox, oy)@ is visible within the clip,
+-- not covered by an opaque floating occluder, and meets at least one active
+-- damage piece.
+{-# INLINE rectVisible #-}
+rectVisible ::
+  PaintEnv -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> Bool
+rectVisible env !x !y !w !h !ox !oy !cx !cy !cw !ch =
+  let !l = max (x - ox) cx
+      !t = max (y - oy) cy
+      !r = min (x + w + ox) (cx + cw)
+      !b = min (y + h + oy) (cy + ch)
+      occluded = anyRun (peOccluders env) $ \x0 y0 x1 y1 -> l >= x0 && t >= y0 && r <= x1 && b <= y1
+      missesPieces =
+        sizeofPrimArray (pePieces env) > 0
+          && not (anyRun (pePieces env) $ \x0 y0 x1 y1 -> l < x1 && t < y1 && r > x0 && b > y0)
+   in r > l && b > t && not occluded && not missesPieces
+
+-- | Enter the node's theme scope (if different from 'peScope') and dispatch.
+{-# INLINE lowerScoped #-}
+lowerScoped :: PaintEnv -> NodeIdx -> NodeType -> Rect -> IO ()
+lowerScoped env idx nt !rect = do
+  scope <- (.&. complement 2) <$> getNodeScope (peNodeArena env) idx
+  if scope == peScope env
+    then lowerNodeVisible env idx nt rect
+    else do
+      theme <- scopeTheme (peContext env) scope
+      lowerNodeVisible env {peTheme = theme, peScope = scope} idx nt rect
 
 -- | Whether @p@ holds for any of the @x0, y0, x1, y1@ runs of @rects@.
 {-# INLINE anyRun #-}
@@ -285,7 +282,7 @@ paintEffectContainer env@PaintEnv {peContext = ctx, peDrawArena = da} idx rect s
     (True, Just entry) -> do
       tok <- beginEffectSpan da rect (seeMargin entry)
       drawKidsWithSvg entry
-      endEffectSpan da tok (seePasses entry) (seeSvgOpacity entry)
+      endEffectSpan da tok (seePasses entry)
     (_, Just entry) -> drawKidsWithSvg entry
     _ -> drawKids
 

@@ -7,7 +7,6 @@ module NanoUI.Internal.Context.Drawing
   , registerHoverZone
   , hoverZoneCrossed
   , registerDrawing
-  , lookupDrawing
   , cachedDrawingOps
   , cachedWidgetLayout
   , lookupDrawFitEnvelope
@@ -209,11 +208,6 @@ registerDrawing ctx wid content build =
   registerAt ctx wid $ \_ nc -> do
     when (null (ncDrawing nc)) (bumpPass ctx 2 1)
     pure nc {ncDrawing = Just (DrawingEntry content build)}
-
--- | The 'DrawingEntry' registered for the widget, if any.
-{-# INLINE lookupDrawing #-}
-lookupDrawing :: Context -> WidgetId -> IO (Maybe DrawingEntry)
-lookupDrawing ctx wid = ncDrawing <$> nodeCustomOf ctx wid
 
 -- | The 'DrawingEntry' registered on node @idx@, if any.
 {-# INLINE lookupDrawingAt #-}

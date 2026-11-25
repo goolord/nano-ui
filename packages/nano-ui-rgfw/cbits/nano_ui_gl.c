@@ -275,31 +275,38 @@ static GLuint ngl_compile(ngl_api* gl, GLenum type, const char* src) {
   return shader;
 }
 
-static int ngl_link(nano_ui_gl* r) {
-  ngl_api* gl = &r->gl;
+static GLuint ngl_link_program(ngl_api* gl, const char* fragSrc, const char* errPrefix) {
   GLuint vs = ngl_compile(gl, GL_VERTEX_SHADER, ngl_vertex_src);
-  GLuint fs = vs ? ngl_compile(gl, GL_FRAGMENT_SHADER, ngl_fragment_src) : 0;
+  GLuint fs = vs ? ngl_compile(gl, GL_FRAGMENT_SHADER, fragSrc) : 0;
   GLint ok = 0;
   if (!fs) {
     if (vs) gl->DeleteShader(vs);
     return 0;
   }
-  r->program = gl->CreateProgram();
-  gl->AttachShader(r->program, vs);
-  gl->AttachShader(r->program, fs);
-  gl->BindAttribLocation(r->program, 0, "aPos");
-  gl->BindAttribLocation(r->program, 1, "aColor");
-  gl->BindAttribLocation(r->program, 2, "aUV");
-  gl->LinkProgram(r->program);
+  GLuint prog = gl->CreateProgram();
+  gl->AttachShader(prog, vs);
+  gl->AttachShader(prog, fs);
+  gl->BindAttribLocation(prog, 0, "aPos");
+  gl->BindAttribLocation(prog, 1, "aColor");
+  gl->BindAttribLocation(prog, 2, "aUV");
+  gl->LinkProgram(prog);
   gl->DeleteShader(vs);
   gl->DeleteShader(fs);
-  gl->GetProgramiv(r->program, GL_LINK_STATUS, &ok);
+  gl->GetProgramiv(prog, GL_LINK_STATUS, &ok);
   if (!ok) {
     char log[1024];
-    gl->GetProgramInfoLog(r->program, sizeof log, NULL, log);
-    fprintf(stderr, "nano-ui-rgfw: shader link failed: %s\n", log);
+    gl->GetProgramInfoLog(prog, sizeof log, NULL, log);
+    fprintf(stderr, "nano-ui-rgfw: %s: %s\n", errPrefix, log);
+    gl->DeleteProgram(prog);
     return 0;
   }
+  return prog;
+}
+
+static int ngl_link(nano_ui_gl* r) {
+  ngl_api* gl = &r->gl;
+  r->program = ngl_link_program(gl, ngl_fragment_src, "shader link failed");
+  if (!r->program) return 0;
   r->uViewport = gl->GetUniformLocation(r->program, "uViewport");
   r->uOrigin = gl->GetUniformLocation(r->program, "uOrigin");
   r->uScale = gl->GetUniformLocation(r->program, "uScale");
@@ -661,30 +668,9 @@ static ngl_shader_entry* ngl_get_shader(nano_ui_gl* r, uint64_t hash, const char
   srcCopy[fragLen] = '\0';
 
   ngl_api* gl = &r->gl;
-  GLuint vs = ngl_compile(gl, GL_VERTEX_SHADER, ngl_vertex_src);
-  GLuint fs = vs ? ngl_compile(gl, GL_FRAGMENT_SHADER, srcCopy) : 0;
+  GLuint prog = ngl_link_program(gl, srcCopy, "custom shader link failed");
   free(srcCopy);
-  if (!fs) {
-    if (vs) gl->DeleteShader(vs);
-    entry->failed = 1;
-    return entry;
-  }
-  GLuint prog = gl->CreateProgram();
-  gl->AttachShader(prog, vs);
-  gl->AttachShader(prog, fs);
-  gl->BindAttribLocation(prog, 0, "aPos");
-  gl->BindAttribLocation(prog, 1, "aColor");
-  gl->BindAttribLocation(prog, 2, "aUV");
-  gl->LinkProgram(prog);
-  gl->DeleteShader(vs);
-  gl->DeleteShader(fs);
-  GLint ok = 0;
-  gl->GetProgramiv(prog, GL_LINK_STATUS, &ok);
-  if (!ok) {
-    char log[1024];
-    gl->GetProgramInfoLog(prog, sizeof log, NULL, log);
-    fprintf(stderr, "nano-ui-rgfw: custom shader link failed: %s\n", log);
-    gl->DeleteProgram(prog);
+  if (!prog) {
     entry->failed = 1;
     return entry;
   }
@@ -700,6 +686,30 @@ static ngl_shader_entry* ngl_get_shader(nano_ui_gl* r, uint64_t hash, const char
   return entry;
 }
 
+static void ngl_bind_shader_uniforms(
+    nano_ui_gl* r, ngl_shader_entry* entry, float ox, float oy, float scale,
+    const void* uniformBytes, int32_t uniformLen) {
+  ngl_api* gl = &r->gl;
+  gl->UseProgram(entry->program);
+  if (entry->uViewport >= 0) gl->Uniform2f(entry->uViewport, (GLfloat)r->curW, (GLfloat)r->curH);
+  if (entry->uOrigin >= 0) gl->Uniform2f(entry->uOrigin, ox, oy);
+  if (entry->uScale >= 0) gl->Uniform1f(entry->uScale, scale);
+  if (entry->uInput >= 0) gl->Uniform1i(entry->uInput, 0);
+  if (uniformLen > 0 && uniformBytes != NULL) {
+    gl->BindBuffer(GL_UNIFORM_BUFFER, r->shaderUbo);
+    gl->BufferData(GL_UNIFORM_BUFFER, (GLsizeiptr)uniformLen, uniformBytes, GL_STREAM_DRAW);
+    gl->BindBufferBase(GL_UNIFORM_BUFFER, 0, r->shaderUbo);
+  }
+}
+
+static void ngl_restore_default(nano_ui_gl* r) {
+  ngl_api* gl = &r->gl;
+  gl->UseProgram(r->program);
+  gl->Uniform2f(r->uViewport, (GLfloat)r->curW, (GLfloat)r->curH);
+  gl->Uniform2f(r->uOrigin, r->originX, r->originY);
+  r->mode = NGL_MODE_NONE;
+}
+
 /* Draw one shader-backed geometry command with its std140 uniform block bound
  * at UBO binding 0, then restore the default renderer program. */
 int32_t nano_ui_gl_draw_shader(nano_ui_gl* r, int32_t x0, int32_t y0, int32_t x1, int32_t y1,
@@ -709,25 +719,13 @@ int32_t nano_ui_gl_draw_shader(nano_ui_gl* r, int32_t x0, int32_t y0, int32_t x1
   ngl_shader_entry* entry = ngl_get_shader(r, hash, fragSrc, fragLen);
   if (entry == NULL || entry->failed || entry->program == 0) return 0;
   ngl_api* gl = &r->gl;
-  gl->UseProgram(entry->program);
-  if (entry->uViewport >= 0) gl->Uniform2f(entry->uViewport, (GLfloat)r->curW, (GLfloat)r->curH);
-  if (entry->uOrigin >= 0) gl->Uniform2f(entry->uOrigin, r->originX, r->originY);
-  if (entry->uScale >= 0) gl->Uniform1f(entry->uScale, r->scale);
-  if (entry->uInput >= 0) gl->Uniform1i(entry->uInput, 0);
-  if (uniformLen > 0 && uniformBytes != NULL) {
-    gl->BindBuffer(GL_UNIFORM_BUFFER, r->shaderUbo);
-    gl->BufferData(GL_UNIFORM_BUFFER, (GLsizeiptr)uniformLen, uniformBytes, GL_STREAM_DRAW);
-    gl->BindBufferBase(GL_UNIFORM_BUFFER, 0, r->shaderUbo);
-  }
+  ngl_bind_shader_uniforms(r, entry, r->originX, r->originY, r->scale, uniformBytes, uniformLen);
   gl->BindVertexArray(r->geomVao);
   gl->Enable(GL_SCISSOR_TEST);
   gl->Scissor(x0, r->curH - y1, x1 - x0, y1 - y0);
   gl->DrawElements(GL_TRIANGLES, (GLsizei)indexCount, GL_UNSIGNED_INT,
                    (const void*)((uintptr_t)firstIndex * NGL_INDEX_BYTES));
-  gl->UseProgram(r->program);
-  gl->Uniform2f(r->uViewport, (GLfloat)r->curW, (GLfloat)r->curH);
-  gl->Uniform2f(r->uOrigin, r->originX, r->originY);
-  r->mode = NGL_MODE_NONE;
+  ngl_restore_default(r);
   return 1;
 }
 
@@ -833,12 +831,9 @@ int32_t nano_ui_gl_bind_target(nano_ui_gl* r, int32_t slot, int32_t clearTranspa
     gl->ClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     gl->Clear(GL_COLOR_BUFFER_BIT);
   }
-  gl->UseProgram(r->program);
-  gl->Uniform2f(r->uViewport, (GLfloat)r->curW, (GLfloat)r->curH);
-  gl->Uniform2f(r->uOrigin, r->originX, r->originY);
   gl->ActiveTexture(GL_TEXTURE0);
   gl->BindTexture(GL_TEXTURE_2D, r->atlas);
-  r->mode = NGL_MODE_NONE;
+  ngl_restore_default(r);
   return 1;
 }
 
@@ -893,21 +888,11 @@ int32_t nano_ui_gl_composite_effect(
     gl->ActiveTexture(GL_TEXTURE0);
     gl->BlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
     gl->Disable(GL_SCISSOR_TEST);
-    gl->Uniform2f(r->uOrigin, r->originX, r->originY);
     gl->Uniform1f(r->uScale, r->scale);
-    r->mode = NGL_MODE_NONE;
+    ngl_restore_default(r);
     return 1;
   }
-  gl->UseProgram(entry->program);
-  if (entry->uViewport >= 0) gl->Uniform2f(entry->uViewport, (GLfloat)r->curW, (GLfloat)r->curH);
-  if (entry->uOrigin >= 0) gl->Uniform2f(entry->uOrigin, 0.0f, 0.0f);
-  if (entry->uScale >= 0) gl->Uniform1f(entry->uScale, 1.0f);
-  if (entry->uInput >= 0) gl->Uniform1i(entry->uInput, 0);
-  if (uniformLen > 0 && uniformBytes != NULL) {
-    gl->BindBuffer(GL_UNIFORM_BUFFER, r->shaderUbo);
-    gl->BufferData(GL_UNIFORM_BUFFER, (GLsizeiptr)uniformLen, uniformBytes, GL_STREAM_DRAW);
-    gl->BindBufferBase(GL_UNIFORM_BUFFER, 0, r->shaderUbo);
-  }
+  ngl_bind_shader_uniforms(r, entry, 0.0f, 0.0f, 1.0f, uniformBytes, uniformLen);
   gl->ActiveTexture(GL_TEXTURE0);
   gl->BindTexture(GL_TEXTURE_2D, r->targets[srcSlot].tex);
   /* Always blend with straight-alpha-to-premultiplied (SRC_ALPHA, 1-SRC_ALPHA,
@@ -922,9 +907,6 @@ int32_t nano_ui_gl_composite_effect(
   gl->Enable(GL_BLEND);
   gl->Disable(GL_SCISSOR_TEST);
   gl->BindTexture(GL_TEXTURE_2D, r->atlas);
-  gl->UseProgram(r->program);
-  gl->Uniform2f(r->uViewport, (GLfloat)r->curW, (GLfloat)r->curH);
-  gl->Uniform2f(r->uOrigin, r->originX, r->originY);
-  r->mode = NGL_MODE_NONE;
+  ngl_restore_default(r);
   return 1;
 }

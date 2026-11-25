@@ -146,7 +146,7 @@ import NanoUI.Internal.Style
 import NanoUI.Internal.Types
 import NanoUI.Internal.Var (Binding (..), bindVar, bindVarBy)
 import NanoUI.Internal.Var.Types (Var)
-import NanoUI.Internal.Widgets.Behavior (leftPress, navStep, useKeyNav)
+import NanoUI.Internal.Widgets.Behavior (dragPressLive, leftPress, navStep, useKeyNav)
 import NanoUI.Internal.Widgets.Combinators (finishInput, finishToggle)
 import NanoUI.Internal.Widgets.Node
 import NanoUI.Internal.Widgets.Animate (wakeAfter)
@@ -368,7 +368,7 @@ drag2DFrom bounds onIt = do
       mouse = inputMousePos inp
   store <- liftIO (getStore ctx)
   let held = findSpec slotDragPress 0 key store
-  active0 <- if held == 0 then pure False else (== held) <$> liftIO (leftPress ctx)
+  active0 <- liftIO (dragPressLive ctx key store)
   let active = heldIn MouseLeft inp && (active0 || (pressedIn MouseLeft inp && onIt))
       prev = findSpec slotDragPoint mouse key store
       delta = if active && active0 then v2Sub mouse prev else V2 0 0

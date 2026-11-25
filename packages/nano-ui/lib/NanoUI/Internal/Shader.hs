@@ -108,8 +108,6 @@ data ShaderProgram = ShaderProgram
   -- ^ SPIR-V 1.0 fragment binary (@nano-ui-sdl@ Vulkan via SDL 3.4 GPU).
   , spMsl :: Maybe Text
   -- ^ Metal Shading Language fragment source (@nano-ui-sdl@ Metal).
-  , spDxil :: Maybe ByteString
-  -- ^ Optional precompiled DXIL fragment binary.
   , spNeedsTex :: !Bool
   -- ^ Whether the fragment shader samples the input texture (@uInput@).
   , spUniformLayout :: ![UniformField]
@@ -127,7 +125,6 @@ emptyShaderProgram =
     , spGlslEs300 = Nothing
     , spSpirv = Nothing
     , spMsl = Nothing
-    , spDxil = Nothing
     , spNeedsTex = False
     , spUniformLayout = []
     , spUniformBytes = 0
@@ -144,8 +141,7 @@ hashShaderProgram sp =
       h4 = maybe h3 (mixBytes h3 . TE.encodeUtf8) (spGlslEs300 sp)
       h5 = maybe h4 (mixBytes h4) (spSpirv sp)
       h6 = maybe h5 (mixBytes h5 . TE.encodeUtf8) (spMsl sp)
-      h7 = maybe h6 (mixBytes h6) (spDxil sp)
-   in if h7 == 0 then 1 else h7
+   in if h6 == 0 then 1 else h6
   where
     mixByte :: Word64 -> Word8 -> Word64
     mixByte !h !b = (h `xor` fromIntegral b) * 0x100000001b3
@@ -310,7 +306,6 @@ data ShaderNodeEntry = ShaderNodeEntry
   , sneCornerRadius :: {-# UNPACK #-} !Float
   , sneFallback :: {-# UNPACK #-} !Color
   , sneTint :: {-# UNPACK #-} !Color
-  , sneCpuEval :: !(Maybe CpuShaderEval)
   }
 
 -- | Registration attached to a shaded 'NodeContainer' in

@@ -889,15 +889,21 @@ foldChildDimsFromParent env@SolveEnv {seArena = na} idx dir gap = do
       pure $ case dir of
         DirRow -> FlowAcc (count + 1) (along + w) (max across h)
         DirColumn -> FlowAcc (count + 1) (along + h) (max across w)
-    baselineStep pItems acc@(FlowAcc _ above below) ci = do
-      ay <- effectiveAlignY (seArrays env) pItems ci
-      hTag <- readTagEnum (seArrays env) ci TagHSizing
-      if ay /= AlignBaseline || hTag == SizingGrow
-        then pure acc
-        else do
-          Rect _ _ _ h <- getNodeRect na ci
-          b <- childBaseline env ci h
-          pure (FlowAcc 0 (max above b) (max below (h - b)))
+    baselineStep pItems (FlowAcc _ above below) ci = do
+      Rect _ _ _ h <- getNodeRect na ci
+      (above', below') <- accumulateBaseline env pItems (above, below) ci h
+      pure (FlowAcc 0 above' below')
+
+-- | Fold a row child @(ci, h)@ into the @(maxAscent, maxDescent)@ baseline
+-- envelope when it aligns to the baseline and does not grow vertically.
+{-# INLINE accumulateBaseline #-}
+accumulateBaseline :: SolveEnv -> ItemsAlign -> (Float, Float) -> NodeIdx -> Float -> IO (Float, Float)
+accumulateBaseline env@SolveEnv {seArrays = a} pItems acc@(!above, !below) ci h = do
+  ay <- effectiveAlignY a pItems ci
+  hTag <- readTagEnum a ci TagHSizing
+  if ay /= AlignBaseline || hTag == SizingGrow
+    then pure acc
+    else (\b -> (max above b, max below (h - b))) <$> childBaseline env ci h
 
 -- | Content size of wrapping container @idx@ ('Wrap'), with lines along
 -- @dir@ at most @bound@ long ('wrapExtent').
@@ -948,17 +954,11 @@ wrapExtent env idx dir gap limit kids = do
 -- the tallest ascent plus the deepest descent among baseline-aligned
 -- children, as in 'foldChildDimsFromParent'.
 wrapLineCross :: SolveEnv -> DirTag -> ItemsAlign -> [(NodeIdx, (Float, Float))] -> IO Float
-wrapLineCross env@SolveEnv {seArrays = a} dir pItems line = do
+wrapLineCross env dir pItems line = do
   let across = foldl' (\m (_, (w, h)) -> max m (if dir == DirRow then h else w)) 0 line
-      baselineStep acc@(!above, !below) (ci, (_, h)) = do
-        ay <- effectiveAlignY a pItems ci
-        hTag <- readTagEnum a ci TagHSizing
-        if ay /= AlignBaseline || hTag == SizingGrow
-          then pure acc
-          else (\b -> (max above b, max below (h - b))) <$> childBaseline env ci h
   if dir /= DirRow
     then pure across
-    else (\(above, below) -> max across (above + below)) <$> foldM baselineStep (0, 0) line
+    else (\(above, below) -> max across (above + below)) <$> foldM (\acc (ci, (_, h)) -> accumulateBaseline env pItems acc ci h) (0, 0) line
 
 -- | Content size of grid @idx@ with @gCols@ columns, or else as many
 -- @minColW@ wide as fit in @innerMaxW@.
@@ -1196,13 +1196,7 @@ lineHeightAt env@SolveEnv {seArena = na, seArrays = a} pItems kids avail gap = d
         then pure Nothing
         else do
           let across = foldl' (\m (_, h) -> max m h) 0 hs
-              baselineStep acc@(!above, !below) (ci, h) = do
-                ay <- effectiveAlignY a pItems ci
-                hTag <- readTagEnum a ci TagHSizing
-                if ay /= AlignBaseline || hTag == SizingGrow
-                  then pure acc
-                  else (\b -> (max above b, max below (h - b))) <$> childBaseline env ci h
-          (above, below) <- foldM baselineStep (0, 0) hs
+          (above, below) <- foldM (\acc (ci, h) -> accumulateBaseline env pItems acc ci h) (0, 0) hs
           pure (Just (max across (above + below)))
 
 -- | The height row child @ci@ comes out when its row gives it @share@ of
@@ -1420,7 +1414,7 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a} ci h = do
           pure (textBaseline fm (if wrapped then fmLineHeight fm else h))
     -- A close button's cross is no label.
     NodeButton
-      | hasFlag buttonFlagClose si -> pure h
+      | buttonKindOf si == ButtonClose -> pure h
       | otherwise -> label
     NodeSelect -> label
     NodeTextInput -> label

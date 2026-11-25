@@ -498,6 +498,24 @@ static NanoUiGpuShaderEntry *get_gpu_shader(
     entry->state = state;
     return entry;
 }
+/* Upload fragment uniform bytes (if any) to entry->state and activate it on
+ * batch->renderer. Returns 1 on success, 0 on failure. */
+static int bind_gpu_shader_state(
+    NanoUiBatch *batch, NanoUiGpuShaderEntry *entry,
+    const uint8_t *uniform_bytes, int uniform_len)
+{
+    if (uniform_len > 0 && uniform_bytes != NULL) {
+        if (!SDL_SetGPURenderStateFragmentUniforms(entry->state, 0u, uniform_bytes, (Uint32)uniform_len)) {
+            fprintf(stderr, "nano-ui-sdl: SDL_SetGPURenderStateFragmentUniforms failed: %s\n", SDL_GetError());
+            return 0;
+        }
+    }
+    if (!SDL_SetGPURenderState(batch->renderer, entry->state)) {
+        fprintf(stderr, "nano-ui-sdl: SDL_SetGPURenderState failed: %s\n", SDL_GetError());
+        return 0;
+    }
+    return 1;
+}
 #endif
 
 /* Flush pending geometry and draw one shader-backed index range via SDL 3.4's
@@ -535,12 +553,6 @@ int nano_ui_batch_draw_shader(
     if (!entry || entry->failed || !entry->state) {
         return 0;
     }
-    if (uniform_len > 0 && uniform_bytes != NULL) {
-        if (!SDL_SetGPURenderStateFragmentUniforms(entry->state, 0u, uniform_bytes, (Uint32)uniform_len)) {
-            fprintf(stderr, "nano-ui-sdl: SDL_SetGPURenderStateFragmentUniforms failed: %s\n", SDL_GetError());
-            return 0;
-        }
-    }
     /* Always pass a valid texture so SDL's GPU renderer selects its textured
      * vertex pipeline (providing both location 0 v_color and location 1 v_uv). */
     SDL_Texture *tex = texture ? texture : ensure_white_tex(batch);
@@ -561,8 +573,7 @@ int nano_ui_batch_draw_shader(
             return 0;
         }
     }
-    if (!SDL_SetGPURenderState(batch->renderer, entry->state)) {
-        fprintf(stderr, "nano-ui-sdl: SDL_SetGPURenderState failed: %s\n", SDL_GetError());
+    if (!bind_gpu_shader_state(batch, entry, uniform_bytes, uniform_len)) {
         return 0;
     }
     bool ok = SDL_RenderGeometryRaw(
@@ -724,18 +735,11 @@ int nano_ui_batch_composite_effect(
         SDL_SetTextureBlendMode(src_tex, SDL_BLENDMODE_BLEND);
         return ok ? 1 : 0;
     }
-    if (uniform_len > 0 && uniform_bytes != NULL) {
-        if (!SDL_SetGPURenderStateFragmentUniforms(entry->state, 0u, uniform_bytes, (Uint32)uniform_len)) {
-            fprintf(stderr, "nano-ui-sdl: effect uniform upload failed: %s\n", SDL_GetError());
-            return 0;
-        }
-    }
     /* Always blend with straight-alpha-to-premultiplied SDL_BLENDMODE_BLEND
      * so both intermediate offscreen targets (cleared to 0,0,0,0) and the
      * final composite stay in premultiplied offscreen space. */
     SDL_SetTextureBlendMode(src_tex, SDL_BLENDMODE_BLEND);
-    if (!SDL_SetGPURenderState(batch->renderer, entry->state)) {
-        fprintf(stderr, "nano-ui-sdl: SDL_SetGPURenderState failed: %s\n", SDL_GetError());
+    if (!bind_gpu_shader_state(batch, entry, uniform_bytes, uniform_len)) {
         return 0;
     }
     bool ok = SDL_RenderGeometry(batch->renderer, src_tex, quad, 4, indices, 6);

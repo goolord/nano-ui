@@ -61,8 +61,8 @@ import Foreign.Marshal.Utils (fromBool, maybePeek)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import NanoUI (Appearance, ImageId, Input (..), NanoUI, ShaderCapabilities (..), Size (..), Theme, V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings, unlessM)
 import NanoUI.Backend
-  ( Backend (..), BackendSession, SBackend (..), askBackendSession, setBackendSession, withBackendSession, cancelTasks, clearMeasureCache
-  , closeWindowHost, damageFull, installWindowHost, markDirty, newPixelContext, registerImage, reportWindowState, setShaderCapabilities, setSystemAppearance
+  ( Backend (..), BackendSession, SBackend (..), askBackendSession, setBackendSession, withBackendSession, cancelTasks
+  , closeWindowHost, installWindowHost, newPixelContext, registerImage, reportWindowState, setShaderCapabilities, setSystemAppearance
   , inBoundThread, setWakeLoopChecked, withClipboard, withTheme
   )
 import NanoUI.Internal.Context (Context (..), followSystemTheme, setDrawSnapScale)
@@ -83,6 +83,7 @@ import NanoUI.Sdl.Internal.Chrome.Types (clearChromeState, newChromeState)
 import NanoUI.Sdl.Internal.Frame (WindowDecorations (..), applyDecorations, framedWindow)
 import NanoUI.Sdl.Internal.Cursor (destroyCursors, initCursors)
 import NanoUI.Sdl.Internal.Font
+import NanoUI.Ttf.Internal.Support (syncSdlFontCache)
 import NanoUI.Sdl.Internal.Font.Search (searchFonts, startFontIndex)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont (..))
 import NanoUI.Internal.Debug (newDebugSampler)
@@ -289,12 +290,7 @@ syncDisplay ctx env inp = do
         then resolveNanoUIFont requested
         else sdlFontCacheSource (sdlFontCache env)
     writeIORef (sdlFontAppliedRef env) requested
-    reloadSdlFontCache (sdlFontCache env) source
-    writeIORef (sdlCachedCtx env) . withSdlClipboard =<< withSdlFontCache (sdlFontCache env) ctx
-    clearMeasureCache ctx
-    -- Glyphs change under rects and texts that may not: repaint everything.
-    damageFull ctx
-    markDirty ctx
+    writeIORef (sdlCachedCtx env) =<< syncSdlFontCache (sdlFontCache env) ctx source withSdlClipboard
   -- SDL updates the appearance before queueing the theme event that wakes
   -- us, and the query is free.
   setSystemAppearance ctx =<< querySystemAppearance

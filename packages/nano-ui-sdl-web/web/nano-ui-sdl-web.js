@@ -203,22 +203,25 @@ class NanoUiSdlWeb {
     if (document.activeElement !== this.input) this.input.focus({ preventScroll: true });
   }
 
-  initGl() {
-    const gl = this.canvas.getContext("webgl2", {
-      alpha: false, antialias: false, depth: false, stencil: false,
-      premultipliedAlpha: false, preserveDrawingBuffer: true,
-    });
-    if (!gl) throw new Error("nano-ui-sdl-web: WebGL2 is not available");
-    this.gl = gl;
+  linkProgram(fragSrc, logErrors) {
+    const gl = this.gl;
+    const compile = (type, src, label) => {
+      const sh = gl.createShader(type);
+      gl.shaderSource(sh, src);
+      gl.compileShader(sh);
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+        const msg = gl.getShaderInfoLog(sh);
+        gl.deleteShader(sh);
+        if (logErrors) { console.error(`nano-ui-sdl-web: ${label} shader compile failed:`, msg); return null; }
+        throw new Error(msg);
+      }
+      return sh;
+    };
+    const vs = compile(gl.VERTEX_SHADER, VERTEX_SHADER, "vertex");
+    if (!vs) return null;
+    const fs = compile(gl.FRAGMENT_SHADER, fragSrc, "fragment");
+    if (!fs) { gl.deleteShader(vs); return null; }
     const program = gl.createProgram();
-    const vs = gl.createShader(gl.VERTEX_SHADER);
-    gl.shaderSource(vs, VERTEX_SHADER);
-    gl.compileShader(vs);
-    if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(vs));
-    const fs = gl.createShader(gl.FRAGMENT_SHADER);
-    gl.shaderSource(fs, FRAGMENT_SHADER);
-    gl.compileShader(fs);
-    if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(fs));
     gl.attachShader(program, vs);
     gl.attachShader(program, fs);
     // Pin attribute locations 0/1/2 so custom fragment shader programs share the same VAO.
@@ -228,7 +231,37 @@ class NanoUiSdlWeb {
     gl.linkProgram(program);
     gl.deleteShader(vs);
     gl.deleteShader(fs);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      const msg = gl.getProgramInfoLog(program);
+      gl.deleteProgram(program);
+      if (logErrors) { console.error("nano-ui-sdl-web: shader link failed:", msg); return null; }
+      throw new Error(msg);
+    }
+    return program;
+  }
+
+  useDefaultProgram() {
+    const gl = this.gl;
+    gl.useProgram(this.defaultProgram);
+    gl.uniform2f(this.uScale, this.uScaleX, this.uScaleY);
+    gl.uniform2f(this.uOrigin, this.originX, this.originY);
+  }
+
+  bindUniformBlock(bytes) {
+    const gl = this.gl;
+    gl.bindBuffer(gl.UNIFORM_BUFFER, this.shaderUbo);
+    gl.bufferData(gl.UNIFORM_BUFFER, bytes, gl.STREAM_DRAW);
+    gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, this.shaderUbo);
+  }
+
+  initGl() {
+    const gl = this.canvas.getContext("webgl2", {
+      alpha: false, antialias: false, depth: false, stencil: false,
+      premultipliedAlpha: false, preserveDrawingBuffer: true,
+    });
+    if (!gl) throw new Error("nano-ui-sdl-web: WebGL2 is not available");
+    this.gl = gl;
+    const program = this.linkProgram(FRAGMENT_SHADER, false);
     this.defaultProgram = program;
     gl.useProgram(program);
     this.uScale = gl.getUniformLocation(program, "uScale");
@@ -248,18 +281,18 @@ class NanoUiSdlWeb {
     // cannot read either, so nano-ui-sdl-web-test checks only that those two
     // agree. Change all three together.
     const attrs = [[0, 2, 0], [1, 4, 8], [2, 2, 24]];
-    for (const [loc, size, offset] of attrs) {
-      gl.enableVertexAttribArray(loc);
-      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 32, offset);
-    }
+    const setupAttrs = () => {
+      for (const [loc, size, offset] of attrs) {
+        gl.enableVertexAttribArray(loc);
+        gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 32, offset);
+      }
+    };
+    setupAttrs();
     this.effectVbo = gl.createBuffer();
     this.effectVao = gl.createVertexArray();
     gl.bindVertexArray(this.effectVao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.effectVbo);
-    for (const [loc, size, offset] of attrs) {
-      gl.enableVertexAttribArray(loc);
-      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 32, offset);
-    }
+    setupAttrs();
     gl.bindVertexArray(this.vao);
     // SDL_BLENDMODE_BLEND: colour by source alpha, alpha accumulating.
     gl.enable(gl.BLEND);
@@ -271,6 +304,7 @@ class NanoUiSdlWeb {
     this.shaders = new Map();
     this.targets = [];
     this.uniformData = new Uint8Array(0);
+    this.geometryUploaded = false;
   }
 
   makeTexture(w, h, pixels) {
@@ -574,38 +608,8 @@ class NanoUiSdlWeb {
 
   registerShader(slot, srcPtr, srcLen) {
     const gl = this.gl;
-    const fragSrc = this.text(srcPtr, srcLen);
-    const vs = gl.createShader(gl.VERTEX_SHADER);
-    gl.shaderSource(vs, VERTEX_SHADER);
-    gl.compileShader(vs);
-    if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
-      console.error("nano-ui-sdl-web: vertex shader compile failed:", gl.getShaderInfoLog(vs));
-      gl.deleteShader(vs);
-      return 0;
-    }
-    const fs = gl.createShader(gl.FRAGMENT_SHADER);
-    gl.shaderSource(fs, fragSrc);
-    gl.compileShader(fs);
-    if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
-      console.error("nano-ui-sdl-web: fragment shader compile failed:", gl.getShaderInfoLog(fs));
-      gl.deleteShader(vs);
-      gl.deleteShader(fs);
-      return 0;
-    }
-    const program = gl.createProgram();
-    gl.attachShader(program, vs);
-    gl.attachShader(program, fs);
-    gl.bindAttribLocation(program, 0, "aPos");
-    gl.bindAttribLocation(program, 1, "aColor");
-    gl.bindAttribLocation(program, 2, "aUv");
-    gl.linkProgram(program);
-    gl.deleteShader(vs);
-    gl.deleteShader(fs);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      console.error("nano-ui-sdl-web: shader link failed:", gl.getProgramInfoLog(program));
-      gl.deleteProgram(program);
-      return 0;
-    }
+    const program = this.linkProgram(this.text(srcPtr, srcLen), true);
+    if (!program) return 0;
     const blk = gl.getUniformBlockIndex(program, "NanoShaderBlock");
     if (blk !== gl.INVALID_INDEX) {
       gl.uniformBlockBinding(program, blk, 0);
@@ -686,9 +690,7 @@ class NanoUiSdlWeb {
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
     }
-    gl.useProgram(this.defaultProgram);
-    gl.uniform2f(this.uScale, this.uScaleX, this.uScaleY);
-    gl.uniform2f(this.uOrigin, this.originX, this.originY);
+    this.useDefaultProgram();
   }
 
   compositeEffect(srcSlot, shaderSlot, blendCopy, rectUvPtr, scissorPtr, uPtr, uLen) {
@@ -711,11 +713,7 @@ class NanoUiSdlWeb {
     if (entry.uScale !== null) gl.uniform2f(entry.uScale, 2 / this.curSize[0], 2 / this.curSize[1]);
     if (entry.uOrigin !== null) gl.uniform2f(entry.uOrigin, 0, 0);
     if (entry.uInput !== null) gl.uniform1i(entry.uInput, 0);
-    if (uLen > 0) {
-      gl.bindBuffer(gl.UNIFORM_BUFFER, this.shaderUbo);
-      gl.bufferData(gl.UNIFORM_BUFFER, this.bytes(uPtr, uLen), gl.STREAM_DRAW);
-      gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, this.shaderUbo);
-    }
+    if (uLen > 0) this.bindUniformBlock(this.bytes(uPtr, uLen));
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.targets[srcSlot].tex);
     // Always blend straight-alpha output into premultiplied offscreen targets
@@ -737,9 +735,7 @@ class NanoUiSdlWeb {
     gl.bindVertexArray(this.vao);
     gl.enable(gl.BLEND);
     gl.disable(gl.SCISSOR_TEST);
-    gl.useProgram(this.defaultProgram);
-    gl.uniform2f(this.uScale, this.uScaleX, this.uScaleY);
-    gl.uniform2f(this.uOrigin, this.originX, this.originY);
+    this.useDefaultProgram();
   }
 
   beginFrame(clear, r, g, b, a, scale, w, h) {
@@ -751,11 +747,10 @@ class NanoUiSdlWeb {
     this.originY = 0;
     this.uScaleX = (2 * scale) / w;
     this.uScaleY = (2 * scale) / h;
+    this.geometryUploaded = false;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, w, h);
-    gl.useProgram(this.defaultProgram);
-    gl.uniform2f(this.uScale, this.uScaleX, this.uScaleY);
-    gl.uniform2f(this.uOrigin, 0, 0);
+    this.useDefaultProgram();
     if (clear) {
       gl.disable(gl.SCISSOR_TEST);
       gl.clearColor(r, g, b, a);
@@ -766,10 +761,15 @@ class NanoUiSdlWeb {
   draw(vertices, vertexCount, indices, indexCount, commands, commandCount) {
     const gl = this.gl;
     gl.bindVertexArray(this.vao);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, this.bytes(vertices, vertexCount * 32), gl.STREAM_DRAW);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, this.bytes(indices, indexCount * 4), gl.STREAM_DRAW);
+    // Upload the frame's shared vertex/index buffers once per frame instead of
+    // re-uploading them for every plain command slice around Tier 2 effects.
+    if (!this.geometryUploaded) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, this.bytes(vertices, vertexCount * 32), gl.STREAM_DRAW);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, this.bytes(indices, indexCount * 4), gl.STREAM_DRAW);
+      this.geometryUploaded = true;
+    }
     const cmds = new Int32Array(this.memory.buffer, commands, commandCount * COMMAND_WORDS);
     const height = this.curSize[1];
     let activeShader = 0;
@@ -790,14 +790,10 @@ class NanoUiSdlWeb {
         const uOff = cmds[o + 9];
         const uLen = cmds[o + 10];
         if (uLen > 0 && uOff + uLen <= this.uniformData.length) {
-          gl.bindBuffer(gl.UNIFORM_BUFFER, this.shaderUbo);
-          gl.bufferData(gl.UNIFORM_BUFFER, this.uniformData.subarray(uOff, uOff + uLen), gl.STREAM_DRAW);
-          gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, this.shaderUbo);
+          this.bindUniformBlock(this.uniformData.subarray(uOff, uOff + uLen));
         }
       } else if (activeShader !== 0) {
-        gl.useProgram(this.defaultProgram);
-        gl.uniform2f(this.uScale, this.uScaleX, this.uScaleY);
-        gl.uniform2f(this.uOrigin, this.originX, this.originY);
+        this.useDefaultProgram();
         activeShader = 0;
       }
       gl.bindTexture(gl.TEXTURE_2D, (slot >= 0 && this.textures[slot]) || this.white);
@@ -810,11 +806,7 @@ class NanoUiSdlWeb {
       }
       gl.drawElements(gl.TRIANGLES, cmds[o + 2], gl.UNSIGNED_INT, cmds[o + 1] * 4);
     }
-    if (activeShader !== 0) {
-      gl.useProgram(this.defaultProgram);
-      gl.uniform2f(this.uScale, this.uScaleX, this.uScaleY);
-      gl.uniform2f(this.uOrigin, this.originX, this.originY);
-    }
+    if (activeShader !== 0) this.useDefaultProgram();
     gl.disable(gl.SCISSOR_TEST);
   }
 
