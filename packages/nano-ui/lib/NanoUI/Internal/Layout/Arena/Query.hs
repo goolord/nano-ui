@@ -180,7 +180,7 @@ adornRows :: NodeArena -> NodeIdx -> IO AdornRows
 adornRows na idx = do
   a <- arenaArrays na
   let add (AdornRows li lw ti tw rowH) ci = do
-        ax <- readTagEnum a ci TagAlignX
+        ax <- readAlignX a ci
         cw <- readGeom a ci GeomW
         ch <- readGeom a ci GeomH
         pure $

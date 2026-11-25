@@ -43,6 +43,7 @@ tests =
   , spec "covered-field-focus" runCoveredFieldFocusTest
   , spec "covered-widget-no-pointer" runCoveredWidgetNoPointerTest
   , spec "container-queries" runContainerQueryTest
+  , pixelSpec "items-align" runItemsAlignTest
   ]
 
 red, green, blue, yellow :: Color
@@ -635,3 +636,76 @@ runContainerQueryTest ctx failed = do
     wb <- rectOf "wide-B"
     checkGt (rectY nb) (rectY na + 4)
     checkGt (rectX wb) (rectX wa + 4)
+
+-- | Container cross-axis alignment ('itemsCenter', 'itemsEnd', 'itemsBaseline')
+-- applies to children without explicit alignment, lets explicit child modifiers
+-- (including 'alignTop' and 'alignStart') override it, does not leak into nested
+-- containers or pinned children, and keeps fill-width text left-aligned.
+runItemsAlignTest :: Context -> IORef Int -> IO ()
+runItemsAlignTest ctx failed = do
+  let inp = withInput 500 400
+  -- Row with itemsCenter: short child centers vertically, explicit alignTop/alignBottom
+  -- override it, nested row keeps ItemsStart, and pinned child ignores itemsCenter.
+  let rowUi = rowWith (tight . gap 4 . fixedWH 300 60 . itemsCenter) $ do
+        box (fixedWH 20 20) green
+        box (fixedWH 20 20 . alignTop) red
+        box (fixedWH 20 20 . alignBottom) blue
+        rowWith (tight . gap 0 . fixedWH 60 60) (box (fixedWH 10 10) yellow)
+        box (pinAt 4 4 . fixedWH 12 12) red
+  _ <- warmup2 ctx inp rowUi
+  arenaRects ctx >>= \case
+    [_, midBox, topBox, botBox, _, nestedBox, pinnedBox] -> do
+      assertEq failed 20 (rectY midBox)
+      assertEq failed 0 (rectY topBox)
+      assertEq failed 40 (rectY botBox)
+      assertEq failed 0 (rectY nestedBox)
+      assertEq failed (Rect 4 4 12 12) pinnedBox
+    rs -> assertEq failed 7 (length rs)
+  -- Column with itemsCenter: fit child centers horizontally, explicit alignStart
+  -- overrides it, and a fillW label keeps left-aligned text spans.
+  let colUi = columnWith (tight . gap 4 . fixedW 200 . itemsCenter) $ do
+        box (fixedWH 40 16) green
+        box (fixedWH 40 16 . alignStart) red
+        labelWith (tight . fillW) "left-fill"
+  _ <- warmup2 ctx inp colUi
+  arenaRects ctx >>= \case
+    [_, centeredBox, startBox, _] -> do
+      assertEq failed 80 (rectX centeredBox)
+      assertEq failed 0 (rectX startBox)
+    rs -> assertEq failed 4 (length rs)
+  colSpans <- collectTextSpans ctx
+  assertJust failed (spanRect "left-fill" colSpans) $ \r ->
+    assertEq failed 0 (rectX r)
+  -- Row with itemsBaseline aligns labels and buttons without per-child alignBaseline,
+  -- ignores stretched grow-height children such as vertical separators, and respects
+  -- an explicit alignTop override.
+  let baseUi = rowWith (tight . gap 8 . fixedH 60 . itemsBaseline) $ do
+        labelWith (tight . fontSize 32) "Big"
+        separator
+        labelWith tight "small"
+        void (button "Go")
+        labelWith (tight . alignTop) "top"
+  _ <- warmup2 ctx inp baseUi
+  baseSpans <- collectTextSpans ctx
+  case mapM (`spanRect` baseSpans) ["Big", "small", "Go", "top"] of
+    Just [big, small, go, topLbl] -> do
+      let baseline r = rectY r + 0.8 * rectH r
+      assert failed (abs (baseline small - baseline big) < 0.5)
+      assert failed (abs (baseline go - baseline big) < 0.5)
+      assert failed (rectY small > rectY big)
+      assert failed (rectY small + rectH small <= 60)
+      assertEq failed 0 (rectY topLbl)
+    _ -> assert failed False
+  -- Grid with itemsCenter centers short cells vertically in taller grid rows,
+  -- and changing itemsAlign dynamically invalidates the layout cache.
+  let gridUi ia = gridWith 2 (tight . gap 0 . fixedW 200 . itemsAlign ia) $ do
+        box (fixedWH 20 20) green
+        box (fixedWH 20 60) blue
+  _ <- warmup2 ctx inp (gridUi ItemsCenter)
+  arenaRects ctx >>= \case
+    [_, shortCell, _] -> assertEq failed 20 (rectY shortCell)
+    rs -> assertEq failed 3 (length rs)
+  _ <- runFrame ctx inp (gridUi ItemsEnd)
+  arenaRects ctx >>= \case
+    [_, shortCell, _] -> assertEq failed 40 (rectY shortCell)
+    rs -> assertEq failed 3 (length rs)

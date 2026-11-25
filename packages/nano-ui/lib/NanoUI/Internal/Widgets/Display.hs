@@ -91,7 +91,7 @@ kvMono = kvRow id fontMono
 
 kvRow :: (Layout -> Layout) -> (Layout -> Layout) -> Text -> Text -> NanoUI ()
 kvRow keyF valF k v =
-  row' (tight . gap 12 . alignMid . fillW $ defaultLayout) $ do
+  row' (tight . gap 12 . itemsCenter . fillW $ defaultLayout) $ do
     void (labelEx (keyF . tight . minW 88 $ defaultLayout) k)
     void (labelEx (tight . fillW . alignEnd . valF $ defaultLayout) (T.stripEnd v))
 
@@ -109,9 +109,9 @@ kvBlock rows =
 card :: NanoUI a -> NanoUI a
 card = panelWith (minW 300 . padXY 12 10 . gap 8 . fillW)
 
--- | Full-width row with no padding, an 8-pixel gap, and vertical centring.
+-- | Full-width row with no padding, an 8-pixel gap, and vertical centring of children.
 toolbar :: NanoUI a -> NanoUI a
-toolbar = rowWith (tight . gap 8 . alignMid . fillW)
+toolbar = rowWith (tight . gap 8 . itemsCenter . fillW)
 
 -- | An image registered with the host, stretched to the rect the layout
 -- modifier gives it; an unsized axis is 32 pixels. 'NanoUI.imageConfigured'

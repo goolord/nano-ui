@@ -53,7 +53,7 @@ import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Arena.Types (newFlexScratch)
 import NanoUI.Internal.Layout.Solve.Flex
-import NanoUI.Internal.Style (AlignY (..), Flow (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..), hasExplicitMin)
+import NanoUI.Internal.Style (AlignY (..), Flow (..), FontStyle (..), FontVariant (..), FontWeight (..), ItemsAlign (..), Padding (..), hasExplicitMin)
 import NanoUI.Internal.Types (Rect (..), clamp, foldUpTo, newZeroedPrimArray, isBounded, isUnbounded, noLimit)
 import NanoUI.Internal.WidgetText
 
@@ -875,7 +875,8 @@ foldChildDimsFromParent env@SolveEnv {seArena = na} idx dir gap = do
       -- A row's baseline-aligned children stand on one line, so together they
       -- are as tall as the most room any takes above it plus the most any takes
       -- below.
-      FlowAcc _ above below <- foldFlowChildrenM na idx baselineStep (FlowAcc 0 0 0)
+      pItems <- readItemsAlign (seArrays env) idx
+      FlowAcc _ above below <- foldFlowChildrenM na idx (baselineStep pItems) (FlowAcc 0 0 0)
       pure (along + gaps, max across (above + below))
   where
     step (FlowAcc count along across) ci = do
@@ -883,9 +884,10 @@ foldChildDimsFromParent env@SolveEnv {seArena = na} idx dir gap = do
       pure $ case dir of
         DirRow -> FlowAcc (count + 1) (along + w) (max across h)
         DirColumn -> FlowAcc (count + 1) (along + h) (max across w)
-    baselineStep acc@(FlowAcc _ above below) ci = do
-      ay <- getAlignY na ci
-      if ay /= AlignBaseline
+    baselineStep pItems acc@(FlowAcc _ above below) ci = do
+      ay <- effectiveAlignY (seArrays env) pItems ci
+      hTag <- readTagEnum (seArrays env) ci TagHSizing
+      if ay /= AlignBaseline || hTag == SizingGrow
         then pure acc
         else do
           Rect _ _ _ h <- getNodeRect na ci
@@ -930,21 +932,23 @@ measureWrap env@SolveEnv {seArena = na} idx dir gap bound = do
 wrapExtent :: SolveEnv -> NodeIdx -> DirTag -> Float -> Float -> [(NodeIdx, (Float, Float))] -> IO (Float, Float)
 wrapExtent env idx dir gap limit kids = do
   lineGap <- readStyle (seArrays env) idx StyleLineGap
+  pItems <- readItemsAlign (seArrays env) idx
   let along (_, (w, h)) = if dir == DirRow then w else h
       lns = wrapLines limit gap along kids
       lineLength l = sum (map along l) + gap * fromIntegral (length l - 1)
-  crosses <- mapM (wrapLineCross env dir) lns
+  crosses <- mapM (wrapLineCross env dir pItems) lns
   pure (foldl' max 0 (map lineLength lns), sum crosses + lineGap * fromIntegral (max 0 (length lns - 1)))
 
 -- | A wrap line's cross size: its largest child's. In a row it is at least
 -- the tallest ascent plus the deepest descent among baseline-aligned
 -- children, as in 'foldChildDimsFromParent'.
-wrapLineCross :: SolveEnv -> DirTag -> [(NodeIdx, (Float, Float))] -> IO Float
-wrapLineCross env@SolveEnv {seArena = na} dir line = do
+wrapLineCross :: SolveEnv -> DirTag -> ItemsAlign -> [(NodeIdx, (Float, Float))] -> IO Float
+wrapLineCross env@SolveEnv {seArrays = a} dir pItems line = do
   let across = foldl' (\m (_, (w, h)) -> max m (if dir == DirRow then h else w)) 0 line
       baselineStep acc@(!above, !below) (ci, (_, h)) = do
-        ay <- getAlignY na ci
-        if ay /= AlignBaseline
+        ay <- effectiveAlignY a pItems ci
+        hTag <- readTagEnum a ci TagHSizing
+        if ay /= AlignBaseline || hTag == SizingGrow
           then pure acc
           else (\b -> (max above b, max below (h - b))) <$> childBaseline env ci h
   if dir /= DirRow
@@ -1072,13 +1076,14 @@ recomputeUnsteady env@SolveEnv {seArena = na, seArrays = a} idx availW =
                           pure (ci, (percentOr subAx innerW w, h))
                     kids <- mapM sized =<< flowChildrenInOrder na idx
                     lineGap <- readStyle a idx StyleLineGap
+                    pItems <- readItemsAlign a idx
                     -- A line is as thick as its measured children
                     -- ('wrapLineCross') or what they grow to at their shares
                     -- of it, as 'positionWrap' places it.
                     let lns = wrapLines innerW gap (fst . snd) kids
                         lineCross l = do
-                          measured <- wrapLineCross env dir l
-                          maybe measured (max measured) <$> lineHeightAt env l innerW gap
+                          measured <- wrapLineCross env dir pItems l
+                          maybe measured (max measured) <$> lineHeightAt env pItems l innerW gap
                     crosses <- mapM lineCross lns
                     padded (sum crosses + lineGap * fromIntegral (max 0 (length lns - 1)))
                 | otherwise -> pure oldH
@@ -1133,13 +1138,14 @@ recomputeUnsteady env@SolveEnv {seArena = na, seArrays = a} idx availW =
 -- padding ('lineHeightAt'), or 'Nothing' when every child keeps its
 -- measured width there.
 rowHeightAt :: SolveEnv -> NodeIdx -> Float -> Float -> IO (Maybe Float)
-rowHeightAt env@SolveEnv {seArena = na} idx innerW gap = do
+rowHeightAt env@SolveEnv {seArena = na, seArrays = a} idx innerW gap = do
   anyFlex <- foldFlowChildrenM na idx (\acc ci -> if acc then pure True else flexesAlongRow env ci) False
   if not anyFlex
     then pure Nothing
     else do
+      pItems <- readItemsAlign a idx
       kids <- mapM (\ci -> (ci,) <$> flowChildSize env False innerW noLimit ci) =<< flowChildrenInOrder na idx
-      lineHeightAt env kids innerW gap
+      lineHeightAt env pItems kids innerW gap
 
 -- | Whether a row's child can come out another width than it measured: it
 -- grows, shrinks, takes a percentage or scrolls.
@@ -1161,8 +1167,8 @@ flexesAlongRow SolveEnv {seArrays = a} ci = do
 --
 -- The sharing runs in a scratch of its own: a parent can ask for this height
 -- while it is filling the arena's scratch with its children's sizes.
-lineHeightAt :: SolveEnv -> [(NodeIdx, (Float, Float))] -> Float -> Float -> IO (Maybe Float)
-lineHeightAt env@SolveEnv {seArena = na, seArrays = a} kids avail gap = do
+lineHeightAt :: SolveEnv -> ItemsAlign -> [(NodeIdx, (Float, Float))] -> Float -> Float -> IO (Maybe Float)
+lineHeightAt env@SolveEnv {seArena = na, seArrays = a} pItems kids avail gap = do
   anyFlex <- foldM (\acc (ci, _) -> if acc then pure True else flexesAlongRow env ci) False kids
   if not anyFlex
     then pure Nothing
@@ -1186,8 +1192,9 @@ lineHeightAt env@SolveEnv {seArena = na, seArrays = a} kids avail gap = do
         else do
           let across = foldl' (\m (_, h) -> max m h) 0 hs
               baselineStep acc@(!above, !below) (ci, h) = do
-                ay <- getAlignY na ci
-                if ay /= AlignBaseline
+                ay <- effectiveAlignY a pItems ci
+                hTag <- readTagEnum a ci TagHSizing
+                if ay /= AlignBaseline || hTag == SizingGrow
                   then pure acc
                   else (\b -> (max above b, max below (h - b))) <$> childBaseline env ci h
           (above, below) <- foldM baselineStep (0, 0) hs
@@ -1364,17 +1371,25 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a} ci h = do
           [] -> pure h
           first : _ -> do
             (pad, _, dir) <- containerFlow a ci
+            cItems <- readItemsAlign a ci
             let innerH = max 0 (h - padT pad - padB pad)
                 heightOf k = rectH <$> getNodeRect na k
+            let isBaselineKid k = do
+                  ay <- effectiveAlignY a cItems k
+                  hTag <- readTagEnum a k TagHSizing
+                  pure (ay == AlignBaseline && hTag /= SizingGrow)
             aligned <-
-              if dir == DirRow then filterM (fmap (== AlignBaseline) . getAlignY na) kids else pure []
+              if dir == DirRow then filterM isBaselineKid kids else pure []
             grouped <- mapM (\k -> heightOf k >>= childBaseline env k) aligned
             (padT pad +) <$> case grouped of
               _ : _ -> pure (maximum grouped)
               [] -> do
                 fh <- heightOf first
                 flow <- getFlow na ci
-                ay <- if dir == DirRow || flow == Layered then getAlignY na first else pure AlignTop
+                ay <-
+                  if dir == DirRow
+                    then effectiveAlignY a cItems first
+                    else if flow == Layered then readAlignY a first else pure AlignTop
                 (alignY ay 0 innerH fh +) <$> childBaseline env first fh
   case nt of
     NodeText -> do

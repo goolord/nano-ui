@@ -19,7 +19,7 @@ import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve.Flex
 import NanoUI.Internal.Layout.Solve.Measure
-import NanoUI.Internal.Style (AlignX (..), AlignY (..), Padding (..), lineAlignFraction, windowMargin)
+import NanoUI.Internal.Style (AlignX (..), AlignY (..), ItemsAlign (..), Padding (..), lineAlignFraction, windowMargin)
 import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp, foldUpTo, forUpTo_)
 import NanoUI.Internal.WidgetText
 
@@ -251,14 +251,15 @@ positionScrollChildren env@SolveEnv {seArena = na} depth idx dir gap pad (Rect p
 -- child is aligned at its resolved width, so text measured wider than the
 -- column wraps to it instead of being pushed past the edge.
 {-# INLINE columnChildX #-}
-columnChildX :: NodeArena -> NodeIdx -> Float -> Float -> IO (Float, Float)
-columnChildX na ci cx cw = do
+columnChildX :: NodeArena -> ItemsAlign -> NodeIdx -> Float -> Float -> IO (Float, Float)
+columnChildX na pItems ci cx cw = do
   wAx <- getWidthSizing na ci
   if axTag wAx == SizingGrow
     then pure (cx, cw)
     else do
+      a <- arenaArrays na
       Rect _ _ iw _ <- getNodeRect na ci
-      ax <- getAlignX na ci
+      ax <- effectiveAlignX a pItems ci
       let !offer = percentOr wAx cw cw
           !x = alignX ax cx cw (resolveSize wAx iw offer)
       pure (x, offer)
@@ -337,29 +338,31 @@ positionRowFromParent ::
   Float ->
   Rect ->
   IO ()
-positionRowFromParent env@SolveEnv {seArena = na} depth parent gap (Rect cx cy cw ch) = do
+positionRowFromParent env@SolveEnv {seArena = na, seArrays = a} depth parent gap (Rect cx cy cw ch) = do
+  pItems <- readItemsAlign a parent
   n <- loadChildrenScratch na parent (flowChildSize env False cw ch)
   distributeScratch na n cw (gap * fromIntegral (max 0 (n - 1))) True
   withSnapshot na depth n fsOut $ \idxSnap outSnap ->
-    placeRowLine env depth idxSnap outSnap n gap cx cy ch
+    placeRowLine env depth pItems idxSnap outSnap n gap cx cy ch
 
 -- | Place the first @k@ snapshot children left to right from @x0@, each as
 -- wide as its @outSnap@ share, in a line @cross@ tall at @top@.
 -- Baseline-aligned children share the lowest of their baselines, so the
 -- child with the tallest ascent touches the top.
-placeRowLine :: SolveEnv -> Int -> IOArr Int -> IOArr Float -> Int -> Float -> Float -> Float -> Float -> IO ()
-placeRowLine env@SolveEnv {seArena = na} !depth idxSnap outSnap !k !gap !x0 !top !cross = do
+placeRowLine :: SolveEnv -> Int -> ItemsAlign -> IOArr Int -> IOArr Float -> Int -> Float -> Float -> Float -> Float -> IO ()
+placeRowLine env@SolveEnv {seArena = na, seArrays = a} !depth pItems idxSnap outSnap !k !gap !x0 !top !cross = do
   -- A child is aligned at the height it is laid out at: its height at its
   -- share of the width when that is not the width it measured at.
   let lowestBaseline acc i = do
         ci <- readPrimArray idxSnap i
-        ay <- getAlignY na ci
-        if ay /= AlignBaseline
+        ay <- effectiveAlignY a pItems ci
+        hTag <- readTagEnum a ci TagHSizing
+        if ay /= AlignBaseline || hTag == SizingGrow
           then pure acc
           else do
             fw <- readPrimArray outSnap i
             h <- childRowCrossSize na ci cross
-            steady <- readTagEnum (seArrays env) ci TagSteadyHeight
+            steady <- readTagEnum a ci TagSteadyHeight
             crossH <- if steady then pure h else fromMaybe h <$> rowChildHeightAt env ci fw
             max acc <$> childBaseline env ci crossH
   base <- foldUpTo k lowestBaseline 0
@@ -372,19 +375,20 @@ placeRowLine env@SolveEnv {seArena = na} !depth idxSnap outSnap !k !gap !x0 !top
           fw <- readPrimArray outSnap i
           -- Fit/fixed children keep content height. Only Grow/Percent eat `cross`.
           crossH0 <- childRowCrossSize na ci cross
-          steady <- readTagEnum (seArrays env) ci TagSteadyHeight
+          steady <- readTagEnum a ci TagSteadyHeight
           crossH <- if steady then pure crossH0 else fromMaybe crossH0 <$> rowChildHeightAt env ci fw
-          ay <- getAlignY na ci
+          ay <- effectiveAlignY a pItems ci
+          hTag <- readTagEnum a ci TagHSizing
           fy <-
-            if ay == AlignBaseline
-              then (\b -> top + base - b) <$> childBaseline env ci crossH
+            if ay == AlignBaseline && hTag /= SizingGrow
+              then (\b -> clamp top (top + max 0 (cross - crossH)) (top + base - b)) <$> childBaseline env ci crossH
               else pure (alignY ay top cross crossH)
           positionNodeA env (depth + 1) ci (Rect x fy fw crossH)
           -- The next child starts at this one's far edge, or at its share's
           -- when it came out wider (a minimum width past its share), so
           -- the row keeps its length. A max width already caps its share
           -- ('distributeScratch').
-          placedW <- readGeom (seArrays env) ci GeomW
+          placedW <- readGeom a ci GeomW
           go (i + 1) (x + min fw placedW + gap)
   go 0 x0
 
@@ -397,9 +401,10 @@ positionGrid ::
   Float ->
   Rect ->
   IO ()
-positionGrid env@SolveEnv {seArena = na} depth parent gCols minColW gap (Rect cx cy cw ch) = do
+positionGrid env@SolveEnv {seArena = na, seArrays = a} depth parent gCols minColW gap (Rect cx cy cw ch) = do
   let cols = gridColumnCount gCols minColW cw gap
       colW = max 0 ((cw - gap * fromIntegral (cols - 1)) / fromIntegral cols)
+  pItems <- readItemsAlign a parent
   -- Refit at the column width before freezing row heights. The enclosing
   -- column's height query uses the same per-node, per-width memo.
   n <- loadChildrenScratch na parent (flowChildSize env True colW ch)
@@ -428,8 +433,8 @@ positionGrid env@SolveEnv {seArena = na} depth parent gCols minColW gap (Rect cx
                       then percentOr hAx rowH rowH
                       else resolveSize hAx fh rowH
                   itemX = cx + fromIntegral j * (colW + gap)
-              ax <- getAlignX na ci
-              ay <- getAlignY na ci
+              ax <- readAlignX a ci
+              ay <- effectiveAlignY a pItems ci
               let fx = alignX ax itemX colW childW
                   fy = alignY ay curY rowH childH
               positionNodeA env (depth + 1) ci (Rect fx fy offerW childH)
@@ -447,6 +452,7 @@ positionWrap :: SolveEnv -> Int -> NodeIdx -> DirTag -> Float -> Rect -> IO ()
 positionWrap env@SolveEnv {seArena = na, seArrays = a} depth parent dir gap (Rect cx cy cw ch) = do
   lineGap <- readStyle a parent StyleLineGap
   align <- lineAlignFraction <$> readTagEnum a parent TagLineAlign
+  pItems <- readItemsAlign a parent
   let row = dir == DirRow
       limit = if row then cw else ch
       along (_, (w, h)) = if row then w else h
@@ -457,7 +463,7 @@ positionWrap env@SolveEnv {seArena = na, seArrays = a} depth parent dir gap (Rec
         FlexScratch {fsIdx = idxArr, fsW = wArr, fsH = hArr, fsOut = outArr} <- ensureScratchCapacity na k
         zipWithM_ (\j (ci, (w, h)) -> writePrimArray idxArr j ci >> writePrimArray wArr j w >> writePrimArray hArr j h) [0 ..] line
         distributeScratch na k limit (gaps k) row
-        lineCross <- wrapLineCross env dir line
+        lineCross <- wrapLineCross env dir pItems line
         -- Shift the line by its alignment's share of the leftover room.
         shift <-
           if align <= 0
@@ -465,8 +471,8 @@ positionWrap env@SolveEnv {seArena = na, seArrays = a} depth parent dir gap (Rec
             else (\used -> max 0 (limit - used) * align) <$> foldUpTo k (\t i -> (t +) <$> readPrimArray outArr i) (gaps k)
         withSnapshot na depth k fsOut $ \idxSnap outSnap ->
           if row
-            then placeRowLine env depth idxSnap outSnap k gap (cx + shift) lineAt lineCross
-            else placeColumnLine env depth idxSnap outSnap k gap False Nothing 0 0 (Rect lineAt (cy + shift) lineCross ch)
+            then placeRowLine env depth pItems idxSnap outSnap k gap (cx + shift) lineAt lineCross
+            else placeColumnLine env depth pItems idxSnap outSnap k gap False Nothing 0 0 (Rect lineAt (cy + shift) lineCross ch)
         -- The next line starts past this one, or past any child that grew.
         let reach m (ci, _) = do
               Rect x y w h <- getNodeRect na ci
@@ -492,8 +498,8 @@ positionLayered env@SolveEnv {seArena = na, seArrays = a} depth idx allLayered (
       -- Only a pinned node has an offset.
       ox <- readStyle a ci StylePinX
       oy <- readStyle a ci StylePinY
-      ax <- readTagEnum a ci TagAlignX
-      ay <- readTagEnum a ci TagAlignY
+      ax <- readAlignX a ci
+      ay <- readAlignY a ci
       wAx <- readAxisSizing a ci True
       hAx@(AxisSizing hTag _ _ _) <- readAxisSizing a ci False
       iw <- readGeom a ci GeomW
@@ -531,7 +537,8 @@ positionColumn ::
   Float ->
   Rect ->
   IO ()
-positionColumn env@SolveEnv {seArena = na} !depth !parent !gap chrome scrollContent !px !pw box@(Rect _ _ cw ch) = do
+positionColumn env@SolveEnv {seArena = na, seArrays = a} !depth !parent !gap chrome scrollContent !px !pw box@(Rect _ _ cw ch) = do
+  pItems <- readItemsAlign a parent
   n <- loadChildrenScratch na parent (flowChildSize env True cw ch)
   -- The gaps come out of the height shared, as in a row, or grow children
   -- overflow the column by them.
@@ -539,15 +546,15 @@ positionColumn env@SolveEnv {seArena = na} !depth !parent !gap chrome scrollCont
     if chrome then columnGapSumScratch na n gap else pure (gap * fromIntegral (max 0 (n - 1)))
   distributeScratch na n (fromMaybe ch scrollContent) gapSum False
   withSnapshot na depth n fsOut $ \idxSnap outSnap ->
-    placeColumnLine env depth idxSnap outSnap n gap chrome scrollContent px pw box
+    placeColumnLine env depth pItems idxSnap outSnap n gap chrome scrollContent px pw box
 
 -- | Place the first @k@ snapshot children top to bottom in the box, each as
 -- tall as its @outSnap@ share. Arguments after @gap@ are as for
 -- 'positionColumn'.
 placeColumnLine ::
-  SolveEnv -> Int -> IOArr Int -> IOArr Float -> Int -> Float ->
+  SolveEnv -> Int -> ItemsAlign -> IOArr Int -> IOArr Float -> Int -> Float ->
   Bool -> Maybe Float -> Float -> Float -> Rect -> IO ()
-placeColumnLine env@SolveEnv {seArena = na} !depth idxSnap outSnap !k !gap chrome scrollContent !px !pw (Rect cx cy cw ch) =
+placeColumnLine env@SolveEnv {seArena = na} !depth pItems idxSnap outSnap !k !gap chrome scrollContent !px !pw (Rect cx cy cw ch) =
   go 0 cy
   where
     go !i !y = when (i < k) $ do
@@ -557,7 +564,7 @@ placeColumnLine env@SolveEnv {seArena = na} !depth idxSnap outSnap !k !gap chrom
       (fx, nodeW) <-
         if chrome && nt == NodeSeparator
           then pure (px, pw)
-          else columnChildX na ci cx cw
+          else columnChildX na pItems ci cx cw
       let childH = case scrollContent of
             Just _ | isScrollNode nt -> min fh (max 0 (ch - (y - cy)))
             _ -> fh

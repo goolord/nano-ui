@@ -174,7 +174,7 @@ adornmentRow lay color =
   inertContainer (adornmentRowLayout lay) . withDefaultLayout (fontSize (layoutFontSize lay) . fontColor color)
 
 adornmentRowLayout :: Layout -> Layout
-adornmentRowLayout lay = tight . gap (layoutGap lay) . alignMid $ defaultLayout {layoutDirection = Row}
+adornmentRowLayout lay = tight . gap (layoutGap lay) . alignMid . itemsCenter $ defaultLayout {layoutDirection = Row}
 
 -- | Whether an 'AdornControl' in one of the node ranges captures the pointer
 -- (either active or hovered over an enabled widget node). When @wid@ itself

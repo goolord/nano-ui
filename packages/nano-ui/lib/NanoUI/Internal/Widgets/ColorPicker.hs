@@ -242,7 +242,7 @@ colorPickerSvLayout =
 -- A row of channel fields. Children are groups sized by 'percent' so the
 -- R/G/B(/A) and H/S/V rows share the same column widths.
 colorPickerRowLayout :: Layout
-colorPickerRowLayout = alignMid (colorPickerLayout Row)
+colorPickerRowLayout = itemsCenter (colorPickerLayout Row)
 
 -- One channel field: an inline label plus its bare box, taking @pct@ of the row.
 colorPickerFieldGroupLayout :: Float -> Layout

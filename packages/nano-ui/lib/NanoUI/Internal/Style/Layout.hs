@@ -12,6 +12,12 @@ module NanoUI.Internal.Style.Layout
   , Flow (..)
   , AlignX (..)
   , AlignY (..)
+  , ItemsAlign (ItemsStart, ItemsCenter, ItemsEnd, ItemsBaseline)
+  , itemsAlign
+  , itemsStart
+  , itemsCenter
+  , itemsEnd
+  , itemsBaseline
   , alignXFraction
   , alignYFraction
   , Padding (..)
@@ -247,6 +253,10 @@ data Layout = Layout
   -- ^ Where truncated single-line text places its ellipsis. Completes the 'layoutGap' word.
   , layoutAlignX :: !AlignX
   , layoutAlignY :: !AlignY
+  , layoutItemsAlign :: {-# UNPACK #-} !ItemsAlign
+  -- ^ Cross-axis alignment applied to children without an explicit alignment ('itemsAlign').
+  , layoutAlignExplicit :: {-# UNPACK #-} !Word8
+  -- ^ Bit 0: 'layoutAlignX' set explicitly; bit 1: 'layoutAlignY' set explicitly.
   , layoutMinW :: {-# UNPACK #-} !Float
   , layoutMinH :: {-# UNPACK #-} !Float
   , layoutMaxW :: {-# UNPACK #-} !Float
@@ -282,6 +292,8 @@ defaultLayout =
     , layoutGap = 8
     , layoutAlignX = AlignStart
     , layoutAlignY = AlignTop
+    , layoutItemsAlign = ItemsStart
+    , layoutAlignExplicit = 0
     , layoutMinW = 0
     , layoutMinH = 0
     , layoutMaxW = noLimit
@@ -407,12 +419,12 @@ fixedWH w h = fixedW w . fixedH h
 -- | Centre vertically in the available space.
 {-# INLINE alignMid #-}
 alignMid :: Layout -> Layout
-alignMid l = l {layoutAlignY = AlignMiddle}
+alignMid l = l {layoutAlignY = AlignMiddle, layoutAlignExplicit = layoutAlignExplicit l .|. 2}
 
 -- | Align to the right edge of the available space.
 {-# INLINE alignEnd #-}
 alignEnd :: Layout -> Layout
-alignEnd l = l {layoutAlignX = AlignEnd}
+alignEnd l = l {layoutAlignX = AlignEnd, layoutAlignExplicit = layoutAlignExplicit l .|. 1}
 
 -- | Remove all padding, retaining the gap between children.
 {-# INLINE tight #-}
@@ -570,27 +582,88 @@ fontStrike l =
 -- | Align to the left edge of the available space.
 {-# INLINE alignStart #-}
 alignStart :: Layout -> Layout
-alignStart l = l {layoutAlignX = AlignStart}
+alignStart l = l {layoutAlignX = AlignStart, layoutAlignExplicit = layoutAlignExplicit l .|. 1}
 
 -- | Centre horizontally in the available space.
 {-# INLINE alignCenter #-}
 alignCenter :: Layout -> Layout
-alignCenter l = l {layoutAlignX = AlignCenter}
+alignCenter l = l {layoutAlignX = AlignCenter, layoutAlignExplicit = layoutAlignExplicit l .|. 1}
 
 -- | Align to the top edge of the available space.
 {-# INLINE alignTop #-}
 alignTop :: Layout -> Layout
-alignTop l = l {layoutAlignY = AlignTop}
+alignTop l = l {layoutAlignY = AlignTop, layoutAlignExplicit = layoutAlignExplicit l .|. 2}
 
 -- | Align to the bottom edge of the available space.
 {-# INLINE alignBottom #-}
 alignBottom :: Layout -> Layout
-alignBottom l = l {layoutAlignY = AlignBottom}
+alignBottom l = l {layoutAlignY = AlignBottom, layoutAlignExplicit = layoutAlignExplicit l .|. 2}
 
 -- | Sit on the row's shared text baseline.
 {-# INLINE alignBaseline #-}
 alignBaseline :: Layout -> Layout
-alignBaseline l = l {layoutAlignY = AlignBaseline}
+alignBaseline l = l {layoutAlignY = AlignBaseline, layoutAlignExplicit = layoutAlignExplicit l .|. 2}
+
+-- | Cross-axis alignment a container applies to children that do not set their
+-- own alignment along that axis ('itemsAlign').
+newtype ItemsAlign = ItemsAlign Word8
+  deriving newtype (Eq, Ord)
+  deriving (Bounded, Enum) via BoundedByte 3
+
+-- | Top of a row or grid row, left of a column. The default.
+pattern ItemsStart :: ItemsAlign
+pattern ItemsStart = ItemsAlign 0
+
+-- | Centred across the container: vertically in a row or grid row,
+-- horizontally in a column.
+pattern ItemsCenter :: ItemsAlign
+pattern ItemsCenter = ItemsAlign 1
+
+-- | Bottom of a row or grid row, right of a column.
+pattern ItemsEnd :: ItemsAlign
+pattern ItemsEnd = ItemsAlign 2
+
+-- | Shared text baseline across a row. Outside a row, behaves like
+-- 'ItemsStart'.
+pattern ItemsBaseline :: ItemsAlign
+pattern ItemsBaseline = ItemsAlign 3
+
+{-# COMPLETE ItemsStart, ItemsCenter, ItemsEnd, ItemsBaseline #-}
+
+instance Show ItemsAlign where
+  show ItemsStart = "ItemsStart"
+  show ItemsCenter = "ItemsCenter"
+  show ItemsEnd = "ItemsEnd"
+  show ItemsBaseline = "ItemsBaseline"
+
+-- | Set cross-axis alignment for direct children that leave their own
+-- cross-axis alignment unset.
+{-# INLINE itemsAlign #-}
+itemsAlign :: ItemsAlign -> Layout -> Layout
+itemsAlign a l = l {layoutItemsAlign = a}
+
+-- | Align children to the start of the cross axis: top of a row, left of a column.
+{-# INLINE itemsStart #-}
+itemsStart :: Layout -> Layout
+itemsStart = itemsAlign ItemsStart
+
+-- | Centre children across the container: vertically in a row or grid row,
+-- horizontally in a column.
+{-# INLINE itemsCenter #-}
+itemsCenter :: Layout -> Layout
+itemsCenter = itemsAlign ItemsCenter
+
+-- | Align children to the end of the cross axis: bottom of a row or grid row,
+-- right of a column.
+{-# INLINE itemsEnd #-}
+itemsEnd :: Layout -> Layout
+itemsEnd = itemsAlign ItemsEnd
+
+-- | Align row children on their shared text baseline. Outside a row, behaves
+-- like 'itemsStart'.
+{-# INLINE itemsBaseline #-}
+itemsBaseline :: Layout -> Layout
+itemsBaseline = itemsAlign ItemsBaseline
 
 -- | Start a new line when the next child would overflow the main axis ('Wrap').
 {-# INLINE wrap #-}

@@ -81,6 +81,12 @@ module NanoUI.Internal.Layout.Arena
   , parentIsRow
   , getAlignX
   , getAlignY
+  , readAlignX
+  , readAlignY
+  , getItemsAlign
+  , readItemsAlign
+  , effectiveAlignX
+  , effectiveAlignY
   , getFlow
   , hasPinnedBelow
   , hasScrollerBelow
@@ -177,7 +183,7 @@ import Data.Primitive.PrimArray
   )
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Word (Word32, Word64)
+import Data.Word (Word8, Word32, Word64)
 import GHC.Float (castFloatToWord32)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Image (ImageLook (..), Rotation (..))
@@ -400,8 +406,15 @@ addNode na nt parent Layout {..} = do
     _ -> DirColumn
   writeTagEnum a idx TagWSizing wTag
   writeTagEnum a idx TagHSizing hTag
-  writeTagEnum a idx TagAlignX layoutAlignX
-  writeTagEnum a idx TagAlignY layoutAlignY
+  let !axByte =
+        fromIntegral (fromEnum layoutAlignX)
+          .|. (if layoutAlignExplicit .&. 1 /= 0 then 0x80 else 0 :: Word8)
+      !ayByte =
+        fromIntegral (fromEnum layoutAlignY)
+          .|. (if layoutAlignExplicit .&. 2 /= 0 then 0x80 else 0 :: Word8)
+  writePrimArray (naArrTags a) (idx * tagStride + fromEnum TagAlignX) axByte
+  writePrimArray (naArrTags a) (idx * tagStride + fromEnum TagAlignY) ayByte
+  writeTagEnum a idx TagItemsAlign layoutItemsAlign
   writeTagEnum a idx TagFlow flow
   writeTagEnum a idx TagPinned pinned
   writeTagEnum a idx TagPointer pointerMode
@@ -439,8 +452,9 @@ addNode na nt parent Layout {..} = do
           , (0x4743, fromIntegral layoutGridCols)
           , (0x474d, fromIntegral (castFloatToWord32 layoutGridMinColW))
           , (0x4648, fromIntegral (castFloatToWord32 layoutFontSize))
-          , (0x4158, fromIntegral (fromEnum layoutAlignX))
-          , (0x4159, fromIntegral (fromEnum layoutAlignY))
+          , (0x4158, fromIntegral axByte)
+          , (0x4159, fromIntegral ayByte)
+          , (0x4941, fromIntegral (fromEnum layoutItemsAlign))
           , (0x464c, fromIntegral (fromEnum flow))
           , (0x4c47, fromIntegral (castFloatToWord32 lineGap))
           , (0x5049, fromIntegral (fromEnum pinned))

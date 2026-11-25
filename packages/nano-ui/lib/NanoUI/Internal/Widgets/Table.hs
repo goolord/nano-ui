@@ -542,7 +542,7 @@ flatLayout = tight defaultLayout {layoutGap = 0}
 tableRowMinH :: Float
 tableRowMinH = 28
 
-textCellLayout, numCellLayout :: Layout
+textCellLayout, numCellLayout, numHeaderLayout :: Layout
 textCellLayout =
   (tight defaultLayout)
     { layoutWidth = Grow 1
@@ -556,6 +556,10 @@ numCellLayout =
   textCellLayout
     { layoutAlignX = AlignEnd
     , layoutFontVariant = FontMono
+    }
+numHeaderLayout =
+  numCellLayout
+    { layoutFontVariant = FontRegular
     }
 
 -- | Column @i@'s box: its stored width (never under 'minColW') once it has
@@ -856,19 +860,19 @@ tablePanes
     gridRowLay idxs = fillIf fillInner flatLayout {layoutMinW = minSum idxs}
     -- Header row and pinned rows, each followed by a rule. Used by both panes.
     headerBlock idxs = do
-      hs <- row' (gridRowLay idxs) $
+      let !rowLay = gridRowLay idxs
+          !colLays = map colBox idxs
+      hs <- row' rowLay $
         forM (zip [0 :: Int ..] idxs) $ \(k, i) -> do
           when (k > 0) $ void separator
           let isSort = isSortable i
               isActive = sortColIndex sort0 == i && isSort
               flags = (if isSort then sortMarkStyle sort0 i else 0) .|. buttonFlagTable
-              hdrLay = (cellLayout i) {layoutFontVariant = FontRegular}
+              hdrLay = if smallAt numeric i False then numHeaderLayout else textCellLayout
           withKey i $
             column' (colBox i) $
               renderHeader i isActive hdrLay flags
       void separator
-      let !rowLay = gridRowLay idxs
-          !colLays = map colBox idxs
       forM_ [0 .. pinnedN - 1] $ \ri -> do
         let !sourceIdx = indexPrimArray sorted ri
         withKey ("pin" :: Text, sourceIdx) $ do

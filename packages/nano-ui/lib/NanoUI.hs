@@ -806,6 +806,7 @@ module NanoUI
   , Flow (..)
   , AlignX (..)
   , AlignY (..)
+  , ItemsAlign (..)
   , Padding (..)
   , defaultLayout
   , askDefaultLayout
@@ -835,6 +836,11 @@ module NanoUI
   , alignTop
   , alignBottom
   , alignBaseline
+  , itemsAlign
+  , itemsStart
+  , itemsCenter
+  , itemsEnd
+  , itemsBaseline
   , tight
   , percent
   , gridMinColW

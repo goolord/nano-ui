@@ -699,7 +699,7 @@ renderTabStrip env fullR pids active = do
           (controlHit, tabArea) <- mouseArea (minH defaultTabH . maxW maxTabW) $
             columnWith (tight . gap 0 . fillH) $ do
               start <- liftIO (arenaCount arena)
-              rowWith (padXY 8 2 . gap 6 . alignMid . fillH) $ do
+              rowWith (padXY 8 2 . gap 6 . itemsCenter . fillH) $ do
                 case pgViewTab (geCfg env) of
                   Just viewTab -> viewTab pid isActive
                   Nothing ->

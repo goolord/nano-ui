@@ -75,6 +75,12 @@ module NanoUI.Internal.Layout.Arena.Types
   , parentIsRow
   , getAlignX
   , getAlignY
+  , readAlignX
+  , readAlignY
+  , getItemsAlign
+  , readItemsAlign
+  , effectiveAlignX
+  , effectiveAlignY
   , getFlow
   , isPinnedNode
   , hasPinnedBelow
@@ -124,7 +130,15 @@ import Data.Word (Word8, Word32, Word64)
 import GHC.Exts (RealWorld)
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Image (ImageLook, defaultImageConfig, imageLook)
-import NanoUI.Internal.Style (AlignX (..), AlignY, Flow (..), Padding (..), PointerMode (..), Sizing (..))
+import NanoUI.Internal.Style
+  ( AlignX (..)
+  , AlignY (..)
+  , Flow (..)
+  , ItemsAlign (..)
+  , Padding (..)
+  , PointerMode (..)
+  , Sizing (..)
+  )
 import NanoUI.Internal.StyleBits (BitField (..))
 import qualified NanoUI.Internal.StyleBits as SB
 import NanoUI.Internal.Types (Color (..), Rect (..), newZeroedPrimArray, rectNonEmpty)
@@ -634,7 +648,9 @@ data StyleCol
 -- * 'TagScrollBarSlot': a 'NanoUI.Internal.Font.ScrollBarSlot', which says where a
 --   scroll container's bar sits. The solver's measure pass writes it, so the
 --   input signature leaves it out and the layout cache restores it on a hit.
--- * 'TagAlignX', 'TagAlignY': the 'AlignX' and the 'AlignY'.
+-- * 'TagAlignX', 'TagAlignY': the 'AlignX' and 'AlignY' in bits 0..6, with bit
+--   7 set when the alignment was explicitly requested by a modifier.
+-- * 'TagItemsAlign': the container's cross-axis 'ItemsAlign' default.
 -- * 'TagIdSuperseded': whether a later node this frame reuses this node's
 --   widget id, as a table's scrolling pane reuses its frozen pane's
 --   ('setWidgetId', 'getIdSuperseded').
@@ -659,7 +675,7 @@ data TagCol
   = TagNodeType | TagDirection | TagWSizing | TagHSizing
   | TagScrollBarSlot | TagAlignX | TagAlignY | TagIdSuperseded
   | TagFlow | TagPinned | TagPinnedBelow | TagPointer | TagLineAlign
-  | TagScrollerBelow | TagSteadyHeight
+  | TagScrollerBelow | TagSteadyHeight | TagItemsAlign
   deriving (Enum, Bounded)
 
 -- | Columns of 'naArrTree'. A link that leads nowhere is -1.
@@ -954,15 +970,68 @@ parentIsRow na idx = do
   p <- getParent na idx
   if p < 0 then pure False else (== DirRow) <$> getDirection na p
 
+-- | Read a node's own horizontal alignment, masking off the explicit bit.
+{-# INLINE readAlignX #-}
+readAlignX :: NodeArenaArrays -> NodeIdx -> IO AlignX
+readAlignX a idx = do
+  raw <- readPrimArray (naArrTags a) (idx * tagStride + fromEnum TagAlignX)
+  pure $! toEnum (fromIntegral (raw .&. 0x7F))
+
+-- | Read a node's own vertical alignment, masking off the explicit bit.
+{-# INLINE readAlignY #-}
+readAlignY :: NodeArenaArrays -> NodeIdx -> IO AlignY
+readAlignY a idx = do
+  raw <- readPrimArray (naArrTags a) (idx * tagStride + fromEnum TagAlignY)
+  pure $! toEnum (fromIntegral (raw .&. 0x7F))
+
 -- | Horizontal alignment requested by the node.
 {-# INLINE getAlignX #-}
 getAlignX :: NodeArena -> NodeIdx -> IO AlignX
-getAlignX na idx = arenaArrays na >>= \a -> readTagEnum a idx TagAlignX
+getAlignX na idx = arenaArrays na >>= \a -> readAlignX a idx
 
 -- | Vertical alignment requested by the node.
 {-# INLINE getAlignY #-}
 getAlignY :: NodeArena -> NodeIdx -> IO AlignY
-getAlignY na idx = arenaArrays na >>= \a -> readTagEnum a idx TagAlignY
+getAlignY na idx = arenaArrays na >>= \a -> readAlignY a idx
+
+-- | Read a container's cross-axis 'ItemsAlign' default.
+{-# INLINE readItemsAlign #-}
+readItemsAlign :: NodeArenaArrays -> NodeIdx -> IO ItemsAlign
+readItemsAlign a idx = readTagEnum a idx TagItemsAlign
+
+-- | Cross-axis 'ItemsAlign' default requested by the container.
+{-# INLINE getItemsAlign #-}
+getItemsAlign :: NodeArena -> NodeIdx -> IO ItemsAlign
+getItemsAlign na idx = arenaArrays na >>= \a -> readItemsAlign a idx
+
+-- | Effective horizontal alignment of child @idx@ inside a column with
+-- cross-axis default @pItems@. An explicit or non-default child alignment
+-- overrides @pItems@.
+{-# INLINE effectiveAlignX #-}
+effectiveAlignX :: NodeArenaArrays -> ItemsAlign -> NodeIdx -> IO AlignX
+effectiveAlignX a pItems idx = do
+  raw <- readPrimArray (naArrTags a) (idx * tagStride + fromEnum TagAlignX)
+  if pItems == ItemsStart || raw /= 0
+    then pure $! toEnum (fromIntegral (raw .&. 0x7F))
+    else pure $! case pItems of
+      ItemsCenter -> AlignCenter
+      ItemsEnd -> AlignEnd
+      _ -> AlignStart
+
+-- | Effective vertical alignment of child @idx@ inside a row or grid with
+-- cross-axis default @pItems@. An explicit or non-default child alignment
+-- overrides @pItems@.
+{-# INLINE effectiveAlignY #-}
+effectiveAlignY :: NodeArenaArrays -> ItemsAlign -> NodeIdx -> IO AlignY
+effectiveAlignY a pItems idx = do
+  raw <- readPrimArray (naArrTags a) (idx * tagStride + fromEnum TagAlignY)
+  if pItems == ItemsStart || raw /= 0
+    then pure $! toEnum (fromIntegral (raw .&. 0x7F))
+    else pure $! case pItems of
+      ItemsCenter -> AlignMiddle
+      ItemsEnd -> AlignBottom
+      ItemsBaseline -> AlignBaseline
+      _ -> AlignTop
 
 -- | How the node lays out its flow children.
 {-# INLINE getFlow #-}

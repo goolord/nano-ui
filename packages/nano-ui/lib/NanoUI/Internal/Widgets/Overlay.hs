@@ -194,7 +194,7 @@ overlay isModal hasChrome shape open title child = do
       if hasChrome
         then do
           close <-
-            row' (tight . gap 6 . alignMid . fixedH barH . fillW $ defaultLayout) $ do
+            row' (tight . gap 6 . itemsCenter . fixedH barH . fillW $ defaultLayout) $ do
               unless (T.null title) $
                 (if isModal then id else withKey title) (void (labelEx titleLayout title))
               flex

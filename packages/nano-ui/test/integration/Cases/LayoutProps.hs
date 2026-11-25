@@ -207,7 +207,7 @@ genMods =
     <*> frequency [(5, pure SFit), (1, pure SFill), (1, SGrow <$> choose (1, 3)), (1, SFixed <$> choose (30, 300))]
     <*> elements [0, 0, 4, 10]
     <*> elements [0, 0, 3, 8]
-    <*> choose (0, 3)
+    <*> choose (0, 7)
   where
     genWidth = frequency [(4, pure SFit), (2, pure SFill), (2, SGrow <$> choose (1, 3)), (1, SPercent <$> choose (20, 100)), (1, SFixed <$> choose (40, 400))]
 
@@ -262,6 +262,10 @@ renderBox axis = \case
     align = \case
       1 -> alignMid
       2 -> alignEnd
+      4 -> itemsCenter
+      5 -> itemsEnd
+      6 -> itemsBaseline
+      7 -> itemsCenter . alignMid
       _ -> id
 
 -- | What the checks read of one node.
