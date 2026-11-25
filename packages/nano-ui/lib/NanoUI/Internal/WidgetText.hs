@@ -1,4 +1,4 @@
--- | Widget labels, numeric/colour formatting, and packed node-style encodings
+-- | Widget labels, numeric/color formatting, and packed node-style encodings
 -- shared by construction, layout, and painting.
 module NanoUI.Internal.WidgetText
   ( treeEncodeStyle
@@ -227,7 +227,7 @@ selectChevronCenterX x w = x + w - selectChevronReserve / 2
 colorPickerGap :: Float
 colorPickerGap = 4
 
--- Height of a colour picker's field row; the field grows to a square this tall.
+-- | Height of a color picker's field row; the field grows to a square this tall.
 colorPickerSvH :: Float
 colorPickerSvH = 250
 
@@ -250,7 +250,7 @@ hexBytes =
   smallArrayFromList
     [T.justifyRight 2 '0' (T.pack (showHex n "")) | n <- [0 .. 255 :: Int]]
 
--- | Parse a hex colour, accepting an optional leading @#@ and either 6 or 8
+-- | Parse a hex color, accepting an optional leading @#@ and either 6 or 8
 -- digits. The fourth component is 'Nothing' for the six-digit form.
 colorPickerParseHex :: Text -> Maybe (Word8, Word8, Word8, Maybe Word8)
 colorPickerParseHex txt
@@ -272,7 +272,7 @@ colorFromHex txt = do
 -- | A text node's style index: the layout's font face, weight, slant and
 -- decoration, a row stripe code (see 'stripeColor'), and the tone (the
 -- 'Tone' plus one, or 0 for none). "NanoUI.Internal.StyleBits" places each
--- field. A colour-only variant packs as the regular face plus its tone, so
+-- field. A color-only variant packs as the regular face plus its tone, so
 -- it is measured in the base font.
 {-# INLINE packTextNodeStyle #-}
 packTextNodeStyle :: Layout -> Int -> Word64
@@ -527,9 +527,9 @@ hasFlag flag si = si .&. flag /= 0
 buttonVisualStyle :: Word64 -> Word64
 buttonVisualStyle si = si .&. SB.fieldMask SB.buttonVisual
 
--- | The colour of a widget label in font bits @font@ ('nodeFontBits') on a
+-- | The color of a widget label in font bits @font@ ('nodeFontBits') on a
 -- surface of @style@: the layout's 'NanoUI.Internal.Style.fontColor', else
--- its tone's, else the surface's text colour.
+-- its tone's, else the surface's text color.
 {-# INLINE labelColor #-}
 labelColor :: Theme -> Style -> Word64 -> Maybe Color -> Color
 labelColor theme style font = fromMaybe (maybe (styleFg style) (toneColor theme) (textNodeFontTone font))
@@ -569,7 +569,7 @@ tabHeaderPadX :: Float
 tabHeaderPadX = 12
 
 -- | Whether a button's label and adornments start at its left padding
--- ('tabHeaderPadX') rather than sit centred: a header of a vertical tab
+-- ('tabHeaderPadX') rather than sit centered: a header of a vertical tab
 -- strip.
 {-# INLINE tabLabelAtStart #-}
 tabLabelAtStart :: Word64 -> Bool

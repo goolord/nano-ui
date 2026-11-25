@@ -64,7 +64,7 @@ onTokens :: [Text] -> MarkdownDoc -> MarkdownDoc
 onTokens tokens = appendMarkdown (T.concat tokens)
 ```
 
-`MarkdownDoc` compares equality by source text (`markdownSource`). Unchanged blocks before the tail keep their widget IDs and skip re-measurement, layout, and repainting. For very long chat histories, combine this with `getScrollMetricsUi` to build only visible messages.
+`MarkdownDoc` compares equality by source text (`markdownSource`). Unchanged blocks before the tail keep their widget IDs and skip re-measurement, layout, and repainting. For very long chat histories, combine this with `getScrollMetrics` to build only visible messages.
 
 ## Customizing appearance
 

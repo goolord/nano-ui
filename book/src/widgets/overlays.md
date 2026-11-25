@@ -9,7 +9,7 @@ Modals, floating in-app windows, and popups are regular `NanoUI` actions control
 ```
 
 > [!CAUTION]
-> Call every overlay on every frame, even when it is closed. Wrapping `modal`, `window`, or `popup` inside `when isShown` shifts the widget IDs of every sibling after it whenever it opens or closes, breaking focus, carets, and per-row state. Closed overlays draw nothing.
+> Call every overlay on every frame, even when it is closed. Wrapping `modal`, `floatingWindow`, or `popup` inside `when isShown` shifts the widget IDs of every sibling after it whenever it opens or closes, breaking focus, carets, and per-row state. Closed overlays draw nothing.
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Overlays.hs:modal}}
@@ -35,13 +35,13 @@ If you want a modal backdrop and panel without a title bar or close button, use 
 
 ## Floating windows
 
-`window` creates a draggable, resizable floating panel with a scrollable body. Unlike a modal, the main UI and any other open floating windows remain interactive around it:
+`floatingWindow` creates a draggable, resizable floating panel with a scrollable body. Unlike a modal, the main UI and any other open floating windows remain interactive around it:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Overlays.hs:window}}
 ```
 
-`window'` returns both the body's result and a `Response`. Use `window` for inspectors, palettes, and tool panels that sit alongside the main view; use `modal` when the user needs to finish an interaction before returning to the page.
+`floatingWindow'` returns both the body's result and a `Response`. Use `floatingWindow` for inspectors, palettes, and tool panels that sit alongside the main view; use `modal` when the user needs to finish an interaction before returning to the page.
 
 ## Popups
 
@@ -56,9 +56,9 @@ Clicks on the anchor rectangle count as clicks inside the popup, so clicking the
 Key placement options:
 
 - `AnchorRect (respRect r)` anchors the popup to a widget; `AnchorPoint pos` anchors it to a specific coordinate.
-- `cfgPlacement` chooses where the popup opens (`PlacementAuto`, `PlacementBelow`, `PlacementAbove`, `PlacementAtCursor`, and others).
-- `cfgOffset` sets the pixel gap between the anchor and the popup.
-- `cfgDismissable = False` prevents automatic closing on Escape or outside clicks so you can handle dismissal explicitly via `popup'`.
+- `popupPlacement` chooses where the popup opens (`PlacementAuto`, `PlacementBelow`, `PlacementAbove`, `PlacementAtCursor`, and others).
+- `popupOffset` sets the pixel gap between the anchor and the popup.
+- `popupDismissable = False` prevents automatic closing on Escape or outside clicks so you can handle dismissal explicitly via `popup'`.
 
 Because anchored popups read `respRect` (which comes from the previous frame), warm up one frame in headless tests before clicking to open them. For tall popup menus, cap the height with `popupWith (maxH ...)` and place a scroller inside.
 
@@ -74,7 +74,7 @@ By default, tooltips appear after hovering for 0.5 seconds. Pass a `TooltipConfi
 
 ## Keep in mind
 
-- **Modals stack cleanly.** Escape dismisses the innermost modal first; sibling modals close in declaration order.
+- **Modals stack in declaration order.** Escape dismisses the innermost modal first; sibling modals close in declaration order.
 - **Keep the open `Var` alive outside conditional branches.** Allocate or read it in a scope that runs even while the overlay is hidden.
 - **Check focus after overlay calls** so focus queries see widgets declared inside open overlays.
 - **Avoid nested borders.** Putting a `scrollArea`, `panel`, or `card` inside a modal or popup draws a box inside a box; strip the inner chrome (see [Double borders](../troubleshooting/recurring-bugs.md#2-double-borders--box-in-a-box)).

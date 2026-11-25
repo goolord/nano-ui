@@ -1,4 +1,4 @@
--- | Interactive pane grid with resizable dividers, modelled on iced's
+-- | Interactive pane grid with resizable dividers, modeled on iced's
 -- @PaneGrid@. The layout is a binary split tree ('GridNode') kept in the
 -- widget store.
 --
@@ -139,7 +139,7 @@ data PaneGridConfig = PaneGridConfig
     -- ^ Panes that keep their size when the grid is resized (default
     -- @const False@). A pinned pane keeps its extent along its parent split's
     -- axis and the other side absorbs the change. It still yields to its
-    -- neighbour's minimum, and its divider can still be dragged. Only that one
+    -- neighbor's minimum, and its divider can still be dragged. Only that one
     -- split is pinned: a pinned sidebar keeps its width, but its row's height
     -- still follows the grid.
   , pgTree :: !PaneTree
@@ -163,8 +163,8 @@ data PaneGridConfig = PaneGridConfig
     --
     -- > pgTree = InitialTree (Just (Split 3 AxisV 0.25 (Pane 1) (Pane 2)))
   , pgDividerColor :: !(Maybe Color)
-    -- ^ The colour of the gutters between panes (default 'Nothing': a faint
-    -- tint of the panel colour with a line down the middle from
+    -- ^ The color of the gutters between panes (default 'Nothing': a faint
+    -- tint of the panel color with a line down the middle from
     -- 'themeSeparator'). The hover and drag highlight is drawn over it.
   , pgFocusable :: !Bool
     -- ^ Whether the grid is a Tab stop whose arrow, @m@, @x@ and Escape keys
@@ -273,9 +273,12 @@ data PaneGridResponse = PaneGridResponse
   , pgrMaximizedPane :: !Word64
     -- ^ Maximized pane id, 0 when none.
   , pgrDropTarget :: !(Maybe PaneGridDrop)
-    -- ^ Destination at the pointer, independent of any drag. Centers, gutters,
-    -- covered/clipped areas, maximization and internal gestures yield Nothing.
-    -- Resolve target priority before calling 'commitPaneDrop'.
+    -- ^ Destination at the pointer, independent of any drag. Pane edges yield
+    -- 'BesidePane', outer grid margins yield 'OutsideGrid', and pane centers
+    -- yield 'IntoTabs' when 'pgCenterDrop' is 'CenterTab' (or 'Nothing' when
+    -- 'CenterSwap'). Gutters, covered/clipped areas, maximization, and internal
+    -- gestures yield 'Nothing'. Resolve target priority before calling
+    -- 'commitPaneDrop'.
   }
   deriving (Eq, Show)
 
@@ -297,7 +300,8 @@ data PaneDropLocation
 data PaneGridDrop = PaneGridDrop !PaneDropLocation Rect !Word64 !WidgetId !GridState GridNode
   deriving (Eq, Show)
 
--- | Where the new pane would go: beside a pane, or around the whole grid.
+-- | Where the new pane would go: beside a pane, into a pane's tab group, or
+-- around the whole grid.
 pgdLocation :: PaneGridDrop -> PaneDropLocation
 pgdLocation (PaneGridDrop location _ _ _ _ _) = location
 
@@ -383,7 +387,7 @@ paneFocus tree g = (maxPane, focus)
 
 -- | Stateful split-pane workspace with draggable tabs and dividers. Keep its
 -- widget identity stable; pane callbacks receive actions for splits, closes,
--- and maximisation through 'PaneGridCtx'.
+-- and maximization through 'PaneGridCtx'.
 paneGrid :: PaneGridConfig -> NanoUI PaneGridResponse
 paneGrid cfg = case pgTree cfg of
   InitialTree t -> paneGridCore cfg False t
@@ -462,7 +466,7 @@ paneGridCore cfg controlled given = do
            in (moved, zone, rest)
         _ -> (False, Nothing, Nothing)
       lifted = dragMoved && heldIn MouseLeft inp
-      -- The store keeps the committed tree so a drag can be cancelled. The
+      -- The store keeps the committed tree so a drag can be canceled. The
       -- screen shows the post-drop tree with an empty slot, or the tree
       -- without the dragged pane when there is no target.
       (visibleTree, (visibleRegions, visibleDividers))
@@ -813,7 +817,7 @@ dividerWidget env axis =
         , widgetDraw = \cdc rect -> runCanvasFor cdc $ do
             let theme = cdcTheme cdc
                 panel = themePanel theme
-                -- The gutter as a vertical one; its centre line as a
+                -- The gutter as a vertical one; its center line as a
                 -- zero-width rect down it.
                 Rect x y w h = alongAxis axis rect
                 Rect lx ly lw lh = alongAxis axis (Rect (x + w / 2) y 0 h)

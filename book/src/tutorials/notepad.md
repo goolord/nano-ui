@@ -110,7 +110,7 @@ Only call `documentText` when you actually need a flat `Text` value (such as whe
 
 ## 7. Dirty state, window title, and the close prompt
 
-The window title is computed from the current file name and dirty flag on every frame, then passed to `setWindowTitleUi`:
+The window title is computed from the current file name and dirty flag on every frame, then passed to `setWindowTitle`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/Notepad.hs:window_title}}
@@ -119,7 +119,7 @@ The window title is computed from the current file name and dirty flag on every 
 {{#include ../../../packages/nano-ui-demo/examples/Notepad.hs:set_title}}
 ```
 
-`setWindowTitleUi` caches the last title and skips the OS call when nothing changed, so calling it unconditionally on every frame is safe and free. Imperative window commands like `resizeWindowUi` or `maximizeWindowUi` run on every call and must always sit behind an event check.
+`setWindowTitle` caches the last title and skips the OS call when nothing changed, so calling it unconditionally on every frame is safe and free. Imperative window commands like `resizeWindow` or `maximizeWindow` run on every call and must always sit behind an event check.
 
 Here is how `exitApp` and the confirmation modal connect:
 
@@ -158,7 +158,7 @@ Reading `doc` here causes the status bar to repaint whenever the document change
 ## 10. Things to try next
 
 - Persist a list of recently opened files across launches.
-- Turn the About dialog into a draggable, resizable floating `window`.
+- Turn the About dialog into a draggable, resizable `floatingWindow`.
 - Toggle word wrap through the editor's configuration.
 - Replace the OS title bar with a custom one using `windowCaption` and `windowFrame` (see [Desktop Windows](../advanced/window-management.md)).
 

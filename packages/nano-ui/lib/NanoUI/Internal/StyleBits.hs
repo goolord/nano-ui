@@ -51,7 +51,7 @@
 -- 0-1     pickerPart        NodeColorPicker
 -- @
 --
--- A @NodeBox@ keeps its fill colour's 32-bit word and a @NodeImage@ its look
+-- A @NodeBox@ keeps its fill color's 32-bit word and a @NodeImage@ its look
 -- in the whole index; the other node types keep nothing there.
 module NanoUI.Internal.StyleBits
   ( BitField (..)
@@ -105,7 +105,7 @@ module NanoUI.Internal.StyleBits
   , scrollMarker
   , scrollBare
   , scrollFocusable
-  -- * Colour picker
+  -- * Color picker
   , pickerPart
   -- * Layouts
   , styleLayouts
@@ -170,18 +170,22 @@ textFace = BitField 0 4
 stripe :: BitField
 stripe = BitField 4 4
 
+-- | Font weight ('NanoUI.Internal.Style.FontWeight').
 {-# INLINE textWeight #-}
 textWeight :: BitField
 textWeight = BitField 8 4
 
+-- | Font slant ('NanoUI.Internal.Style.FontStyle').
 {-# INLINE textSlant #-}
 textSlant :: BitField
 textSlant = BitField 12 2
 
+-- | Text decoration ('NanoUI.Internal.Style.TextDecoration').
 {-# INLINE textDecoration #-}
 textDecoration :: BitField
 textDecoration = BitField 14 2
 
+-- | Whether a text node uses tabular lining figures ('NanoUI.fontTabular').
 {-# INLINE textTabular #-}
 textTabular :: BitField
 textTabular = BitField 16 1
@@ -223,18 +227,22 @@ textFontKeyMask = fieldMask textFace .|. fieldMask textWeight .|. fieldMask text
 
 -- Text field flags ---------------------------------------------------------
 
+-- | Search input with leading icon and clear button ('NanoUI.searchInput').
 {-# INLINE inputSearch #-}
 inputSearch :: BitField
 inputSearch = BitField 26 1
 
+-- | Read-only selectable text node ('NanoUI.selectableText').
 {-# INLINE inputSelectable #-}
 inputSelectable :: BitField
 inputSelectable = BitField 28 1
 
+-- | Masked password input ('NanoUI.ticPassword').
 {-# INLINE inputPassword #-}
 inputPassword :: BitField
 inputPassword = BitField 29 1
 
+-- | Numeric input with steppers ('NanoUI.numericInput').
 {-# INLINE inputNumeric #-}
 inputNumeric :: BitField
 inputNumeric = BitField 30 1
@@ -276,18 +284,22 @@ tabStyle = BitField 0 2
 tabOrient :: BitField
 tabOrient = BitField 2 2
 
+-- | Indentation depth (0-255) of a tree row.
 {-# INLINE treeDepth #-}
 treeDepth :: BitField
 treeDepth = BitField 0 8
 
+-- | Whether a tree row has child rows.
 {-# INLINE treeHasKids #-}
 treeHasKids :: BitField
 treeHasKids = BitField 8 1
 
+-- | Whether a tree row's branch is currently expanded.
 {-# INLINE treeExpanded #-}
 treeExpanded :: BitField
 treeExpanded = BitField 9 1
 
+-- | Alternating-row stripe bit for a tree row.
 {-# INLINE treeOdd #-}
 treeOdd :: BitField
 treeOdd = BitField 10 1
@@ -304,10 +316,12 @@ labelFont = BitField 32 32
 
 -- Container ----------------------------------------------------------------
 
+-- | Inert container whose subtree ignores pointer and focus interaction.
 {-# INLINE containerInert #-}
 containerInert :: BitField
 containerInert = BitField 0 1
 
+-- | Container clips its children to its own laid-out rectangle.
 {-# INLINE containerClip #-}
 containerClip :: BitField
 containerClip = BitField 1 1
@@ -329,20 +343,24 @@ containerButtonGroup = BitField 3 1
 chromePart :: BitField
 chromePart = BitField 8 2
 
+-- | Tab strip visual style (0-3) stored on a tab chrome container.
 {-# INLINE chromeStyle #-}
 chromeStyle :: BitField
 chromeStyle = BitField 10 2
 
+-- | Tab strip orientation (0-3) stored on a tab chrome container.
 {-# INLINE chromeOrient #-}
 chromeOrient :: BitField
 chromeOrient = BitField 12 2
 
 -- Scroll container ---------------------------------------------------------
 
+-- | Horizontal 'NanoUI.ScrollPolicy' enum code (0-4).
 {-# INLINE scrollPolicyX #-}
 scrollPolicyX :: BitField
 scrollPolicyX = BitField 0 3
 
+-- | Vertical 'NanoUI.ScrollPolicy' enum code (0-4).
 {-# INLINE scrollPolicyY #-}
 scrollPolicyY :: BitField
 scrollPolicyY = BitField 3 3
@@ -352,6 +370,7 @@ scrollPolicyY = BitField 3 3
 scrollMarker :: BitField
 scrollMarker = BitField 6 1
 
+-- | Omit the scroll container's background well and border ('NanoUI.scrollBare').
 {-# INLINE scrollBare #-}
 scrollBare :: BitField
 scrollBare = BitField 7 1
@@ -362,7 +381,7 @@ scrollBare = BitField 7 1
 scrollFocusable :: BitField
 scrollFocusable = BitField 8 1
 
--- Colour picker ------------------------------------------------------------
+-- Color picker -------------------------------------------------------------
 
 -- | The 'NanoUI.Internal.Widgets.ColorPicker.ColorPickerPart' a node paints.
 {-# INLINE pickerPart #-}

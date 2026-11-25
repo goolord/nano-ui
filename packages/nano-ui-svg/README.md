@@ -9,6 +9,7 @@ import Data.Text (Text)
 import NanoUI
 import NanoUI.Draw.Svg (drawOpsToSvg)
 import NanoUI.Path qualified as P
+import NanoUI.Widgets.Custom (runCanvasFor)
 
 badgeSvg :: CustomDrawContext -> Text
 badgeSvg cdc = drawOpsToSvg bounds $ runCanvasFor cdc $ do

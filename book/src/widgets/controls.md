@@ -30,6 +30,11 @@ Reach for the primed variant (`button'`) whenever you need the `Response` for ho
 
 Wrap adjacent buttons (including `iconButton`, `toggleButton`, `buttonContent`, and `select`) in `buttonGroup` or `buttonGroupWith` to join them with zero gap, outer-only corner rounding, and shared 1-pixel internal borders.
 
+For selectable list items and collapsible sections without a full `table` or `tree`:
+
+- `selectableRow selected body` (plus `selectableRow'`, `selectableRowWith`, `selectableRowWith'`) renders a full-width clickable row that tints on hover and highlights when `selected` is `True`, returning `True` when clicked.
+- `collapsing title openVar body` (and `collapsingWith`) renders a toggle header with a disclosure arrow and runs `body` inside `scope` while `openVar` is `True`.
+
 ## Menus
 
 Menu rows are built from `menuItem` (returns `True` when clicked), `menuItemShortcut` (shows a shortcut label and activates on that chord while the menu is open), `menuSeparator`, and `menuItemDisabled`.
@@ -68,9 +73,9 @@ Input widgets display a `Var` and mutate it in place, keeping transient editing 
 | `checkbox` | `Text -> Var Bool -> NanoUI ()` | Checkbox with a label |
 | `toggleButton` | `Tone -> Text -> Var Bool -> NanoUI ()` | Two-state button filled with its tone color when active |
 | `radio` | `Foldable f => f Text -> Var Int -> NanoUI ()` | Radio button group indexed by position |
-| `boundedRadio` | `(Bounded a, Enum a) => (a -> Text) -> Var a -> NanoUI ()` | Radio group covering every constructor of an enum |
+| `enumRadio` / `enumRadioBy` | `(Bounded a, Enum a) => (a -> Text) -> Var a -> NanoUI ()` | Radio group covering every constructor of an enum (`enumRadio` uses `Show`) |
 | `select` | `Foldable f => f Text -> Var Int -> NanoUI ()` | Dropdown selector indexed by position |
-| `boundedSelect` | `(Bounded a, Enum a) => (a -> Text) -> Var a -> NanoUI ()` | Dropdown selector over every constructor of an enum |
+| `enumSelect` / `enumSelectBy` | `(Bounded a, Enum a) => (a -> Text) -> Var a -> NanoUI ()` | Dropdown selector over every constructor of an enum (`enumSelect` uses `Show`) |
 | `comboBox` | `Foldable f => Text -> f Text -> Var Text -> NanoUI ()` | Free-text field with filterable autocomplete suggestions |
 | `slider` | `Float -> Float -> Var Float -> NanoUI ()` | Continuous horizontal slider between min and max |
 | `textInput` | `Var Text -> NanoUI ()` | Single-line text input |
@@ -78,7 +83,7 @@ Input widgets display a `Var` and mutate it in place, keeping transient editing 
 | `numericInput` | `Var Double -> NanoUI ()` | Numeric input with increment/decrement steppers |
 | `colorPicker` | `Var Color -> NanoUI ()` | Saturation/value square and hue slider |
 
-Every widget in this table provides the standard variants: primed (`...'`) returns a `Response`, `...With` accepts a layout modifier, and `...Configured` accepts a config record:
+Every widget in this table provides a primed form (`...'`) returning a `Response`. Simpler controls (`checkbox`, `toggleButton`, `select`, `slider`) add `...With` for layout modifiers, while richer fields (`textInput`, `searchInput`, `numericInput`) add `...Configured` taking a config record (whose `*Layout` field carries any layout modifier):
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Controls.hs:configured}}

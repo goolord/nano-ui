@@ -12,7 +12,7 @@ Everything else in the toolkit (widgets, layout modifiers, focus, and keys) work
 
 `NanoUIE msg a` is a UI action that can only emit values of type `msg`. There is no `Typeable` constraint and no runtime casting, so emitting the wrong message type is caught at compile time.
 
-Under the hood, `NanoUIE msg a` is just a `NanoUI a` action with a message sink in scope (via the implicit parameter `?emit`). That means every core widget runs inside it without wrappers, and `NanoUI.Emit` re-exports all of `NanoUI` alongside the emission helpers below. Calling `emit` inside a container, modal, tab body, or menu callback sends messages straight to the enclosing view's sink.
+`NanoUIE msg a` is a `NanoUI a` action with a message sink in scope via the implicit parameter `?emit`. That means every core widget runs inside it without wrappers, and `NanoUI.Emit` re-exports all of `NanoUI` alongside the emission helpers below. Calling `emit` inside a container, modal, tab body, or menu callback sends messages straight to the enclosing view's sink.
 
 | Function | When it emits |
 | --- | --- |

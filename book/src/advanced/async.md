@@ -25,7 +25,7 @@ If you only care about the most recent completed result, `useTask` is simpler:
 How task lifecycles work:
 
 - **Key changes restart the job.** Whenever the key changes, `nano-ui` cancels the previous worker with an asynchronous exception and starts a new one.
-- **Skipping the hook cancels the job.** If a full frame runs without calling `useTask` (for instance, because the user switched to another tab or hid a conditional panel), the running worker is cancelled. Call `useTask` outside the tab or branch if work should keep going while hidden.
+- **Skipping the hook cancels the job.** If a full frame runs without calling `useTask` (for instance, because the user switched to another tab or hid a conditional panel), the running worker is canceled. Call `useTask` outside the tab or branch if work should keep going while hidden.
 - **Include a counter in the key to support retries.** Pressing Retry on the same input only restarts the task if the key changes (for example, `(query, attempt)`).
 - **Clean up resources with `bracket`.** Because cancellation arrives as an asynchronous exception, acquire files, sockets, or database handles inside `bracket` or `withFile`.
 - **Force results on the worker thread.** `useTask` evaluates the result to weak head normal form on the worker; if you return a lazy list, force its spine (`length found \`seq\` pure found`) before returning so evaluation does not happen on the UI thread.
@@ -39,7 +39,7 @@ Use `Stream` for background producers that emit values over time: download progr
 {{#include ../../../packages/nano-ui-demo/book/Book/Async.hs:stream}}
 ```
 
-The producer receives `update :: (s -> s) -> IO ()` and runs until it returns, throws, or gets cancelled. Each call to `update` wakes the frame loop; multiple pushes between frames coalesce automatically into a single redraw.
+The producer receives `update :: (s -> s) -> IO ()` and runs until it returns, throws, or gets canceled. Each call to `update` wakes the frame loop; multiple pushes between frames coalesce automatically into a single redraw.
 
 - **Stop by skipping the call.** Guarding `useStream` with `when isRunning` cancels the producer as soon as `isRunning` becomes `False`.
 - **Save state outside if you want pause/resume.** Stopping a stream discards its internal accumulator and restarts from the initial value next time.

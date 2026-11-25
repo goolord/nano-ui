@@ -49,7 +49,7 @@ Wrap any view with `withShader` to apply a post-processing effect to the whole r
 {{#include ../../../packages/nano-ui-demo/book/Book/Shaders.hs:subtree_effect}}
 ```
 
-`gaussianBlur` runs two separable 1D passes (horizontal then vertical) by pinging between pooled offscreen targets. Its bleed margin (`3 * sigma` pixels on each side) expands the offscreen target, cull test, and partial-damage region automatically so soft halos never clip at the widget edge.
+`gaussianBlur` runs two separable 1D passes (horizontal then vertical) by alternating between pooled offscreen targets. Its bleed margin (`3 * sigma` pixels on each side) expands the offscreen target, cull test, and partial-damage region automatically so soft halos never clip at the widget edge. Use `withShader'` when you need both the subtree's return value and its `Response`.
 
 Compatible effects fuse into a single GPU pass with zero extra offscreen targets:
 
@@ -64,13 +64,13 @@ Compatible effects fuse into a single GPU pass with zero extra offscreen targets
 
 ## Bounded loops in `FragM`
 
-Iterative kernels (blurs, shadows, multi-octave noise) use the `FragM` builder (`surfaceShaderM`, `colorEffectM`, `distortionEffectM`, `layerEffectM`) with explicit `bind` and structured `forRange` loops:
+Iterative kernels (blurs, shadows, multi-octave noise) use the `FragM` builder (`surfaceShaderM`, `colorEffectM`, `distortionEffectM`, `layerEffectM`) with explicit `bind`, branchless selection (`selectE`), and structured `forRange` loops:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Shaders.hs:blur_loop}}
 ```
 
-The first argument to `layerEffectM` reports the maximum sample offset in logical pixels (`V2 marginX marginY`) for the current uniform value.
+The first argument to `layerEffectM` reports the maximum sample offset in logical pixels (`V2 marginX marginY`) for the current uniform value. If you want to supply hand-written GLSL, MSL, or SPIR-V sources directly without the EDSL, import `NanoUI.Shader.Raw` from `nano-ui`.
 
 ## Built-in effects
 
@@ -85,7 +85,7 @@ The first argument to `layerEffectM` reports the maximum sample offset in logica
 
 ## Capabilities, fallbacks, and SVG export
 
-On SDL 3.4+, `RenderDriverAuto` selects SDL's `"gpu"` render driver when available (falling back cleanly to standard drivers or software rendering when unavailable). Inspect live GPU support inside a view with `askShaderCapabilities`:
+On SDL 3.4+, `RenderDriverAuto` selects SDL's `"gpu"` render driver when available (falling back to standard drivers or software rendering when unavailable). Inspect live GPU support inside a view with `askShaderCapabilities`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Shaders.hs:capabilities}}

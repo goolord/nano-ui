@@ -37,7 +37,7 @@ If any requested font fails to load, the session falls back to bundled Inter and
 
 Because browsers do not expose local filesystem paths, web file dialogs work directly on filenames and byte contents:
 
-- `openWebFiles opts` opens a file picker and returns each chosen file's name and bytes (`WebFile`), or `Nothing` if cancelled. `opts` accepts the same `FileDialogOptions` (`dialogFilters`, `dialogAllowMany`) as `nano-ui-sdl`.
+- `openWebFiles opts` opens a file picker and returns each chosen file's name and bytes (`WebFile`), or `Nothing` if canceled. `opts` accepts the same `FileDialogOptions` (`dialogFilters`, `dialogAllowMany`) as `nano-ui-sdl`.
 - `openWebFolder` reads every file in a selected directory, preserving relative paths inside that folder.
 - `saveWebFile opts name bytes` opens a native Save dialog in Chromium browsers (via `showSaveFilePicker`) and falls back to a standard browser download in Firefox and Safari, returning the saved filename. (Firefox prompts for a destination if its "Always ask you where to save files" setting is enabled, and otherwise saves straight to Downloads.)
 
@@ -79,11 +79,11 @@ PKG_CONFIG_PATH=~/.nano-ui-wasi/lib/pkgconfig packages/nano-ui-sdl-web/scripts/b
 python3 -m http.server -d dist-web 8000
 ```
 
-`build-wasi-deps.sh` cross-compiles FreeType, HarfBuzz, SDL3, and SDL3_ttf into `~/.nano-ui-wasi` with `-fPIC` (required for ghc-wasm-meta's shared Template Haskell linking) and Wasm exception handling (`-mllvm -wasm-enable-sjlj`, needed by FreeType's `setjmp`). Because SDL3 does not yet have a dedicated WASI target, the script patches three spots in SDL to build it cleanly as a single-threaded console Unix build.
+`build-wasi-deps.sh` cross-compiles FreeType, HarfBuzz, SDL3, and SDL3_ttf into `~/.nano-ui-wasi` with `-fPIC` (required for ghc-wasm-meta's shared Template Haskell linking) and Wasm exception handling (`-mllvm -wasm-enable-sjlj`, needed by FreeType's `setjmp`). Because SDL3 does not yet have a dedicated WASI target, the script patches three spots in SDL so it compiles as a single-threaded console Unix build.
 
-`build-web.sh [out-dir [cabal-target]]` compiles the target with `cabal.project.wasm` (defaulting to `nano-ui-sdl-web-demo`; pass `nano-ui-demo:exe:nano-ui-web-sampler` for the full sampler), optimizes the Wasm binary with `wasm-opt -O2` (override via `WASM_OPT_FLAGS`), and writes the HTML page, JS runtime, `main.wasm`, JSFFI glue, and [browser_wasi_shim](https://github.com/bjorn3/browser_wasi_shim) into `out-dir` (`dist-web/` by default). `cabal.project.wasm` enables `split-sections` so unused code strips cleanly; in the landing demo, roughly 2 MB of the binary is C libraries (FreeType, HarfBuzz, SDL, SDL_ttf, RTS, libc) and the rest is Haskell. Make sure `node` is on `PATH`, since Template Haskell embeds the bundled Inter font via Node.js.
+`build-web.sh [out-dir [cabal-target]]` compiles the target with `cabal.project.wasm` (defaulting to `nano-ui-sdl-web-demo`; pass `nano-ui-demo:exe:nano-ui-web-sampler` for the full sampler), optimizes the Wasm binary with `wasm-opt -O2` (override via `WASM_OPT_FLAGS`), and writes the HTML page, JS runtime, `main.wasm`, JSFFI glue, and [browser_wasi_shim](https://github.com/bjorn3/browser_wasi_shim) into `out-dir` (`dist-web/` by default). `cabal.project.wasm` enables `split-sections` so unused code strips out at link time; in the landing demo, roughly 2 MB of the binary is C libraries (FreeType, HarfBuzz, SDL, SDL_ttf, RTS, libc) and the rest is Haskell. Make sure `node` is on `PATH`, since Template Haskell embeds the bundled Inter font via Node.js.
 
-Verify a built directory in headless Chromium with `scripts/smoke-test.cjs <dir> <x> <y>`, which checks that the app updates the document title, renders text, and redraws cleanly after a click with zero console errors. CI runs this pipeline in `.github/workflows/web.yml` and publishes the output to GitHub Pages.
+Verify a built directory in headless Chromium with `scripts/smoke-test.cjs <dir> <x> <y>`, which checks that the app updates the document title, renders text, and redraws after a click with zero console errors. CI runs this pipeline in `.github/workflows/web.yml` and publishes the output to GitHub Pages.
 
 ## Building and testing natively
 
@@ -97,4 +97,4 @@ Key differences from `nano-ui-sdl`:
 
 - **Fonts:** No local font directories; fonts come from Chromium's Local Font Access API or a configured web font service (see [Fonts](#fonts)), fallbacks come from `webFallbackFonts`, and bold/italic weights are synthesized when separate face files are absent.
 - **Clipboard:** Paste reads the browser's `paste` event and copy writes via `navigator.clipboard`; clipboard reads from Haskell only see text previously copied or pasted inside the page.
-- **Windowing:** The browser `<canvas>` acts as the single window. `setWindowTitleUi` updates `document.title`, while `nativeWindow`, screenshots, and OS file drops are unsupported, and file dialogs operate on bytes rather than paths (see [File dialogs](#file-dialogs)).
+- **Windowing:** The browser `<canvas>` acts as the single window. `setWindowTitle` updates `document.title`, while `nativeWindow`, screenshots, and OS file drops are unsupported, and file dialogs operate on bytes rather than paths (see [File dialogs](#file-dialogs)).

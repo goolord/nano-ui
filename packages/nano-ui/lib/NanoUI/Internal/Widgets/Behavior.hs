@@ -120,7 +120,7 @@ recordDragPress :: Context -> Int -> IO ()
 recordDragPress ctx key = leftPress ctx >>= modifyStore ctx . insertSpec slotDragPress key
 
 -- | Whether a press at @mouse@ on a track of widget @owner@ is covered
--- ('pointerCovered'). A track wider than its owner (a colour picker's bar)
+-- ('pointerCovered'). A track wider than its owner (a color picker's bar)
 -- takes presses beside the owner too, where the pointer reaches what holds
 -- the owner rather than the owner itself: there only a node that is none of
 -- the owner's ancestors covers it.

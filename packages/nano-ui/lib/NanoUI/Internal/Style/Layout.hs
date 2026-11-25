@@ -159,7 +159,7 @@ data Flow
     Layered
   deriving (Eq, Show, Enum, Bounded, Ord)
 
--- | Horizontal alignment: left, centre, or right.
+-- | Horizontal alignment: left, center, or right.
 data AlignX = AlignStart | AlignCenter | AlignEnd
   deriving (Eq, Show, Enum, Bounded, Ord)
 
@@ -170,7 +170,7 @@ data AlignY = AlignTop | AlignMiddle | AlignBottom | AlignBaseline
   deriving (Eq, Show, Enum, Bounded, Ord)
 
 -- | Where 'AlignX' puts content across the room left over: 0 at the left, 0.5
--- centred, 1 at the right.
+-- centered, 1 at the right.
 {-# INLINE alignXFraction #-}
 alignXFraction :: AlignX -> Float
 alignXFraction AlignStart = 0
@@ -178,7 +178,7 @@ alignXFraction AlignCenter = 0.5
 alignXFraction AlignEnd = 1
 
 -- | Where 'AlignY' puts content down the room left over: 0 at the top, 0.5
--- centred, 1 at the bottom. 'AlignBaseline' counts as 'AlignTop': only a row
+-- centered, 1 at the bottom. 'AlignBaseline' counts as 'AlignTop': only a row
 -- has a baseline to share, and it places those children itself.
 {-# INLINE alignYFraction #-}
 alignYFraction :: AlignY -> Float
@@ -209,7 +209,7 @@ data FontVariant
   | FontMono
   deriving (Eq, Show, Enum, Bounded, Ord)
 
--- | A semantic theme colour ('NanoUI.Internal.Style.Theme.toneColor') for text
+-- | A semantic theme color ('NanoUI.Internal.Style.Theme.toneColor') for text
 -- ('fontTone') and buttons.
 data Tone
   = Accent
@@ -252,7 +252,7 @@ type LayoutModifier = Layout -> Layout
 -- | Layout and text options for a node. Lengths use logical pixels. Font size
 -- 0 selects the backend default, positive values set an explicit logical size,
 -- and negative values encode a scale factor relative to the backend default
--- ('fontSizeScale'); 'Nothing' for font colour uses the theme.
+-- ('fontSizeScale'); 'Nothing' for font color uses the theme.
 data Layout = Layout
   { layoutDirection :: !Direction
   , layoutWidth :: !Sizing
@@ -546,7 +546,7 @@ fontRegular l = l {layoutFontVariant = FontRegular}
 fontHeading :: Layout -> Layout
 fontHeading = fontMedium
 
--- | Text in the theme's muted colour: 'fontTone' 'Muted'.
+-- | Text in the theme's muted color: 'fontTone' 'Muted'.
 {-# INLINE fontMuted #-}
 fontMuted :: Layout -> Layout
 fontMuted = fontTone Muted
@@ -556,12 +556,12 @@ fontMuted = fontTone Muted
 fontMono :: Layout -> Layout
 fontMono l = l {layoutFontVariant = FontMono}
 
--- | Text in the theme's danger colour: 'fontTone' 'Danger'.
+-- | Text in the theme's danger color: 'fontTone' 'Danger'.
 {-# INLINE fontDanger #-}
 fontDanger :: Layout -> Layout
 fontDanger = fontTone Danger
 
--- | Colour text with a tone. 'fontColor' takes precedence.
+-- | Color text with a tone. 'fontColor' takes precedence.
 {-# INLINE fontTone #-}
 fontTone :: Tone -> Layout -> Layout
 fontTone t l = l {layoutFontTone = Just t}
@@ -597,7 +597,7 @@ resolveFontSize baseSize stored
        in if abs (s - 1) <= 1.0e-5 then 0 else max 1 (baseSize * s)
   | otherwise = 0
 
--- | Override the theme's text colour for this node.
+-- | Override the theme's text color for this node.
 {-# INLINE fontColor #-}
 fontColor :: Color -> Layout -> Layout
 fontColor col l = l {layoutFontColor = Just col}
@@ -678,7 +678,7 @@ fontStrike l =
 alignStart :: Layout -> Layout
 alignStart l = l {layoutAlignX = AlignStart, layoutAlignExplicit = layoutAlignExplicit l .|. 1}
 
--- | Centre horizontally in the available space.
+-- | Center horizontally in the available space.
 {-# INLINE alignCenter #-}
 alignCenter :: Layout -> Layout
 alignCenter l = l {layoutAlignX = AlignCenter, layoutAlignExplicit = layoutAlignExplicit l .|. 1}
@@ -878,7 +878,7 @@ newtype LineAlign = LineAlign Word8
 pattern LinesStart :: LineAlign
 pattern LinesStart = LineAlign 0
 
--- | Centred on the main axis.
+-- | Centered on the main axis.
 pattern LinesCenter :: LineAlign
 pattern LinesCenter = LineAlign 1
 

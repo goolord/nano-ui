@@ -70,11 +70,13 @@ A container wraps a `NanoUI` action and positions its children. Use the plain fo
 </details>
 
 <details class="nano-example">
-<summary><code>callout</code>: a panel tinted with a semantic color</summary>
+<summary><code>callout</code> / <code>calloutTone</code>: a panel tinted with a semantic color</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:callout}}
 ```
+
+`calloutTone Warning body` resolves a theme `Tone` directly instead of taking an explicit `Color`.
 
 <img class="nano-example-shot" src="../images/layout/callout.svg" alt="An amber callout warning about an expiring certificate.">
 
@@ -103,9 +105,9 @@ A container wraps a `NanoUI` action and positions its children. Use the plain fo
 </details>
 
 <details class="nano-example">
-<summary><code>responsive</code> / <code>responsiveRowCol</code>: switch layouts at a breakpoint</summary>
+<summary><code>responsive</code> / <code>responsiveRowCol</code> / container queries: switch layouts at a breakpoint</summary>
 
-`responsive breakpoint wide narrow body` chooses between two containers based on window width; `responsiveRowCol` switches between a row and a column.
+`responsive breakpoint wide narrow body` chooses between two containers based on window width; `responsiveRowCol` switches between a row and a column. For layouts inside split panes or sidebars that depend on the enclosing container's own inner width rather than the window, use `responsiveIn`, `responsiveRowColIn`, `withContainerQuery`, `withContainerWidth`, or `withContainerSize`. `withContainerQuery` projects the inner `Size` to any `Eq` value and only schedules a follow-up frame when that projected value changes.
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:responsive}}
@@ -393,11 +395,13 @@ Modifiers are plain `Layout -> Layout` functions chained with `(.)`. Because the
 
 </details>
 
-### Alignment and wrapping
+### Alignment, distribution, and wrapping
 
-`alignStart`, `alignCenter`, and `alignEnd` position a child horizontally inside a column. `alignTop`, `alignMid`, `alignBottom`, and `alignBaseline` position a child vertically inside a row.
+`alignStart`, `alignCenter`, and `alignEnd` position a child horizontally inside a column. `alignTop`, `alignMiddle`, `alignBottom`, and `alignBaseline` position a child vertically inside a row.
 
-Every `align*` modifier applies to the node it is placed on, not to that node's children. Putting `alignMid` on a `row` centers the row inside its parent. To align the children *inside* a container across its cross axis, put `itemsStart`, `itemsCenter`, `itemsEnd`, or `itemsBaseline` (or `itemsAlign`) on the container itself: `rowWith (itemsCenter . gap 8)` vertically centers every child that does not set its own vertical alignment, and `columnWith itemsCenter` centers fit-width children horizontally without affecting left-aligned text inside `fillW` labels. Any explicit `align*` modifier on a child (including `alignTop` or `alignStart`) overrides the container default, and `itemsAlign` never leaks into nested containers or pinned children.
+Every `align*` modifier applies to the node it is placed on, not to that node's children. Putting `alignMiddle` on a `row` centers the row inside its parent. To align the children *inside* a container across its cross axis, put `itemsStart`, `itemsCenter`, `itemsEnd`, `itemsBaseline`, or `itemsStretch` (or `itemsAlign`) on the container itself: `rowWith (itemsCenter . gap 8)` vertically centers every child that does not set its own vertical alignment, `columnWith itemsCenter` centers fit-width children horizontally without affecting left-aligned text inside `fillW` labels, and `itemsStretch` stretches fit-sized children across the cross axis. To distribute leftover space along a container's main axis, use `justifyStart`, `justifyCenter`, `justifyEnd`, or `justifyBetween` (or `justify`). Any explicit `align*` modifier on a child (including `alignTop` or `alignStart`) overrides the container default, and `itemsAlign` never leaks into nested containers or pinned children.
+
+Additional sizing and flow helpers include `fitW` / `fitH`, `growW` / `growH`, `percentH`, `spacerW` / `spacerH`, `direction`, and `clipBox` (clips children without painting a panel border or fill).
 
 <details class="nano-example">
 <summary><code>alignStart</code>: align to the left edge</summary>
@@ -444,7 +448,7 @@ Every `align*` modifier applies to the node it is placed on, not to that node's 
 </details>
 
 <details class="nano-example">
-<summary><code>alignMid</code>: center vertically</summary>
+<summary><code>alignMiddle</code>: center vertically</summary>
 
 ```haskell
 {{#include ../../../packages/nano-ui-svg/app/LayoutExamples.hs:alignmid}}
@@ -556,20 +560,20 @@ A scroll container must have a bounded viewport along its scroll axis:
 
 If none of the scroller's ancestors constrain its size, `grow` leaves it with nothing to measure against.
 
-- `scrollWith` scrolls vertically and returns its body's result.
-- `scrollArea` also returns the scroller's `WidgetId` for programmatic scrolling.
-- `scroll2DWith` and `scrollArea2D` scroll both horizontally and vertically.
+- `scrollWith` scrolls vertically and returns its body's result; `scrollWith'` also returns the scroller's `Response` (including `respId`).
+- `scroll2DWith` and `scroll2DWith'` scroll both horizontally and vertically.
+- `scrollConfigured` and `scrollConfigured'` accept a `ScrollConfig`: choose per-axis `ScrollPolicy` (`ScrollAuto`, `ScrollAlways`, `ScrollNone`, `ScrollHidden`, or `ScrollOverlay` for a floating thumb without a reserved gutter), set `scrollBare = True` to omit the well background and border, or set `scrollFocusable = True` for keyboard-driven list views.
 - A full-viewport scroller (`scrollWith grow`) drops its bordered input well and fills with `pageBackground` (`themeWindow` by default). Wrap the view in `styled panelPage` if you want the page background to match the panel surface instead.
 
 ### Virtualization
 
-For lists with tens of thousands of rows, build only the rows currently inside the viewport and pad above and below them with spacers. Grab the scroller's ID first and read its previous-frame layout with `getScrollMetricsUi`:
+For lists with tens of thousands of rows, build only the rows currently inside the viewport and pad above and below them with spacers. Grab the scroller's ID first and read its previous-frame layout with `getScrollMetrics`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Layout.hs:virtualized}}
 ```
 
-Use `scrollViewport` rather than the outer container rectangle for the visible height, since `scrollViewport` already subtracts padding and the scrollbar lane. `scrollOffset` gives the current scroll position. Calling `getScrollMetricsUi` registers a layout dependency, so resizing the window triggers a fresh frame automatically.
+Use `scrollViewport` rather than the outer container rectangle for the visible height, since `scrollViewport` already subtracts padding and the scrollbar lane. `scrollOffset` gives the current scroll position. Calling `getScrollMetrics` registers a layout dependency, so resizing the window triggers a fresh frame automatically.
 
 For complete examples, look at `packages/nano-ui-demo/examples/LongList.hs` (100,000 rows) and `Logs.hs` (auto-scrolling log tail).
 
@@ -579,17 +583,17 @@ For complete examples, look at `packages/nano-ui-demo/examples/LongList.hs` (100
 {{#include ../../../packages/nano-ui-demo/book/Book/Layout.hs:reveal}}
 ```
 
-Inside a view, you can drive scrolling with `scrollToUi`, `scrollByUi`, `scrollPagesUi`, `scrollToStartUi`, `scrollToEndUi`, `scrollIntoViewUi`, `scrollRectIntoViewUi`, `setScrollOffsetUi`, and `setScrollStepUi`. Matching `Context` variants (`scrollTo`, `getScrollOffset2D`, and so on) are available in `IO`.
+Inside a view, you can drive scrolling with `scrollTo`, `scrollBy`, `scrollPages`, `scrollToStart`, `scrollToEnd`, `scrollIntoView`, `scrollRectIntoView`, `setScrollOffset`, and `setScrollStep`.
 
-For custom keyboard-driven lists without a full `table` or `tree`, set `scrollFocusable = True` in `ScrollConfig` so the scroller joins the Tab order and takes focus when passive content inside it is clicked. Pair its `WidgetId` with `useListNav` (uniform row height) or `useListNavWith` (custom per-row rectangles) to handle Up, Down, PageUp, PageDown, Home, End, Enter, and Space with automatic `scrollRectIntoViewUi`.
+For custom keyboard-driven lists without a full `table` or `tree`, set `scrollFocusable = True` in `ScrollConfig` so the scroller joins the Tab order and takes focus when passive content inside it is clicked. Pair its `WidgetId` with `useListNav` (uniform row height) or `useListNavWith` (custom per-row rectangles) and `selectableRow` to handle Up, Down, PageUp, PageDown, Home, End, Enter, and Space with automatic `scrollRectIntoView`.
 
-By default, one mouse-wheel notch scrolls 60 logical pixels. For uniform lists, match the wheel step to your row height so one notch advances exactly one row (`askContext` lives in `NanoUI.Monad`):
+By default, one mouse-wheel notch scrolls 60 logical pixels. For uniform lists, match the wheel step to your row height so one notch advances exactly one row:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Layout.hs:wheel_step}}
 ```
 
-You can also override the wheel step for a single scroller with `setScrollStepUi sid px`; passing `0` restores the context default.
+You can also override the wheel step for a single scroller with `setScrollStep sid px`; passing `0` restores the context default.
 
 ## Nesting and chrome
 

@@ -83,7 +83,7 @@ Common signs:
 {{#include ../../../packages/nano-ui-demo/book/Book/Troubleshooting.hs:strip_chrome}}
 ```
 
-- Match `themeFloatingWindow` and `themePopup` to your panel surface so padded content blends cleanly into the dialog.
+- Match `themeFloatingWindow` and `themePopup` to your panel surface so padded content blends into the dialog.
 - Between adjacent chrome regions, place a single `separator` in the parent instead of drawing touching borders on both sides.
 
 Both `stronghead` and `winget-gui` adopted these patterns to eliminate duplicate popover and dialog borders.
@@ -114,9 +114,9 @@ At 125% Windows display scaling, rows of 22.4 logical pixels round unevenly to 2
 
 Stacking a large label over a smaller label and centering by line boxes leaves extra empty space beneath the smaller line's baseline, making the pair look roughly 4 px too high. Either nudge it with `padTop`, or compute optical centering from the ink bounds and cap/x-height midpoints exposed by `FontMetrics`.
 
-### `alignMid` on a row aligns the row itself, not its children
+### `alignMiddle` on a row aligns the row itself, not its children
 
-Applying `alignMid` to a `row` centers the row inside its parent. To vertically center items *inside* the row, put `itemsCenter` on the row (or `alignMid` on individual children). The same holds for `itemsEnd` and `itemsBaseline`.
+Applying `alignMiddle` to a `row` centers the row inside its parent. To vertically center items *inside* the row, put `itemsCenter` on the row (or `alignMiddle` on individual children). The same holds for `itemsEnd` and `itemsBaseline`.
 
 ## 4. Stale cached drawings
 
@@ -160,7 +160,7 @@ The default wheel notch scrolls 60 logical pixels, which can feel awkward over 5
 {{#include ../../../packages/nano-ui-demo/book/Book/Layout.hs:wheel_step}}
 ```
 
-You can also override one scroller at a time with `setScrollStepUi`; pass `0` to revert to the context default.
+You can also override one scroller at a time with `setScrollStep`; pass `0` to revert to the context default.
 
 ## 6. Focus and input ordering
 
@@ -216,7 +216,7 @@ Any branch that runs different widget calls than its alternative shifts sibling 
 - [ ] `liftIO (newVar ...)` inside the view allocates a fresh `Var` every pass; move it to setup.
 - [ ] Unguarded side effects run every frame; wrap them in `whenM (button ...)` or an explicit event check.
 - [ ] Conditional widgets or `useVar` calls need `scope`; dynamic lists need `withKey` with stable IDs (never indices).
-- [ ] Call `modal`, `window`, and `popup` unconditionally every frame with a `Var Bool`.
+- [ ] Call `modal`, `floatingWindow`, and `popup` unconditionally every frame with a `Var Bool`.
 - [ ] Putting `useTask` inside a tab or conditional cancels the worker as soon as it is hidden.
 - [ ] Calling `keepAnimating` unconditionally at the top level creates a busy loop; call it inside the animating widget, and use `wakeAfter` for timers.
 - [ ] Writing a computed `NaN` to a `Var Float` redraws endlessly (`NaN /= NaN`); guard float math.

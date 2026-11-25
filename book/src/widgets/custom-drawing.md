@@ -190,7 +190,7 @@ Line joins control corners between consecutive segments. If a sharp miter point 
 
 ### Text
 
-`drawText pos alignX alignY txt color` places text relative to an anchor point (the red dot below). Alignment specifies which part of the text sits on that point: `AlignStart` anchors the left edge, `AlignTop` anchors the top of the line box, and `AlignBaseline` anchors the text baseline. Use `drawTextWith` with a `TextFont` to customize size, variant, weight, or slant.
+`drawText pos alignX alignY txt color` places text relative to an anchor point (the red dot below). Alignment specifies which part of the text sits on that point: `AlignStart` anchors the left edge, `AlignTop` anchors the top of the line box, and `AlignBaseline` anchors the text baseline. Use `drawTextWith` with a `TextFont` to customize size, variant, weight, or slant, and `drawTextClipped` / `drawTextClippedWith` to clip a single text draw to a sub-rectangle without pushing a separate `withClip` scope.
 
 <img src="../images/canvas/text.svg" alt="Eight cells showing the word Anchor placed against a red dot: left, center and right aligned; then top, middle, baseline and bottom aligned; and a large bold amber 42.">
 
@@ -198,7 +198,7 @@ Line joins control corners between consecutive segments. If a sharp miter point 
 {{#include ../../../packages/nano-ui-svg/app/CanvasExamples.hs:text}}
 ```
 
-Measure strings inside the view using `lineWidthUi` and `uiFontMetrics` (or trim them to fit with `truncateTextUi`) and pass those measurements into your drawing callback. Both helpers ensure the needed glyphs are loaded first. The pure `lineWidth` is only exact for text that has already been measured or drawn; otherwise it falls back to summing per-glyph advances, which drifts from HarfBuzz's unrounded shaped runs over long strings.
+Measure strings inside the view using `lineWidthUi` and `uiFontMetrics` (or trim them to fit with `truncateTextUi`) and pass those measurements into your drawing callback. Both helpers load and shape the needed glyphs first. The pure `lineWidth` is only exact for text that has already been measured or drawn; otherwise it falls back to summing per-glyph advances, which drifts from HarfBuzz's unrounded shaped runs over long strings.
 
 ### Borders: inset vs. centered
 
@@ -232,7 +232,7 @@ Without a version key, it stays frozen on the draw ops from its very first frame
 
 ## SVG icons
 
-Parse inline SVG markup with `parseSvg` or load a file once at startup with `loadSvg`. Any stroke or fill using `currentColor` automatically inherits the active text color (so `fontColor` and semantic tones tint it cleanly), while hard-coded colors in the SVG stay untouched:
+Parse inline SVG markup with `parseSvg` or load a file once at startup with `loadSvg`. Any stroke or fill using `currentColor` automatically inherits the active text color (so `fontColor` and semantic tones tint it directly), while hard-coded colors in the SVG stay untouched:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/CustomDrawing.hs:svg_icons}}

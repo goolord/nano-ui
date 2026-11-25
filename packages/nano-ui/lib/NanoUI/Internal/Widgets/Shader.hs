@@ -67,7 +67,7 @@ shaderBox' :: LayoutModifier -> Shader 'Surface u -> u -> NanoUI Response
 shaderBox' f = shaderConfigured' defaultShaderConfig {scLayout = f}
 
 -- | Paint a leaf 'Surface' shader node with explicit corner radius, fallback
--- colour (used on non-GPU backends and SVG export), and vertex tint.
+-- color (used on non-GPU backends and SVG export), and vertex tint.
 {-# INLINE shaderConfigured #-}
 shaderConfigured :: ShaderConfig -> Shader 'Surface u -> u -> NanoUI ()
 shaderConfigured cfg sh u = void (shaderConfigured' cfg sh u)

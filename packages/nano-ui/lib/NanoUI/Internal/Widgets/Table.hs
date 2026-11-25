@@ -1,5 +1,5 @@
 -- | Text tables described by Colonnade columns, with sorting, frozen panes,
--- column resizing/reordering, and row virtualisation.
+-- column resizing/reordering, and row virtualization.
 module NanoUI.Internal.Widgets.Table
   ( SortDir (..)
   , SortCol (..)
@@ -96,11 +96,11 @@ data TableConfig = TableConfig
   , tableSqueeze :: !Bool
   -- ^ Squeeze instead of scroll: when the table is narrower than the sum of
   -- its pinned widths (fixed columns, content floors, dragged widths), the
-  -- unfrozen columns shrink in proportion, none under 'minColW', rather than
-  -- surfacing a horizontal scrollbar. A stretch column takes part with a
-  -- bounded share, frozen columns keep their widths, and the vertical
-  -- scrollbar's lane comes off the room first. Off by default: a table too
-  -- wide for its pane keeps its sideways scroll.
+  -- unfrozen columns shrink in proportion (never below the 40-pixel column
+  -- floor) rather than surfacing a horizontal scrollbar. A stretch column takes
+  -- part with a bounded share, frozen columns keep their widths, and the
+  -- vertical scrollbar's lane comes off the room first. Off by default: a table
+  -- too wide for its pane keeps its sideways scroll.
   , tableBare :: !Bool
   -- ^ Omit the outer panel border and background well so a table embedded
   -- inside a pane blends directly onto the pane's surface (default 'False').

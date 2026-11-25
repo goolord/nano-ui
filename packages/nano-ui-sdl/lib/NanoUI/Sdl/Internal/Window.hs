@@ -385,27 +385,20 @@ setSdlHint name value =
     BS.useAsCString value $ \cvalue ->
       void $ setHint (PtrConst.unsafeFromPtr cname) (PtrConst.unsafeFromPtr cvalue)
 
--- | Create the window and renderer under the render driver the options ask
--- for, unless @SDL_RENDER_DRIVER@ in the environment names one.
+-- | Create a non-GPU renderer under the render driver the options ask for,
+-- unless @SDL_RENDER_DRIVER@ in the environment names one.
 --
--- 'RenderDriverAuto' asks for GL on Windows. Windows' modal size loop hands
--- the app one step at a time and cannot take the next until the app returns.
--- SDL's D3D11 renderer presents through a two-buffer flip-model swap chain,
--- so a present blocks until a back buffer comes free -- about a refresh --
--- even with vsync off. A drag presents a newly sized swap chain every step,
--- so those stalls land in the size loop and the window (and the pointer with
--- it) judders; the bigger the window, the worse. The GL renderer does not
--- block that way. Measured on a 120Hz display: present p99 6.4ms under d3d11
--- against a flawless drag under opengl. Benchmarks take the same driver as
--- the apps they stand in for, so their present numbers are numbers a user
--- can see.
+-- 'acquireWindowAndRenderer' tries SDL 3.4's @"gpu"@ driver first for
+-- 'RenderDriverAuto' (for shader support) and falls back here when no GPU
+-- device is available. On Windows, this fallback asks for @"opengl"@ rather
+-- than D3D11: Windows' modal size loop hands the app one step at a time, and
+-- SDL's D3D11 flip-model swap chain blocks present until a back buffer frees,
+-- stalling window resize drags (measured 6.4 ms present p99 at 120 Hz under
+-- d3d11 vs. smooth dragging under opengl).
 --
--- That guess is dropped again if the creation fails under it, and the
--- creation tried once more. A Windows machine whose GL will not create a
--- context -- a remote desktop session, a VM on the basic display adapter --
--- then opens on whatever SDL can give rather than failing to start. A driver
--- the caller chose is not retried: its failure is theirs to see, and a
--- creation that failed for some other reason should report that reason once.
+-- If GL context creation fails (remote desktop, basic display adapter VM),
+-- the hint is cleared and creation is retried with SDL's default driver. A
+-- driver the caller explicitly named is not retried.
 withRenderDriver :: RenderDriver -> IO a -> IO a
 withRenderDriver driver create = do
   fromEnv <- isJust <$> lookupEnv "SDL_RENDER_DRIVER"

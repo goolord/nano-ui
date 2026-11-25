@@ -641,7 +641,7 @@ module NanoUI
     -- completion. 'useTaskStatus' reports whether the task is running, done,
     -- or failed; 'useTask' returns the latest completed result. A task starts
     -- on the first frame it is called with a key, restarts when the key
-    -- changes, and is cancelled if the call is omitted on a later frame.
+    -- changes, and is canceled if the call is omitted on a later frame.
     -- Allocate @searchTask <- newTask@ during setup:
     --
     -- > query <- useVar ""

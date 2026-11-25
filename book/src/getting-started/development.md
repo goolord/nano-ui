@@ -103,7 +103,7 @@ python scripts/profile/summarize_prof.py profile-json.prof
 
 ### Source line budget
 
-`source-budget.py <git-rev>` reports the net lines of library code changed since a given commit (`packages/*/lib` and `cbits`, excluding `nano-ui-demo`). It counts both raw lines and lines after formatting each modified Haskell file through `fourmolu` on stdin, ensuring pure reformatting does not masquerade as code reduction. It requires `fourmolu` on `PATH` and never modifies files on disk.
+`source-budget.py <git-rev>` reports the net lines of library code changed since a given commit (`packages/*/lib` and `cbits`, excluding `nano-ui-demo`). It counts both raw lines and lines after formatting each modified Haskell file through `fourmolu` on stdin, so pure reformatting does not masquerade as code reduction. It requires `fourmolu` on `PATH` and never modifies files on disk.
 
 ## Haddocks and Hoogle
 
@@ -127,4 +127,4 @@ Every Haskell snippet in this book comes from an anchored region of a compiled m
 
 ## Module conventions
 
-See [Ecosystem Packages](../packages/index.md) for the companion packages. In `packages/nano-ui/lib`, the public API consists of `NanoUI` (with `packages/nano-ui/lib/NanoUI.hs` holding the full export list) and `NanoUI.Widgets.*`. Modules under `NanoUI.Internal.*` are exposed for backends and tests and may change without notice between minor releases.
+See [Ecosystem Packages](../packages/index.md) for the companion packages. In `packages/nano-ui/lib`, `NanoUI` (`packages/nano-ui/lib/NanoUI.hs`) re-exports the core view API, while specialized public modules cover focused subsystems: `NanoUI.Themes`, `NanoUI.Chrome`, `NanoUI.Path`, `NanoUI.Shortcut`, `NanoUI.Svg`, `NanoUI.Shader.Raw`, `NanoUI.Effectful`, `NanoUI.Widgets.PaneGrid`, `NanoUI.Widgets.TextDocument`, `NanoUI.Widgets.Custom`, `NanoUI.Testing` / `NanoUI.Testing.Sim`, and `NanoUI.Backend` / `NanoUI.Runner`. Modules under `NanoUI.Internal.*` are exposed for companion packages and tests and may change without notice between minor releases.

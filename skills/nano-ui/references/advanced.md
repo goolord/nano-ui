@@ -17,7 +17,7 @@ Custom widgets that accept keyboard input declare their claimed keys via `widget
 - **Scoped lifetimes (preferred):** Allocate `owner <- newImageHandle` during setup and call `useImageRgba owner key w h pixels` inside the view. The atlas slot frees automatically when the key changes or a frame completes without calling `useImageRgba`.
 - **Session-wide images:** Allocate an ID with `freshImageId`, upload once via `registerImageRgba iid w h bytes`, and free manually with `releaseImageRgba`.
 - **Layout and fitting:** `image mods iid` stretches to its bounds. `imageConfigured` supports CSS-style `ContentFit` (`FitContain`, `FitCover`, `FitFill`, `FitScaleDown`, `FitNone`), alignment, sub-rectangle crop, zoom, opacity, and rotation.
-- **SVG icons:** Parse once at setup with `parseSvg` or `loadSvg` and render via `svgIcon` / `svgIconConfigured`. Single-color SVGs using `stroke="currentColor"` or `fill="currentColor"` inherit the current text color, so one 24 px icon adapts cleanly to any theme or tone.
+- **SVG icons:** Parse once at setup with `parseSvg` or `loadSvg` and render via `svgIcon` / `svgIconConfigured`. Single-color SVGs using `stroke="currentColor"` or `fill="currentColor"` inherit the current text color, so one 24 px icon adapts to any theme or tone.
 - **Lazy loading:** Wrap thumbnails in `sensorConfigured` with `sensorAnticipate` to load images shortly before they scroll into view.
 
 ## Multi-line text editing
@@ -27,11 +27,11 @@ Custom widgets that accept keyboard input declare their claimed keys via `widget
 ## Window management
 
 - Configure initial windows with `WindowSettings` (`wsTitle`, logical `wsSize`, `wsMinSize`, window mode, transparency).
-- Inside a view, `askWindow` reads live `WindowState` and triggers redraws whenever window metadata changes. Declarative setters (`setWindowTitleUi`, `setWindowModeUi`, and so on) are no-ops when unchanged and safe to call every frame; imperative commands (`resizeWindowUi`, `maximizeWindowUi`, and so on) run every time and belong behind events.
-- **Close confirmation:** Set `wsExitOnCloseRequest = False`, watch `winCloseRequested <$> askWindow` (true for one frame only), copy it into a `Var` to open a confirmation `modal`, and call `quitUi` once confirmed.
-- **Multiple windows:** Call `nativeWindow openVar settings body` unconditionally every frame like `modal`. Each window has independent focus and widget state, re-evaluates its `body` after `Var` changes and parent frames (so closures over parent bindings stay fresh), and closes only itself on `quitUi`.
+- Inside a view, `askWindow` reads live `WindowState` and triggers redraws whenever window metadata changes. Declarative setters (`setWindowTitle`, `setWindowMode`, and so on) are no-ops when unchanged and safe to call every frame; imperative commands (`resizeWindow`, `maximizeWindow`, and so on) run every time and belong behind events.
+- **Close confirmation:** Set `wsExitOnCloseRequest = False`, watch `winCloseRequested <$> askWindow` (true for one frame only), copy it into a `Var` to open a confirmation `modal`, and call `quit` once confirmed.
+- **Multiple windows:** Call `nativeWindow openVar settings body` unconditionally every frame like `modal`. Each window has independent focus and widget state, re-evaluates its `body` after `Var` changes and parent frames (so closures over parent bindings stay fresh), and closes only itself on `quit`.
 - **Screenshots:** `requestScreenshot` (callback after present), `askScreenshot` (blocking `IO` trigger for worker threads), and `useScreenshot` (keyed `Task` hook).
-- **Custom title bars (SDL):** Set `sdlWindowDecorations = DecorationsNone` or `DecorationsFrame`, and pair with `windowCaption` (or `captionButtons`, `dragSpans`, and `windowFrame`).
+- **Custom title bars (SDL):** Set `sdlWindowDecorations = DecorationsNone` or `DecorationsFrame`, and pair with `windowCaption` (or `captionButtons`, `dragSpans`, and `windowFrame` from `NanoUI.Chrome`).
 
 ## SDL specifics
 

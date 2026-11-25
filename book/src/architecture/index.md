@@ -70,7 +70,7 @@ Calling `requestFrame` schedules one immediate follow-up frame whenever an actio
 | Has one central domain state updated by workers or CLI commands | Pattern A (`IORef` + `askWake`) |
 | Consists of many interactive tool panes and inspectors | Pattern B (record of `Var`s) |
 | Wraps an existing domain model or library | Pattern C (app-owned `IORef` + `requestFrame`) |
-| Models cleanly as pure `Msg -> Model -> Model` transitions | Elm-style (`nano-ui-emit`) |
+| Fits pure `Msg -> Model -> Model` state transitions | Elm-style (`nano-ui-emit`) |
 | Is a small utility or prototype | Keep it simple: a few `useVar` calls are plenty |
 
 These patterns mix freely. Combining an `IORef` for domain data with `useVar` for view-local flags is standard, and an Elm-style reducer can happily run a single pane inside a larger `Var`-based app.

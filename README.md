@@ -25,7 +25,7 @@ counter = row $ do
 ## Features
 
 - Built-in widgets: text inputs, multi-line documents with undo, sortable tables, trees, tabs, menus, modals, floating windows, dockable pane grids, charts, and Markdown
-- Custom widgets and a 2D vector canvas with paths, strokes, gradients, clips, and transforms
+- Custom widgets, a 2D vector canvas with paths, strokes, gradients, clips, and transforms, and typed GPU fragment shaders (`nano-ui-shader`)
 - Row, column, grid, wrapping, and layered layouts driven by composable modifiers, with scrolling and an interactive layout inspector
 - Rich text, HarfBuzz bidirectional text shaping, fallback fonts, images, and SVG icons
 - Keyboard focus, composable shortcuts, and IME composition
@@ -52,10 +52,11 @@ cabal run nano-ui-sdl-logs          # streaming log viewer
 cabal run nano-ui-sdl-terminal      # PTY terminal emulator (Linux and macOS)
 cabal run nano-ui-rgfw-demo         # lightweight RGFW + OpenGL backend
 cabal run nano-ui-markdown-example  # streamed Markdown chat reply
+cabal run nano-ui-example-shaders   # typed GPU surface shaders and subtree effects
 cabal run nano-ui-example-hello     # first single-topic example
 ```
 
-The [single-topic examples](packages/nano-ui-demo/README.md#examples) are small standalone programs covering one topic each: state, layout, form validation, background tasks, 100,000-row virtualized lists, and more.
+The [single-topic examples](packages/nano-ui-demo/README.md#examples) are small standalone programs covering one topic each: state, layout, form validation, shaders, background tasks, 100,000-row virtualized lists, and more.
 
 ## How a frame runs
 
@@ -80,6 +81,7 @@ See [docs/rendering-pipeline.svg](docs/rendering-pipeline.svg) for the full pipe
 | `nano-ui-rgfw` | RGFW + OpenGL 3.2 backend with a bundled bitmap font and no extra library dependencies |
 | `nano-ui-rgfw-bindings` | Haskell bindings to RGFW (C source bundled) |
 | `nano-ui-sdl-web` | Browser backend for GHC's WebAssembly target using SDL_ttf and WebGL2 |
+| `nano-ui-shader` | Pure-Haskell typed fragment shader EDSL, multi-target GPU compiler (GLSL, SPIR-V, MSL, CPU), pass fusion, and built-in effects |
 | `nano-ui-diagrams` | Line, bar, scatter, area, and step charts, plus [diagrams](https://diagrams.github.io/) widgets |
 | `nano-ui-form` | Validated applicative forms built on [ditto](https://hackage.haskell.org/package/ditto) |
 | `nano-ui-emit` | Statically typed emitting views, widget adapters, and pure reducers |
@@ -99,7 +101,7 @@ Read **[The nano-ui Book](https://goolord.github.io/nano-ui/book/)** online (or 
 - **[Layout & Scrolling](https://goolord.github.io/nano-ui/book/layout/index.html)**: Containers, modifiers, and virtualizing 100,000-row lists.
 - **[Widget Gallery](https://goolord.github.io/nano-ui/book/widgets/index.html)** and **[Styling & Theming](https://goolord.github.io/nano-ui/book/styling/index.html)**: Reference for every widget family, themes, typography, and the [Interactive Styling Lab](https://goolord.github.io/nano-ui/book/styling/lab.html).
 - **[Keyboard, Focus & IME](https://goolord.github.io/nano-ui/book/input/index.html)**: Shortcuts, focus rules, and custom text input.
-- **[Async Work & Animation](https://goolord.github.io/nano-ui/book/advanced/async.html)** and **[Ecosystem Packages](https://goolord.github.io/nano-ui/book/packages/index.html)**: Background tasks, streams, charts, forms, Markdown, SVG export, and backends.
+- **[Async Work & Animation](https://goolord.github.io/nano-ui/book/advanced/async.html)**, **[Shaders](https://goolord.github.io/nano-ui/book/advanced/shaders.html)**, and **[Ecosystem Packages](https://goolord.github.io/nano-ui/book/packages/index.html)**: Background tasks, streams, GPU shaders, charts, forms, Markdown, SVG export, and backends.
 - **[Troubleshooting](https://goolord.github.io/nano-ui/book/troubleshooting/recurring-bugs.html)**: Recurring bugs from real applications and how to fix them.
 - **[Architecture & Internals](https://goolord.github.io/nano-ui/book/architecture/index.html)**: Frame lifecycle and application patterns.
 - **[Development Setup](https://goolord.github.io/nano-ui/book/getting-started/development.html)**: Building, testing, profiling, and repo conventions.
@@ -107,4 +109,4 @@ Read **[The nano-ui Book](https://goolord.github.io/nano-ui/book/)** online (or 
 
 ## License
 
-MIT, except the bundled Inter font (SIL Open Font License 1.1, [`LICENSE-Inter`](packages/nano-ui-sdl/LICENSE-Inter)), the bundled Cozette bitmap font (MIT, [`LICENSE-Cozette`](packages/nano-ui-rgfw/LICENSE-Cozette)), and the bundled RGFW library (zlib, [`LICENSE-RGFW`](packages/nano-ui-rgfw-bindings/LICENSE-RGFW)).
+MIT, except the bundled Inter font (SIL Open Font License 1.1, [`LICENSE-Inter`](packages/nano-ui-ttf/LICENSE-Inter)), the bundled Cozette bitmap font (MIT, [`LICENSE-Cozette`](packages/nano-ui-rgfw/LICENSE-Cozette)), and the bundled RGFW library (zlib, [`LICENSE-RGFW`](packages/nano-ui-rgfw-bindings/LICENSE-RGFW)).

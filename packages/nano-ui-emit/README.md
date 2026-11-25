@@ -16,7 +16,7 @@ view volume = column $ do
   emitWhen (button "Save") Save
 ```
 
-`NanoUIE msg a` is a regular `NanoUI a` action with a typed message sink in scope via the implicit parameter `?emit`. Because `NanoUI.Emit` re-exports all of `NanoUI`, every built-in container, control, overlay, and scope runs inside `NanoUIE` unchanged. `emit :: msg -> NanoUIE msg ()` requires no `Typeable` constraint, so emitting a mismatched message type fails at compile time, and polymorphic or function-valued messages work out of the box.
+`NanoUIE msg a` is a regular `NanoUI a` action with a typed message sink in scope via the implicit parameter `?emit`. Because `NanoUI.Emit` re-exports all of `NanoUI`, every built-in container, control, overlay, and scope runs inside `NanoUIE` unchanged. `emit :: msg -> NanoUIE msg ()` requires no `Typeable` constraint, so emitting a mismatched message type fails at compile time, and polymorphic or function-valued messages work with no extra instances.
 
 Embed reusable child components using `mapMessages ChildMsg childView`, which forwards messages directly to the parent's sink in traversal order without allocating an intermediate queue.
 

@@ -49,7 +49,7 @@ Padded containers paint the panel color, and `scrollArea`, `panel`, and `card` e
   ```
 
 - **Line-box centering looks slightly high.** Stacking a large label over a small one leaves extra empty space below the smaller baseline, reading ~4 px too high. Nudge with `padTop`, or compute optical centering from glyph ink bounds and cap/x-height midpoints in `FontMetrics`.
-- **`alignMid` on a row positions the row itself**, not its contents. Put `itemsCenter` (or `itemsEnd` / `itemsBaseline`) on the row to align its children, or `alignMid` on individual children.
+- **`alignMiddle` on a row positions the row itself**, not its contents. Put `itemsCenter` (or `itemsEnd` / `itemsBaseline`) on the row to align its children, or `alignMiddle` on individual children.
 
 ## Cached drawings that do not update
 
@@ -60,7 +60,7 @@ Padded containers paint the panel color, and `scrollArea`, `panel`, and `card` e
 ## Scroll details
 
 - **Content runs underneath the scrollbar.** The scrollbar claims a lane out of `scrollViewport`. Clamp row content and hit targets to `scrollViewport`, while keeping row highlight backgrounds spanning the full widget width so no vertical gap appears along the scrollbar edge (`ned`'s finder).
-- **Match mouse-wheel step to row height.** The default 60 px notch feels uneven on 54 px rows or compact lists. Call `setScrollTuning` (or `setScrollStepUi`) so one notch steps cleanly by one row (`winget-gui`).
+- **Match mouse-wheel step to row height.** The default 60 px notch feels uneven on 54 px rows or compact lists. Call `setScrollTuning` (or `setScrollStep`) so one notch steps by one row (`winget-gui`).
 
 ## Input ordering and focus
 
@@ -71,7 +71,7 @@ Padded containers paint the panel color, and `scrollArea`, `panel`, and `card` e
 
 ## SVG export (`nano-ui-svg`)
 
-- When embedding multiple exported SVGs on one HTML page, ensure each uses a distinct `clip_`/`grad_` ID prefix (handled automatically by `frameToSvg`'s document hash, by passing `svgIdPrefix`, or by prefixing each `<g><defs>` block with an index as `stronghead` does).
+- When embedding multiple exported SVGs on one HTML page, give each one a distinct `clip_`/`grad_` ID prefix (handled automatically by `frameToSvg`'s document hash, by passing `svgIdPrefix`, or by prefixing each `<g><defs>` block with an index as `stronghead` does).
 - Right-aligned numerals can lose their anchor across browsers: `text-anchor` and `textLength` may need post-processing, and `font-variant-numeric: tabular-nums` at the document root keeps numeric columns aligned.
 
 ## Testing custom-drawn widgets

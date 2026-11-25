@@ -615,7 +615,7 @@ generateTypoDemos = do
           [ TypoDemo
               "Text helpers and font modifiers"
               "label, heading, labelWith (fontTone Accent), muted, mono, danger, bold, italic, underline, fontStrike, fontColor"
-              "NodeText and NodeTextInput pack font variant, tone, weight, style and decoration into styleIdx; buttons and selects pack the same above their own 32 bits."
+              "Font modifiers (variant, tone, weight, slant, decoration, and color) compose with layout modifiers on text nodes, buttons, and selects without cascading from parent containers."
               svgLabels
           , TypoDemo
               "Tones and tinted surfaces"
@@ -817,8 +817,8 @@ generateInteractions = do
         "NanoUI.Internal.Frame.Chrome (widgetVisualStyle)"
         "Even though they look alike when closed, `select` paints from `themeButton` while `comboBox` is built on `textInput` and paints from `themeInput`. Applying `inputStyle` to a form styles `textInput`, `numericInput`, and `comboBox`, leaving `select` unstyled."
         "Apply your field style to both `inputStyle` and `buttonStyle`, or wrap `select` in `styled (buttonStyle ...)`."
-        "-- select stays on themeButton under inputStyle\nstyled (inputStyle myFieldStyle) $ do\n  comboBox opts vCombo\n  select opts vIdx"
-        "styled (inputStyle myFieldStyle . buttonStyle myFieldStyle) $ do\n  comboBox opts vCombo\n  select opts vIdx"
+        "-- select stays on themeButton under inputStyle\nstyled (inputStyle myFieldStyle) $ do\n  comboBox \"Choose...\" opts vCombo\n  select opts vIdx"
+        "styled (inputStyle myFieldStyle . buttonStyle myFieldStyle) $ do\n  comboBox \"Choose...\" opts vCombo\n  select opts vIdx"
         "inputStyle only: comboBox changes, select stays default"
         i4Bad
         "inputStyle and buttonStyle matched"
@@ -843,8 +843,8 @@ generateInteractions = do
         "NanoUI.Internal.Widgets.Layout (calloutWith)"
         "`calloutWith` wraps its children in `styled (panelStyle ...)`, so any `panel` or `card` inside the callout inherits its tinted background and border. `modal` and `popup` read `themePopup`, so overlays keep the normal `themePanel`."
         "Save `basePanel <- themePanel <$> uiTheme` before the callout and restore it around inner panels with `styled (\\t -> t {themePanel = basePanel})`."
-        "callout Warning $ do\n  label \"Warning\"\n  card (label \"Inner card turns yellow\")"
-        "basePanel <- themePanel <$> uiTheme\ncallout Warning $ do\n  label \"Warning\"\n  styled (\\t -> t {themePanel = basePanel}) (card (label \"Clean card\"))"
+        "calloutTone Warning $ do\n  label \"Warning\"\n  card (label \"Inner card turns yellow\")"
+        "basePanel <- themePanel <$> uiTheme\ncalloutTone Warning $ do\n  label \"Warning\"\n  styled (\\t -> t {themePanel = basePanel}) (card (label \"Clean card\"))"
         "nested card inherits the callout tint"
         i6Bad
         "themePanel restored inside the callout"

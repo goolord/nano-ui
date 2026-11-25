@@ -94,7 +94,7 @@ Focus requests are ignored if the target widget is disabled, covered by an open 
 
 ## Input Method Editors (IME)
 
-Built-in text inputs and text areas support IME composition out of the box, rendering pre-edit text at the caret and suppressing shortcuts until composition commits.
+Built-in text inputs and text areas support IME composition directly, rendering pre-edit text at the caret and suppressing shortcuts until composition commits.
 
 If you build a custom widget that reads typed characters from `inputChars`, opt into text input on every frame it can accept text:
 

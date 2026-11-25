@@ -52,7 +52,7 @@ A few important details are at work here:
 
 - `textInputConfigured'` (the primed form) returns a `Response` containing the widget's ID, bounds, hover/click flags, and `respSubmitted` (which turns `True` when the user presses Enter). By contrast, `button` returns just the `Bool` we need.
 - `readVar draft` runs *below* the text input that edits it, so the read immediately sees the new text in the same pass. Reading above an editing widget forces a second pass of the view.
-- `modifyVar` applies a pure function to the latest stored value, so multiple updates in one frame compose cleanly instead of overwriting each other.
+- `modifyVar` applies a pure function to the latest stored value, so multiple updates in one frame compose without overwriting each other.
 - After inserting the item, we clear `draft` and call `requestFocus` so the user can keep typing the next task right away. Focus requests take effect at the end of the frame.
 
 > [!NOTE]
@@ -66,7 +66,7 @@ The active filter has three values. `useEnumVar` works with any `Enum`/`Bounded`
 {{#include ../../../packages/nano-ui-demo/examples/TodoList.hs:filter_and_count}}
 ```
 
-`boundedTabBarConfigured` creates a segmented tab bar with one segment per constructor of `Filter`, using `show` for the labels. The active item count is *derived* on the fly from the current list rather than copied into a separate `Var` that could fall out of sync. Wrapping the clear button in `disabledWhen` dims it and ignores clicks without removing it from the layout.
+`enumTabBarByConfigured` creates a segmented tab bar with one segment per constructor of `Filter`, using `show` for the labels. The active item count is *derived* on the fly from the current list rather than copied into a separate `Var` that could fall out of sync. Wrapping the clear button in `disabledWhen` dims it and ignores clicks without removing it from the layout.
 
 ## 5. Rows own their state
 
@@ -94,7 +94,7 @@ Three patterns keep this row solid:
 
 ## 6. Reordering by ID
 
-The Up and Down buttons need to swap two items in the full list, even when a filter hides rows between them. Looking up items by ID handles both filtered and unfiltered views cleanly:
+The Up and Down buttons need to swap two items in the full list, even when a filter hides rows between them. Looking up items by ID handles both filtered and unfiltered views:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/TodoList.hs:swap_ids}}

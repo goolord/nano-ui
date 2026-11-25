@@ -62,7 +62,7 @@ Here `settings.volume` is a `Var Float` targeting just that field. Dragging the 
 Several helpers cover other shapes:
 
 - `constVar x` builds a read-only `Var` whose writes are no-ops. Use it when you want to display a derived value inside an input widget and handle changes through the widget's primed `Response`.
-- `withValue val widget` runs a `Var`-based widget against a temporary `Var` and returns both the widget result and the updated value. `nano-ui-emit` uses this under the hood for `emitChanged`.
+- `withValue val widget` runs a `Var`-based widget against a temporary `Var` and returns both the widget result and the updated value. `nano-ui-emit` builds `emitChanged` on top of it.
 - `zoomVar getter setter` projects a custom slice of a larger `Var`, and `zoomVarL` does the same using a lens.
 - `forEachVar key list body` gives each item of a `Var [a]` its own `Var a` keyed across reorders. Use `withElemVars` when you need to filter or sort the list yourself before drawing.
 

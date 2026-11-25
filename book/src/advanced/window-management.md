@@ -22,28 +22,28 @@ Because the OS window persists across the entire session while your view runs ev
 
 ### Declarative setters
 
-Setters remember the last value they sent to the OS and skip the backend call when nothing changed. You can call them unconditionally on every frame (as `editor` above does with `setWindowTitleUi`), and skipping a setter simply leaves the current value in place:
+Setters remember the last value they sent to the OS and skip the backend call when nothing changed. You can call them unconditionally on every frame (as `editor` above does with `setWindowTitle`), and skipping a setter simply leaves the current value in place:
 
-- `setWindowTitleUi`
-- `setWindowModeUi`
-- `setWindowMinSizeUi` / `setWindowMaxSizeUi`
-- `setWindowOpacityUi`
-- `setWindowIconUi`
+- `setWindowTitle`
+- `setWindowMode`
+- `setWindowMinSize` / `setWindowMaxSize`
+- `setWindowOpacity`
+- `setWindowIcon`
 
-A repeated setter call costs only an `Eq` check. For `setWindowIconUi`, build the `RgbaPixels` once at startup and reuse that same value every frame: `ByteString` equality returns immediately when both sides share the same buffer, whereas freshly decoded icons compare byte by byte.
+A repeated setter call costs only an `Eq` check. For `setWindowIcon`, build the `RgbaPixels` once at startup and reuse that same value every frame: `ByteString` equality returns immediately when both sides share the same buffer, whereas freshly decoded icons compare byte by byte.
 
 ### Imperative commands
 
 Commands forward directly to the OS on every call, because the user can also move, resize, or maximize the window independently and there is no single desired value to cache. Always guard commands behind one-shot events such as `button`:
 
-- `moveWindowUi` (takes desktop coordinates on SDL, physical pixels on RGFW)
-- `centerWindowUi`
-- `resizeWindowUi`
-- `minimizeWindowUi`, `maximizeWindowUi`, `restoreWindowUi`, `toggleMaximizedUi`
+- `moveWindow` (takes desktop coordinates on SDL, physical pixels on RGFW)
+- `centerWindow`
+- `resizeWindow`
+- `minimizeWindow`, `maximizeWindow`, `restoreWindow`, `toggleMaximized`
 
 Keep in mind that SDL applies commands asynchronously and reports the updated geometry back through an OS event, so `askWindow` still sees the old size during the frame the command ran and updates on the following frame.
 
-Call `quitUi` to close the window after the current frame finishes painting (`runSdlApp` then returns). Inside a secondary `nativeWindow`, `quitUi` closes only that child window.
+Call `quit` to close the window after the current frame finishes painting (`runSdlApp` then returns). Inside a secondary `nativeWindow`, `quit` closes only that child window.
 
 ### Reading window state and updating from worker threads
 
@@ -74,10 +74,10 @@ For a full example that only prompts when the buffer is dirty, see [Tutorial 2: 
 A few important details about secondary windows:
 
 - **Independent focus and IDs.** Each native window owns its own keyboard focus, text carets, scroll positions, and hover state. `useVar` calls inside `body` count from zero independently of the parent window.
-- **Initial settings apply once.** `nativeWindow` reads `WindowSettings` only when opening the window. To update the title or mode afterward, call setters like `setWindowTitleUi` inside `body`.
+- **Initial settings apply once.** `nativeWindow` reads `WindowSettings` only when opening the window. To update the title or mode afterward, call setters like `setWindowTitle` inside `body`.
 - **Closures stay fresh.** Every frame of the parent view also re-evaluates each open child `body`, so any local values captured from the parent stay up to date.
 - **Watch parent animation rates.** Because child views re-evaluate when the parent renders, a parent animating at 60 fps also lays out open child windows at 60 fps (though a child only repaints pixels when its draw list actually changes).
-- **Nesting and shared state.** Child windows can open further windows of their own, and all windows share state cleanly through `Var`s (a write in one window shows up in the others on their next frame).
+- **Nesting and shared state.** Child windows can open further windows of their own, and all windows share state directly through `Var`s (a write in one window shows up in the others on their next frame).
 - **Elm-style usage.** With `NanoUIE` ([Elm-Style State](../state/elm.md)), child windows emit to the same reducer. To store the open flag in your model, pass `constVar model.inspectorOpen`, set `wsExitOnCloseRequest = False`, and emit a close message when `winCloseRequested` fires.
 - **Platform notes.** Both SDL and RGFW support `nativeWindow`, while headless `NanoUI.Testing` ignores it without running `body`. On Windows, Win32 blocks the message pump during a window resize drag, so sibling windows pause redrawing until the drag ends.
 
@@ -100,7 +100,7 @@ Choose between two decoration modes:
 - `DecorationsFrame` hides the title bar while preserving the native OS resize border.
 - `DecorationsNone` removes both the title bar and OS border (on resizable windows, the outer edges still act as resize borders).
 
-Use `windowCaptionWith` to customize button appearance or resize border thickness. `windowFrame` wraps your view in a full-window panel with a rounded border `frameWidth` thick and insets the view by `frameWidth`:
+Use `windowCaptionWith` to customize button appearance or resize border thickness. `windowFrame` (from `NanoUI.Chrome`) wraps your view in a full-window panel with a rounded border `frameWidth` thick and insets the view by `frameWidth`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Windows.hs:window_frame}}
@@ -136,4 +136,4 @@ If you are working directly with `SdlEnv` (from `askSdlEnv`), `nano-ui-sdl` also
 
 ## Testing views that use window APIs
 
-Window setters and commands become no-ops when no OS window is attached, so views that call them still run cleanly under headless `NanoUI.Testing`. Testing screenshots or custom title bars requires a real SDL window (see the hidden-window tests in `nano-ui-demo`).
+Window setters and commands become no-ops when no OS window is attached, so views that call them still run under headless `NanoUI.Testing`. Testing screenshots or custom title bars requires a real SDL window (see the hidden-window tests in `nano-ui-demo`).

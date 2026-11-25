@@ -47,9 +47,9 @@ How web UI mental models translate to `nano-ui`:
 | `<canvas>` | `canvas mods (\rect -> drawing)` from `NanoUI.Widgets.Custom` |
 | `<table>` | `simpleTable headers rows`, or `table` with Colonnade and `Var SortCol` |
 | `<ul>` / `<ol>` + `<li>` | `column` + `for_ items (\i -> withKey (itemId i) (row ...))` |
-| `<details>` / `<summary>` | A `Var Bool`, a toggle button, and `scope (when open body)` |
+| `<details>` / `<summary>` | `collapsing "Details" openVar body` (or `collapsingWith`) |
 | Tree view | `tree` with `TreeItem`s |
-| `<dialog>` / modal | `modal openVar "Title" body`; `window` for a draggable floating panel |
+| `<dialog>` / modal | `modal openVar "Title" body`; `floatingWindow` for a draggable floating panel |
 | Popover / dropdown panel | `popup openVar (defaultPopupConfig (AnchorRect (respRect resp))) body` |
 | `title="..."` | `tooltip resp "text"` (takes a primed widget's `Response`) |
 | `oncontextmenu` | `contextMenu resp (menuItem ...)`, or `contextMenuArea` for a region |
@@ -57,7 +57,7 @@ How web UI mental models translate to `nano-ui`:
 | Tab strip | `tabs var [tab k "Title" body, ...]`, `enumTabs`, `tabBar` for headers only |
 | `<progress>` | `progressBar fraction` (0 to 1), `circularProgress`, `spinner` |
 | `<meter>`, sparkline | `sparkline values`; full charts in `nano-ui-diagrams` (`NanoUI.Plot`) |
-| Split panes | `paneGrid` (resizable, dockable panes) |
+| Split panes | `paneGrid` (`NanoUI.Widgets.PaneGrid`: resizable, dockable panes) |
 | `<iframe>`, `<video>`, `<audio>` | Not built in |
 
 ## Layout properties
@@ -74,43 +74,44 @@ How web UI mental models translate to `nano-ui`:
 | `align-content` for wrapped lines | `lineAlign LinesCenter` |
 | `flex: 1` | `fillW` inside a row, `fillH` inside a column |
 | `flex: 1` on both axes | `grow` |
-| `justify-content: space-between` | `spacer (Grow 1) Fit` (or `flex`) between children |
-| `justify-content: flex-end` | Leading `spacer (Grow 1) Fit`, or `alignEnd` on a single child in a column |
-| `justify-content: center` | `center body` (both axes), or spacers on both sides |
+| `justify-content: space-between` | `justifyBetween` on the container (or `spacer (Grow 1) Fit` / `flex`) |
+| `justify-content: flex-end` | `justifyEnd` on the container |
+| `justify-content: center` | `justifyCenter` (main axis) or `center body` (both axes) |
 | `align-items: center` | `itemsCenter` on the row, column, or grid |
 | `align-items: flex-end` | `itemsEnd` on the row, column, or grid |
 | `align-items: baseline` | `itemsBaseline` on the row |
-| `align-self` | `alignStart`/`alignCenter`/`alignEnd` or `alignTop`/`alignMid`/`alignBottom`/`alignBaseline` on the child (overrides container `items*`) |
-| `align-items: stretch` | `fillH` (row) or `fillW` (column) on children |
+| `align-self` | `alignStart`/`alignCenter`/`alignEnd` or `alignTop`/`alignMiddle`/`alignBottom`/`alignBaseline` on the child (overrides container `items*`) |
+| `align-items: stretch` | `itemsStretch` on the container (or `fillH`/`fillW` on individual children) |
 | `display: grid; grid-template-columns: repeat(3, 1fr)` | `gridWith 3 (gap 8 . fillW)`, children `fillW` |
 | `repeat(auto-fill, minmax(160px, 1fr))` | `gridMinColW 160` on the grid |
 | `width` / `height` | `fixedW` / `fixedH` / `fixedWH` |
 | `min-width`, `max-width`, `min-height`, `max-height` | `minW`, `maxW`, `minH`, `maxH` |
-| `width: 50%` | `percent 50` (width only, relative to parent width) |
-| `height: 50%` | Not built in: use `fillH` with siblings or compute from `windowHeight` |
+| `width: 50%` / `height: 50%` | `percent 50` / `percentH 50` (relative to parent) |
 | `aspect-ratio: 16/9` | `aspect (16 / 9)` |
-| `width: fit-content` | Default |
+| `width: fit-content` | Default (`fitW` / `fitH` to override) |
 | `box-sizing: border-box` | Default (padding sits inside fixed sizes) |
 | `padding: 12px` | `padAll 12` |
 | `padding: 4px 12px` (vertical horizontal) | `padXY 12 4` (**horizontal first**) |
 | `padding: t r b l` | `padLRTB l r t b` (**left, right, top, bottom**) |
 | `padding-left` etc. | `padLeft`, `padRight`, `padTop`, `padBottom` |
 | `padding: 0` | `tight` (containers default to 3 px padding and an 8 px gap) |
-| `margin` | None: use parent `gap` / padding or `spacer (Fixed 16) Fit` |
+| `margin` | None: use parent `gap` / padding or `spacerW 16` / `spacerH 16` |
 | `margin: 0 auto` | `alignCenter` on a child of a column |
 | `margin-left: auto` | `spacer (Grow 1) Fit` before the child in a row |
 | `position: relative` + `absolute` | `pinAt x y` on the child (alignment picks the anchor corner, then shifts by `x`, `y`) |
 | `position: absolute; inset: 0` | `pinAt 0 0 . grow` |
-| `position: fixed` | An overlay (`modal`, `window`, `popup`), or `pinAt` on a root child |
+| `position: fixed` | An overlay (`modal`, `floatingWindow`, `popup`), or `pinAt` on a root child |
 | `position: sticky` | None: place the sticky header outside the scroller |
 | `z-index` | Call order inside `layers` (later draws on top); overlays always sit above the page |
-| `overflow: auto` | `scrollWith (fixedH 240 . fillW) body` (needs bounded size), `scroll2D` for both axes |
-| `overflow-x: hidden; text-overflow: ellipsis` | `labelWith fillW` (or `maxW`) inside a row truncates with `...` |
+| `overflow: hidden` | `clipBox mods body` |
+| `overflow: auto` | `scrollWith (fixedH 240 . fillW) body` (needs bounded size), `scroll2D` for both axes, `ScrollOverlay` for floating thumbs |
+| `overflow-x: hidden; text-overflow: ellipsis` | `labelWith (fillW . singleLine)` (with `ellipsisEnd`, `ellipsisMiddle`, or `ellipsisStart`) |
 | `white-space: normal` | `label` inside a column wraps to the column width |
 | `overflow-wrap: anywhere` | `breakAnywhere` |
 | `display: none` | Skip the widget call inside `scope` |
 | `visibility: hidden` | None: reserve the slot with a fixed `spacer` |
 | `@media (max-width: 640px)` | `responsiveRowCol 640 mods body`, `responsive 640 wide narrow body`, or branch on `windowWidth` |
+| `@container (min-width: 480px)` | `responsiveIn 480 wide narrow body`, `responsiveRowColIn`, `withContainerQuery`, `withContainerWidth` |
 | `pointer-events: none` | `pointer PointerPass` |
 | Click-blocking backdrop | `pointer PointerBlock` on a `pinAt 0 0 . grow` panel |
 | `cursor: pointer` etc. | `withCursorShape UiCursorPointer subtree` |
@@ -136,15 +137,17 @@ Colors, borders, and corner radii live in the active `Theme`. Adjust them for a 
 | Other `:hover` changes | Inspect `respHovered` on a primed widget or `mouseArea` |
 | `:focus` outline | Automatic (`themeFocusRing`); query with `isFocused` |
 | `:disabled` | `disabledWhen` |
-| `opacity` | `withAlpha` on colors; `icOpacity` on images |
+| `opacity` | `withShader groupOpacity alpha body` (`nano-ui-shader`) for subtrees; `withAlpha` on colors; `icOpacity` on images |
 | `font-size` | `fontSize 18` or relative `fontSizeScale 1.25` on the text widget; `sdlAppFontSize` for app default |
 | `font-weight: bold` | `fontBold`, `fontWeight WeightSemiBold` |
 | `font-style: italic` | `fontItalic` |
 | `font-family` | `fontMono` per widget; `sdlAppFont` / `sdlAppMonoFont` globally |
+| `font-variant-numeric: tabular-nums` | `fontTabular` |
 | `text-decoration` | `fontUnderline`, `fontStrike` |
 | `text-align: center` (single line) | `labelWith alignCenter` inside a column |
 | `object-fit`, `object-position` | `imageConfigured defaultImageConfig {icFit = FitCover, ...}` |
-| `box-shadow`, `linear-gradient` | Draw in a `canvas` (`P.Linear` for gradients) |
+| `box-shadow`, `filter: blur(...)` | `withShader dropShadow params body`, `withShader gaussianBlur sigma body` (`nano-ui-shader`) |
+| `linear-gradient` / mesh gradient | `shaderBox meshGradient4 params` (`nano-ui-shader`), or `P.Linear` inside a `canvas` |
 | `prefers-color-scheme` | `followSystemTheme`, or `lightDark` with `systemAppearance` |
 | `transition` | `animateTo (Tween EaseOutCubic 0.2 0) target` |
 | `@keyframes` | `animate` or `pulse` paired with `keepAnimating` |
@@ -156,7 +159,7 @@ Font modifiers do not cascade from parent containers (`columnWith (fontSize 20)`
 | Web | nano-ui |
 | --- | --- |
 | `onclick` | `whenM (button "Go") go`, or `when (respClicked resp)` |
-| `onclick` on a card or row | `(_, resp) <- mouseArea mods body`, then check `respClicked resp` |
+| `onclick` on a card or row | `selectableRow selected body` for selectable list rows, or `mouseArea mods body` + `respClicked` |
 | `oninput` | Input mutates its `Var` directly; read it below, or check `respChanged` |
 | `onchange` / `onsubmit` / Enter | `respSubmitted` from `textInput'` |
 | `onmouseenter` / `onmouseleave` | Track `respHovered` across frames |
@@ -169,9 +172,9 @@ Font modifiers do not cascade from parent containers (`columnWith (fontSize 20)`
 | `element.focus()`, `autofocus` | `requestFocus (respId resp)` (safe to call every frame; no-op when already focused) |
 | `element.blur()` | `clearFocus` |
 | `getBoundingClientRect()` | `respRect resp` (previous frame's bounds) |
-| `scrollIntoView()` | `scrollIntoViewUi` / `scrollRectIntoViewUi` (plus `scrollToStartUi` / `scrollToEndUi`) |
+| `scrollIntoView()` | `scrollIntoView` / `scrollRectIntoView` (plus `scrollToStart` / `scrollToEnd`) |
 | `IntersectionObserver` | `sensor` / `sensorConfigured` / `useVisibility` |
-| `ResizeObserver` | `respRect` and `windowSize`, read each frame |
+| `ResizeObserver` | `withContainerSize` / `withContainerQuery`, `respRect`, and `windowSize` |
 | HTML5 drag and drop | `useDrag`, `useReorder` + `insertionIndex`; `dropZone` for OS file drops |
 | `setTimeout`, `setInterval` | `wakeAfter seconds` each frame, comparing against `uiTime` |
 | `requestAnimationFrame` | `keepAnimating resp` inside the visible animating widget |
@@ -179,8 +182,8 @@ Font modifiers do not cascade from parent containers (`columnWith (fontSize 20)`
 | WebSocket, EventSource | `useStream stream key initial producer` |
 | `navigator.clipboard` | `getClipboard`, `setClipboard` |
 | `window.open(url)` | SDL `openUrl url` (in `IO`) |
-| `document.title` | `setWindowTitleUi` (cached no-op when unchanged) |
-| `beforeunload` | `wsExitOnCloseRequest = False`, `winCloseRequested <$> askWindow`, then `quitUi` |
+| `document.title` | `setWindowTitle` (cached no-op when unchanged) |
+| `beforeunload` | `wsExitOnCloseRequest = False`, `winCloseRequested <$> askWindow`, then `quit` |
 | `localStorage` | Persist manually in `IO` on change or close |
 | `document.querySelector` | Not needed: keep the `Response` or `WidgetId` directly |
 | `window.innerWidth` | `windowWidth`, `windowSize` |
@@ -202,7 +205,7 @@ Font modifiers do not cascade from parent containers (`columnWith (fontSize 20)`
 | `useMemo` | Compute outside the view or cache in an `IORef` keyed by revision; pass a content key to custom widgets |
 | `useRef` to DOM node | Keep the widget's `Response` or `respId` |
 | Context provider | Function arguments or app record; `styled` / `themed` for themes |
-| Portals | Not needed: `modal`, `popup`, `window`, and `tooltip` render on overlay layers automatically |
+| Portals | Not needed: `modal`, `popup`, `floatingWindow`, and `tooltip` render on overlay layers automatically |
 | `React.memo` | Not needed: the view runs every frame and damage tracking repaints only changes; keep views cheap instead |
 | CSS-in-JS | Composable Haskell modifier functions |
 
@@ -228,8 +231,8 @@ Font modifiers do not cascade from parent containers (`columnWith (fontSize 20)`
 shell :: Var Text -> NanoUI ()
 shell query =
   columnWith (grow . tight . gap 0) $ do
-    rowWith (fillW . padXY 16 8 . gap 8) $ do
-      labelWith (alignMid . fontSize 22 . fontBold) "Inbox"
+    rowWith (fillW . padXY 16 8 . gap 8 . itemsCenter) $ do
+      labelWith (fontSize 22 . fontBold) "Inbox"
       spacer (Grow 1) Fit
       searchInput "Search mail" query
     separator
@@ -350,9 +353,9 @@ Below 640 logical pixels wide the panels stack vertically; at 640 px and above t
 
 ## Web concepts that do not carry over
 
-- **Margins, `z-index`, `position: sticky`, CSS grid areas, percentage heights:** Use gaps/padding, child order inside `layers`, headers outside scrollers, nested rows/columns, and `fillH`.
+- **Margins, `z-index`, `position: sticky`, CSS grid areas:** Use gaps/padding, child order inside `layers`, headers outside scrollers, and nested rows/columns.
 - **Cascading text styles:** Apply font modifiers directly on each text widget.
 - **Default text selection:** Plain `label`s are not selectable; use `selectableText` or `selectableRichText` where copyability matters.
-- **Synchronous layout queries during render:** `respRect` and scroll metrics always come from the previous frame.
+- **Synchronous layout queries during render:** `respRect`, `withContainerSize`, and scroll metrics always come from the previous frame.
 - **Unmounting cleanup:** Hidden widgets retain their state (`useVar`, caret) for when they reappear; `useTask` and `useStream` cancel automatically after one skipped frame.
-- **CSS shadows and gradient backgrounds:** Draw custom gradients or shadows inside a `canvas`.
+- **CSS shadows, blurs, opacity, and gradients:** Use `nano-ui-shader` (`withShader` with `dropShadow`, `gaussianBlur`, `groupOpacity`; `shaderBox` with `meshGradient4`, `radialGlow`) or draw directly inside a `canvas`.

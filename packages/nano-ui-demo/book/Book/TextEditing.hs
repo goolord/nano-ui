@@ -4,6 +4,7 @@ module Book.TextEditing where
 
 import Control.Monad (when)
 import Data.ByteString qualified as BS
+import Data.Foldable (for_)
 import Data.Text (Text)
 import Data.Text.Encoding qualified as TE
 import NanoUI
@@ -46,7 +47,26 @@ undoState editorId = do
   pure (canUndo, canRedo)
 -- ANCHOR_END: history
 
+-- ANCHOR: rich_text
+releaseNote :: NanoUI ()
+releaseNote = do
+  clicked <-
+    selectableRichText
+      [ "Build "
+      , strong "v0.2"
+      , " with "
+      , inlineTooltip "Uses -j1 to keep memory modest" (inlineCode "cabal build -j1 all")
+      , " or read the "
+      , hyperlink "https://goolord.github.io/nano-ui/book/" "documentation"
+      , "."
+      ]
+  for_ clicked openLink
+-- ANCHOR_END: rich_text
+
 -- Stand-ins for application code the snippets refer to.
 
 markDirty :: NanoUI ()
 markDirty = pure ()
+
+openLink :: Text -> NanoUI ()
+openLink _ = pure ()

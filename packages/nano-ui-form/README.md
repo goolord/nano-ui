@@ -9,7 +9,7 @@ Each form combines widget rendering, parsing, and validation in one applicative 
 
 import Data.Text (Text)
 import NanoUI (NanoUI, label)
-import NanoUI.Form hiding (label)
+import NanoUI.Form
 
 data Signup = Signup Text Text
 

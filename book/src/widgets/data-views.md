@@ -43,7 +43,7 @@ Here are all four built-in `TabStyle` options, each with a different tab active:
 | `TabSegmented` | Segmented control inside a rounded track, with the active segment raised |
 | `TabContained` | Classic folder tabs whose active header opens directly into a bordered body |
 
-Set `tabsOrientation` to `TabTop`, `TabBottom`, `TabLeft`, or `TabRight`. For enum-backed tabs, `boundedTabs` and `boundedTabBar` generate one tab per constructor automatically.
+Set `tabsOrientation` to `TabTop`, `TabBottom`, `TabLeft`, or `TabRight`. For enum-backed tabs, `enumTabs` / `enumTabsBy` and `enumTabBar` / `enumTabBarBy` generate one tab per constructor automatically.
 
 ## Tables
 
@@ -53,9 +53,9 @@ Set `tabsOrientation` to `TabTop`, `TabBottom`, `TabLeft`, or `TabRight`. For en
 {{#include ../../../packages/nano-ui-demo/book/Book/DataViews.hs:table}}
 ```
 
-`SortCol` stores the active column index and sort direction. For quick text-only tables, `simpleTable headers rows` skips the Colonnade boilerplate. The primed `table'` returns a `TableResponse` with updated sort state, reordered columns, and hidden column indices; `tableConfigured` adds frozen rows/columns, fixed widths, and visibility options through `TableConfig`. Row rendering is virtualized internally. Users can drag column dividers down to a 40-pixel floor and double-click a divider to auto-fit the column to its content width (double-clicking again restores default fill sizing).
+`SortCol` stores the active column index and sort direction. For quick text-only tables, `simpleTable headers rows` skips the Colonnade boilerplate. The primed `table'` returns a `TableResponse` with updated sort state, reordered columns, and hidden column indices; `tableConfigured` adds frozen rows/columns, fixed widths, `tableSqueeze`, `tableBare` (omit the outer border and well so an embedded table blends onto its pane), and column visibility options through `TableConfig`. Row rendering is virtualized internally. Users can drag column dividers down to a 40-pixel floor and double-click a divider to auto-fit the column to its content width (double-clicking again restores default fill sizing).
 
-When building custom cells, you can use `textCell`, `cellWidget`, `widgetCell`, or construct a `Cell` with an explicit sort key (`cellKey`). If a cell renders a custom widget, still populate `cellText` when you want automatic column width measurement to account for it.
+When building custom cells, use `textCell`, `cellWidget`, or attach typed sort keys with `cellSort` (text), `cellSortNum` (floating-point `SortNum`), `cellSortInt` (64-bit integer `SortInt`), or `cellSortKey` (`SortKey`) so numeric columns sort numerically instead of lexicographically. If a cell renders a custom widget, set `cellWidthText` (or `cellText`) so automatic column width measurement accounts for it.
 
 ## Trees
 

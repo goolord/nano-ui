@@ -6,6 +6,8 @@ The `nano-ui` workspace splits optional backends and domain widgets into focused
 | --- | --- |
 | `nano-ui-sdl` | Desktop SDL3 backend with TrueType fonts, native file dialogs, and custom title bars |
 | `nano-ui-rgfw` | Lightweight RGFW + OpenGL 3.2 backend with a bundled bitmap font |
+| `nano-ui-sdl-web` | Browser backend for GHC's WebAssembly target using SDL_ttf and WebGL2 |
+| `nano-ui-emit` | Statically typed emitting views and Elm-style reducers (`NanoUIE`) |
 | `nano-ui-diagrams` | Line, bar, scatter, area, and step charts plus `diagrams-lib` widgets |
 | `nano-ui-form` | Validated applicative forms built on `ditto` |
 | `nano-ui-markdown` | CommonMark rendering with incremental appends for streaming |
@@ -134,7 +136,7 @@ Allocate `owner <- newFormState` once during setup, then render the form under a
 {{#include ../../../packages/nano-ui-demo/book/Book/Packages.hs:form_submit}}
 ```
 
-`nanoFormLive` returns `Just a` continuously whenever the form is valid, `nanoFormEx` accepts a `FormConfig`, and `runNanoForm` separates the rendered view from its result. Built-in inputs cover `inputText`, `inputPassword`, `inputTextArea`, `inputCheckbox`, `inputSlider`, `inputSelect`, `inputRadio`, and `inputColor`, paired with validators such as `notEmpty`, `minLength`, `maxLength`, `inRange`, `validEmail`, `matches`, and `customProof`. Wrap any custom `Var a -> NanoUI Response` widget with `inputWidget`, choosing when edits publish (`OnChange`, `OnChangeOr`, or `OnlyWhen`).
+`nanoFormLive` returns `Just a` continuously whenever the form is valid, `nanoFormEx` accepts a `FormConfig`, and `runNanoForm` separates the rendered view from its result. Built-in inputs cover `inputText`, `inputPassword`, `inputTextArea`, `inputCheckbox`, `inputSlider`, `inputSelect`, `inputEnumSelect`, `inputRadio`, `inputEnumRadio`, and `inputColor`, alongside `formLabel` and `formSeparator`, paired with validators such as `notEmpty`, `minLength`, `maxLength`, `inRange`, `validEmail`, `matches`, and `customProof`. Wrap any custom `Var a -> NanoUI Response` widget with `inputWidget`, choosing when edits publish (`OnChange`, `OnChangeOr`, or `OnlyWhen`).
 
 ## Markdown
 
@@ -144,13 +146,17 @@ Allocate `owner <- newFormState` once during setup, then render the form under a
 {{#include ../../../packages/nano-ui-demo/book/Book/Packages.hs:markdown}}
 ```
 
-Allocate `cache <- newMarkdownCache` once during setup. `markdown` returns the URL of any link clicked on the current frame. For streaming chat replies or live logs, append chunks incrementally without reparsing the whole document:
+Allocate `cache <- newMarkdownCache` once during setup. `markdown` returns the URL of any link clicked on the current frame, and `markdownWith` applies a layout modifier to the document column. For streaming chat replies or live logs, append chunks incrementally without reparsing the whole document:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Packages.hs:markdown_stream}}
 ```
 
 If tokens arrive on the UI thread, concatenate each frame's batch into a single `appendMarkdown` call. The incremental parser only reparses the trailing block (except when a chunk completes an unsplittable block or adds a link-reference definition). To customize rendering for specific elements (such as adding syntax highlighting to fenced code blocks), override `MarkdownConfig.mdBlock`.
+
+## Shaders
+
+`nano-ui-shader` provides a pure-Haskell typed fragment shader EDSL, algebraic pass fusion (`composeColor`, `composeDistort`, `distortThenColor`, `chainLayer`), compilers for GLSL 150, GLSL ES 300, SPIR-V, MSL, and a CPU reference evaluator, plus 21 built-in surface fills and subtree effects (`meshGradient4`, `gaussianBlur`, `dropShadow`, `groupOpacity`, and more). See the [Shaders](../advanced/shaders.md) chapter for full examples and backend fallback rules.
 
 ## SVG export
 

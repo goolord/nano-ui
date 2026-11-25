@@ -88,6 +88,7 @@ panel = panelWith id
 panelWith :: (Layout -> Layout) -> NanoUI a -> NanoUI a
 panelWith = (`withDefaultWith` panel')
 
+-- | 'panel' with an explicit 'Layout' record.
 {-# INLINE panel' #-}
 panel' :: Layout -> NanoUI a -> NanoUI a
 panel' = container NodePanel
@@ -164,6 +165,7 @@ rowWith' f = withDefaultWith (\l -> (f l) {layoutDirection = Row}) (containerRes
 columnWith' :: (Layout -> Layout) -> NanoUI a -> NanoUI (a, Response)
 columnWith' f = withDefaultWith (\l -> (f l) {layoutDirection = Column}) (containerResponse NodeContainer)
 
+-- | 'row' with an explicit 'Layout' record; direction remains horizontal.
 {-# INLINE row' #-}
 row' :: Layout -> NanoUI a -> NanoUI a
 row' layout = container NodeContainer (layout {layoutDirection = Row})
@@ -178,6 +180,7 @@ column = columnWith id
 columnWith :: (Layout -> Layout) -> NanoUI a -> NanoUI a
 columnWith = (`withDefaultWith` column')
 
+-- | 'column' with an explicit 'Layout' record; direction remains vertical.
 {-# INLINE column' #-}
 column' :: Layout -> NanoUI a -> NanoUI a
 column' layout = container NodeContainer (layout {layoutDirection = Column})
@@ -203,6 +206,7 @@ layers = layersWith id
 layersWith :: (Layout -> Layout) -> NanoUI a -> NanoUI a
 layersWith = (`withDefaultWith` layers')
 
+-- | 'layers' with an explicit 'Layout' record; the flow remains layered.
 {-# INLINE layers' #-}
 layers' :: Layout -> NanoUI a -> NanoUI a
 layers' = container NodeContainer . layered

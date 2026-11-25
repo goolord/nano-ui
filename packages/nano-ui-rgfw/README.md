@@ -12,7 +12,7 @@ main :: IO ()
 main = runRgfwApp defaultRgfwOptions {optScale = 2} (label "Hello")
 ```
 
-For Elm-style views, `runRgfwAppReduce` pairs a `model -> NanoUIE msg ()` view with an update function `msg -> model -> model` (add `nano-ui-emit` and import `NanoUI.Emit`). Configure the window (`optWindow`, using the same `WindowSettings` as `nano-ui-sdl`), theme, UI scale, and animation refresh rate through `RgfwOptions`. RGFW centers windows that leave `wsPosition` at its default, and all RGFW windows are opaque (`wsTransparent`, `wsOpacity`, and `setWindowOpacityUi` are no-ops; use `nano-ui-sdl` if you need translucent windows).
+For Elm-style views, `runRgfwAppReduce` pairs a `model -> NanoUIE msg ()` view with an update function `msg -> model -> model` (add `nano-ui-emit` and import `NanoUI.Emit`). Configure the window (`optWindow`, using the same `WindowSettings` as `nano-ui-sdl`), theme, UI scale, and animation refresh rate through `RgfwOptions`. RGFW centers windows that leave `wsPosition` at its default, and all RGFW windows are opaque (`wsTransparent`, `wsOpacity`, and `setWindowOpacity` are no-ops; use `nano-ui-sdl` if you need translucent windows).
 
 Call `askRgfwDebug` inside a view to inspect frame timings and display stats, or render them directly with `debugWindowBody`. To run custom initialization after window creation and before frame 1, use `runRgfwAppWith` or `runRgfwAppReduceCustomWith`.
 

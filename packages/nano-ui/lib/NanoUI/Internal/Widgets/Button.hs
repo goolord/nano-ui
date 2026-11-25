@@ -113,8 +113,8 @@ iconButton' :: Svg -> Text -> NanoUI Response
 iconButton' doc = buttonConfigured' defaultButtonConfig {bcAdornments = leading (icon doc)}
 
 -- | A button whose content is any view, as iced's buttons are: laid out in a
--- row, the layout's gap apart, and centred as a label is, with a label's
--- padding around it. Labels in it take the button's text colour. The content
+-- row, the layout's gap apart, and centered as a label is, with a label's
+-- padding around it. Labels in it take the button's text color. The content
 -- is for display, so a press anywhere on the button is the button's.
 --
 -- > whenM (buttonContent (svgIcon 16 saveIcon >> label "Save")) saveDocument

@@ -77,7 +77,7 @@ layersExample =
 -- ANCHOR: center
 centerExample =
   panelWith (fillW . fillH) $
-    center (label "Centred on both axes")
+    center (label "Centered on both axes")
 -- ANCHOR_END: center
 
 -- ANCHOR: responsive

@@ -39,6 +39,8 @@ source-repository-package
   location: https://github.com/goolord/nano-ui
   subdir:
     packages/nano-ui
+    packages/nano-ui-emit
+    packages/nano-ui-ttf
     packages/nano-ui-sdl
 
 package nano-ui-sdl

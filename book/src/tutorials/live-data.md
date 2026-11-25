@@ -41,7 +41,7 @@ Here is how `useTaskStatus` coordinates the worker with the UI loop:
 - On the first frame with a new key, it spawns a worker thread for that key.
 - On subsequent frames while the worker runs, it returns immediately with `TaskRunning previous`. Keeping the previous result lets the UI show existing rows instead of flashing empty.
 - When the worker completes, it wakes the loop so the next frame receives `TaskDone`.
-- If the key changes before the worker finishes (for instance, the user commits a new search), the old thread is cancelled with an asynchronous exception and a fresh worker starts.
+- If the key changes before the worker finishes (for instance, the user commits a new search), the old thread is canceled with an asynchronous exception and a fresh worker starts.
 
 If you only need the latest available value and do not care about distinguishing loading or error states, `useTask` is shorter:
 
@@ -70,7 +70,7 @@ Because cancellation delivers an asynchronous exception, always manage external 
 
 ## 4. Streams: many updates, one frame
 
-Use a `Stream` when a background producer pushes values repeatedly, such as progress updates, live telemetry, or streamed LLM tokens. The producer receives an `update` callback and runs until it returns or is cancelled:
+Use a `Stream` when a background producer pushes values repeatedly, such as progress updates, live telemetry, or streamed LLM tokens. The producer receives an `update` callback and runs until it returns or is canceled:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/examples/Tasks.hs:progress_card}}
@@ -119,7 +119,7 @@ Constructing a `Chart` value on every frame is cheap, and comparing a few hundre
 
 - Key a search task directly on the live query text (without debouncing) and observe how cancellation behaves compared to `searchInput'`.
 - Stream Markdown tokens into `NanoUI.Markdown` with incremental appends (see [Ecosystem Packages](../packages/index.md)).
-- Virtualize a 100,000-row log view using `getScrollMetricsUi` (see [Layout & Scrolling](../layout/index.md) and `Logs.hs`).
+- Virtualize a 100,000-row log view using `getScrollMetrics` (see [Layout & Scrolling](../layout/index.md) and `Logs.hs`).
 - Swap the streaming chart for a one-shot `Task` that loads a full dataset from disk.
 
 For the full lifecycle details of tasks, streams, animations, and timers, see [Async Work & Animation](../advanced/async.md).

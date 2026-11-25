@@ -90,6 +90,7 @@ data StoredForm = StoredForm
 -- owned by this handle. The map is keyed by the full prefix, without hashing.
 newtype FormState = FormState (IORef (Map.Map Text StoredForm))
 
+-- | Allocate a new empty 'FormState' during component or application setup.
 newFormState :: IO FormState
 newFormState = FormState <$> newIORef Map.empty
 

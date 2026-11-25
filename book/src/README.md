@@ -24,6 +24,7 @@ If you want to try the widgets before installing anything, open the [interactive
 | `packages/nano-ui-diagrams` | Line, bar, scatter, and area charts (`NanoUI.Plot`) alongside `diagrams-lib` support. | [Ecosystem Packages](packages/index.md) |
 | `packages/nano-ui-form` | Validated applicative forms built on `ditto`. | [Ecosystem Packages](packages/index.md) |
 | `packages/nano-ui-markdown` | CommonMark rendering with incremental appends for streamed text. | [Ecosystem Packages](packages/index.md) |
+| `packages/nano-ui-shader` | Pure-Haskell typed fragment shader EDSL, multi-target GPU compiler, pass fusion, and built-in effects. | [Shaders](advanced/shaders.md) |
 | `packages/nano-ui-svg` | Headless `DrawOp` and full-frame SVG export for documentation and visual tests. | [Ecosystem Packages](packages/index.md) |
 | `packages/nano-ui-demo` | Full example applications and focused single-topic demos. | [Tutorials](tutorials/index.md) |
 

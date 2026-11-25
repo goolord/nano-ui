@@ -100,7 +100,7 @@ editorView editor = textAreaDocument (document editor)
 
 Use `readVar` to read the current value, `writeVar` to replace it, and
 `modifyVar` to apply a pure function to the latest value (so multiple updates
-in the same frame compose cleanly). Writes that do not change the value (`==`)
+in the same frame compose without overwriting each other). Writes that do not change the value (`==`)
 do nothing. `readVar` can also be used inside event handlers: reading a `Var`
 and then writing to it costs at most one extra pass on that frame. To check
 whether an input widget modified its `Var` on the current frame, inspect
@@ -135,16 +135,16 @@ widget), the UI action is re-run once before layout so earlier widgets reflect
 the updated value (with one-shot inputs cleared so clicks and key presses do not
 fire twice). If a `Var` is written before anything reads it, no extra pass is
 needed: placing `readVar` below the input widget that edits it keeps typing to a
-single pass. If a `Var` is only bound to an input widget and not read elsewhere
-with `readVar`, only that widget is repainted on change; if `readVar` was
-called on it, the full window is repainted.
+single pass. Either way, paint-hash damage tracking compares each node's text,
+value, style, and bounds against the previous frame and repaints only the
+regions that changed.
 
 Read/write tracking is granular up to two levels of nesting (a record field or
 list element, plus a nested field within it). With a record in a single `Var`,
 `m.title` and `m.volume` are tracked separately, so reading `m.title` above a
 slider bound to `m.volume` does not trigger a second pass when the slider moves.
 Reading the entire record `m` or projecting through `zoomVar` marks all fields
-as read. `forEachVar` only reads the list's keys and order, so editing a single row's `Var` does not invalidate earlier rows; `withElemVars` returns the elements directly and therefore marks the whole list as read. Rows are distinguished using 63 hash bits of their keys, so past ~63 rows (or for keys that collide on the same bit, such as `Int` keys 64 apart), editing a row may trigger a second pass and a full repaint if sibling rows call `readVar` on that field.
+as read. `forEachVar` only reads the list's keys and order, so editing a single row's `Var` does not invalidate earlier rows; `withElemVars` returns the elements directly and therefore marks the whole list as read. Rows are distinguished using 63 hash bits of their keys, so past ~63 rows (or for keys that collide on the same bit, such as `Int` keys 64 apart), editing a row may trigger a second pass if sibling rows call `readVar` on that field; damage tracking still repaints only the rows whose output changed.
 
 Primed widget variants (`button'`, `textInput'`, `slider'`) return a `Response`:
 `respChanged` is `True` when the value was edited, `respSubmitted` when
@@ -242,11 +242,12 @@ layers $ do
 ```
 
 Scroll containers require a bounded viewport size, such as
-`scrollWith (fixedH 240 . fillW) body`. `scrollArea` also returns the scroller's
-`WidgetId` for programmatic scroll commands like `scrollToUi`, or `scrollToEnd`
-with the context from `askContext` (in `NanoUI.Monad`). For large virtualized
-lists, use `getScrollMetricsUi` to query the current scroll offset and viewport
-size so you only build the visible rows.
+`scrollWith (fixedH 240 . fillW) body`. `scrollWith'` (or `scrollConfigured'`)
+also returns the scroller's `Response` (including its `WidgetId`) for
+programmatic scroll commands like `scrollTo`, `scrollToEnd`, and
+`scrollRectIntoView`. For large virtualized lists, use `getScrollMetrics` to
+query the current scroll offset and viewport size so you only build the visible
+rows.
 
 To defer work until a widget enters the viewport, wrap it in `sensor` (or pass
 its ID to `useVisibility`). The returned visibility record contains the widget's
@@ -283,9 +284,10 @@ preserving layout geometry and widget state.
 
 Semantic status colors are applied with tones: `fontTone Warning` sets a
 label's text color (combining with font faces like `fontMono . fontTone Danger`),
-`tone Danger` styles buttons, and `toneColor` retrieves the `Color` value for
-custom drawing. Legacy helpers (`fontMuted`, `fontDanger`, `primary`,
-`destructive`, `success`, `warning`) are aliases for the corresponding tones.
+`tone Danger` styles buttons, `calloutTone Warning` tints callout panels, and
+`toneColor` retrieves the `Color` value for custom drawing. Helpers such as
+`fontMuted`, `fontDanger`, `primary`, `destructive`, `success`, and `warning`
+are shorthands for the corresponding tones.
 
 To follow the operating system's light or dark mode, pass a theme selector such
 as `lightDark defaultLightTheme defaultTheme` (which falls back to the dark
@@ -293,17 +295,18 @@ theme on platforms that do not report system appearance, such as RGFW). You can
 apply it inside your UI action:
 
 ```haskell
-setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
+setTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
 ```
 
-Or configure it via `followSystemTheme ctx` (a view gets `ctx` from
-`askContext`), or at startup via `sdlAppThemeFor` or `optThemeFor`. Calling `setTheme` or `setUiTheme` switches to a fixed theme,
-and `themeAppearance` returns whether a `Theme` is light or dark.
+Or configure it via `followSystemTheme` inside the view, or at startup via
+`sdlAppThemeFor` or `optThemeFor`. Calling `setTheme` switches to a fixed theme,
+and `themeAppearance` returns whether a `Theme` is light or dark. Extra preset
+themes and Base16 palettes live in `NanoUI.Themes`.
 
 Modals, floating windows, and popups take a `Var Bool` controlling whether they
 are open. While the `Var` is `True`, the overlay is shown; pressing Escape,
 clicking outside, or clicking the close button writes `False` to the `Var`. A
-floating `window` closes only by its close button.
+`floatingWindow` closes only by its close button.
 Call the overlay unconditionally every frame so sibling widget IDs remain
 stable:
 
@@ -316,7 +319,7 @@ modal confirm "Delete the file?" $
 
 If the open state is derived or the dialog must not close until explicitly
 confirmed, pass a `constVar` and handle dismissal via `respClicked` on the
-primed variant (`modal'`, `window'`, `popup'`).
+primed variant (`modal'`, `floatingWindow'`, `popup'`).
 
 Tooltips require no state variable: passing a widget's response to `tooltip`
 (or wrapping the widget with `withTooltip`, for a tooltip built from widgets)
@@ -391,8 +394,8 @@ through to shortcuts). An Escape press that dismisses an open dropdown, a focuse
 which keys they handle via `widgetKeys` (for example, a terminal widget sets
 `KeysAll`); one that claims Tab this way keeps focus when Tab is pressed.
 `menuItemShortcut` only matches while its menu is open; to make the shortcut
-active while the menu is closed, also declare a top-level `shortcut` before the
-menu.
+active while the menu is closed, declare a matching top-level `shortcut` after
+the menu so the open menu handles the chord first.
 
 Built-in text inputs and text areas handle IME composition automatically: the
 focused field renders the active pre-edit string (`inputComposition`) at the
@@ -459,12 +462,12 @@ case status of
 or failed with a synchronous exception (`TaskFailed`); `useTask` returns
 `Maybe a` (`Nothing` until the first result is produced). A task runs once per
 key and wakes the event loop when it finishes. When the key changes, the
-previous thread is cancelled with an asynchronous exception and a new thread is
+previous thread is canceled with an asynchronous exception and a new thread is
 spawned; while the new key is still running, both `useTaskStatus` and `useTask`
 continue to provide the previous key's result (`TaskRunning (Just old)`) so UI
 lists do not flash empty while re-querying. To add a retry trigger, include an
 attempt counter in the key, e.g. `useTaskStatus task (path, attempt)`. Because
-cancelled tasks receive an asynchronous exception and may briefly overlap with
+canceled tasks receive an asynchronous exception and may briefly overlap with
 the new task, use `bracket` inside tasks that open files or hold external
 resources. Task results are evaluated to WHNF on the worker thread. Compile
 applications with `-threaded`.
@@ -501,7 +504,8 @@ The `Context` and its arenas must only be accessed from the UI thread. If an
 external thread managed outside `useTask`/`useStream` updates shared state, it
 should write the update and then invoke the wake callback obtained from
 `askWake`; multiple wakes before the next frame coalesce into a single frame
-with a full-window redraw.
+whose damage diff repaints only the nodes whose text, value, style, or bounds
+changed.
 
 Note that low-level damage requests only mark screen regions for repainting and
 do not wake a blocked event loop on their own; external updates must trigger a
@@ -628,29 +632,29 @@ main =
 `askWindow` returns the window's state at the start of the frame (logical size,
 display scale, screen position, keyboard focus, and minimized/maximized/fullscreen
 mode). UI actions that call `askWindow` automatically receive a new frame when
-window state changes. Declarative setters (`setWindowTitleUi`,
-`setWindowIconUi`, `setWindowMinSizeUi`, `setWindowMaxSizeUi`,
-`setWindowOpacityUi`, `setWindowModeUi`) are no-ops when the requested value
+window state changes. Declarative setters (`setWindowTitle`,
+`setWindowIcon`, `setWindowMinSize`, `setWindowMaxSize`,
+`setWindowOpacity`, `setWindowMode`) are no-ops when the requested value
 matches the current state, so they can be called unconditionally each frame.
-Imperative window actions (`moveWindowUi`, `centerWindowUi`, `resizeWindowUi`,
-`minimizeWindowUi`, `maximizeWindowUi`, `restoreWindowUi`, `toggleMaximizedUi`)
+Imperative window actions (`moveWindow`, `centerWindow`, `resizeWindow`,
+`minimizeWindow`, `maximizeWindow`, `restoreWindow`, `toggleMaximized`)
 apply on every call and should only be triggered from events. Transparent
 windows (`wsTransparent = True` combined with a translucent theme
 `windowColor`) are supported on the SDL backend when a desktop compositor is
 present; RGFW windows are always opaque and ignore `wsOpacity` and
-`setWindowOpacityUi`.
+`setWindowOpacity`.
 
 By default, clicking the window's close button exits the session immediately.
 With `wsExitOnCloseRequest = False`, close requests are not handled
 automatically: `winCloseRequested` on `askWindow` becomes `True` on the next
-frame, and the window stays open until `quitUi` is called:
+frame, and the window stays open until `quit` is called:
 
 ```haskell
 asking <- useVar False
 whenM (winCloseRequested <$> askWindow) $
-  if unsaved then writeVar asking True else quitUi
+  if unsaved then writeVar asking True else quit
 modal asking "Discard your changes?" $ do
-  whenM (button "Discard") quitUi
+  whenM (button "Discard") quit
   whenM (button "Keep editing") (writeVar asking False)
 ```
 
@@ -703,7 +707,7 @@ defaults). Register a thread-safe wake callback with `setWakeLoop`, report OS
 light/dark appearance changes with `setSystemAppearance`, update window metrics
 before each frame with `reportWindowState`, and fulfill pending screenshot
 requests after presentation with `answerScreenshots`. `runSessionLoop` manages
-close requests and `quitUi` automatically; custom event loops can drive them
+close requests and `quit` automatically; custom event loops can drive them
 with `requestWindowClose`, `clearWindowClose`, and `quitRequested`.
 
 ## Headless tests

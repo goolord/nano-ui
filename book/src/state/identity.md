@@ -61,13 +61,13 @@ When your list is stored in a `Var [a]`, `forEachVar key list body` gives each e
 
 ## Rule 4: call overlays unconditionally
 
-`modal`, `window`, and `popup` each take a `Var Bool` controlling whether they are open, and they render nothing when that flag is `False`. Call them on every frame:
+`modal`, `floatingWindow`, and `popup` each take a `Var Bool` controlling whether they are open, and they render nothing when that flag is `False`. Call them on every frame:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Identity.hs:overlay}}
 ```
 
-Putting a modal or popup inside `when isOpen` shifts the IDs of following siblings whenever it opens or closes. If your open state is derived from other data instead of a `Var Bool`, pass `constVar` and handle close events through the primed variants (`modal'`, `window'`, `popup'`).
+Putting a modal or popup inside `when isOpen` shifts the IDs of following siblings whenever it opens or closes. If your open state is derived from other data instead of a `Var Bool`, pass `constVar` and handle close events through the primed variants (`modal'`, `floatingWindow'`, `popup'`).
 
 ## Rule 5: prune state for unbounded collections
 

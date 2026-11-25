@@ -39,7 +39,7 @@ filePicker (FilePicker pending) =
     writeVar pending . Just =<< askOpenFileDialog defaultFileDialogOptions
 ```
 
-`pollFileDialogUi handle` consumes a finished dialog result once and restores focus to the main window, while `peekFileDialogUi handle` checks status without consuming it. Dialog launch helpers return a handle immediately and report errors as `FileDialogFailed` (including when called outside a live SDL session). View actions like `askSdlDebug`, `setSdlUiFont`, `setSdlUiScale`, `windowCaption`, and the `*Ui` window helpers likewise act on the active session and become no-ops in headless tests.
+`pollFileDialogUi handle` consumes a finished dialog result once and restores focus to the main window, while `peekFileDialogUi handle` checks status without consuming it. Dialog launch helpers return a handle immediately and report errors as `FileDialogFailed` (including when called outside a live SDL session). View actions like `askSdlDebug`, `setSdlUiFont`, `setSdlUiScale`, `windowCaption`, and the core window helpers likewise act on the active session and become no-ops in headless tests.
 
 When you explicitly need low-level `IO` operations (`openFileDialog`, `pollFileDialog`, `setWindowChrome`, `saveScreenshot`), fetch the opaque `SdlEnv` session capability via `askSdlEnv`. Because those functions call directly into SDL, run them on the display thread (only `cancelFileDialog` is safe from another thread). Internal mutable caches and native pointers live in `NanoUI.Sdl.Internal.Window`, which is reserved for render tests and unstable across releases.
 
@@ -54,7 +54,7 @@ runSdlApp
   notesView
 ```
 
-Read live window metadata with `askWindow`, and update it via core setters and commands (`setWindowTitleUi`, `setWindowModeUi`, `moveWindowUi`, `resizeWindowUi`, and so on). For frameless custom title bars, combine `sdlWindowDecorations` with `windowCaption`.
+Read live window metadata with `askWindow`, and update it via core setters and commands (`setWindowTitle`, `setWindowMode`, `moveWindow`, `resizeWindow`, and so on). For frameless custom title bars, combine `sdlWindowDecorations` with `windowCaption`.
 
 Enabling `wsTransparent` lets the desktop show through wherever your theme's window background is translucent (note that SDL's software renderer accumulates alpha where translucent surfaces overlap). Capture the last presented frame with `captureScreenshot` (raw `Screenshot`) or `saveScreenshot` (writes a BMP file).
 
@@ -62,7 +62,7 @@ Enabling `wsTransparent` lets the desktop show through wherever your theme's win
 
 Target GHC 9.10 through 9.14 with `default-language: GHC2024`, add `nano-ui` and `nano-ui-sdl` to `build-depends`, and link executables with `-threaded` so background threads keep running while the SDL event wait sleeps.
 
-High-level runners (`runSdlApp`, `runSdlAppReduce`) manage the window and renderer for the full session. If you are embedding `nano-ui` inside an existing event loop, use the lower-level session API exported from `NanoUI.Backend.Sdl`, keeping all window, renderer, and font calls on the display thread and closing the session cleanly on exit.
+High-level runners (`runSdlApp`, `runSdlAppReduce`) manage the window and renderer for the full session. If you are embedding `nano-ui` inside an existing event loop, use the lower-level session API exported from `NanoUI.Backend.Sdl`, keeping all window, renderer, and font calls on the display thread and closing the session on exit.
 
 ## Fonts and DPI scaling
 

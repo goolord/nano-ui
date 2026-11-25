@@ -14,7 +14,7 @@ To experiment with modifiers live, open the [Interactive Styling Lab](lab.md). F
 | `themePopup` | Dropdown menus, context menus, popups |
 | `themeFloatingWindow` | Modals, floating windows, inspectors |
 
-Each `Style` sets `bg`, `fg`, `border`, `borderWidth`, `cornerRadius`, `hoverBg`, and `activeBg`. Beyond those five surfaces, a `Theme` defines shared semantic colors: `themeAccent`, `themeOnAccent`, `themeMuted`, `themeSelection`, `themeFocusRing`, `themeWindow`, `themeSeparator`, and the success, warning, and danger tones.
+Each `Style` sets `styleBg`, `styleFg`, `styleBorder`, `styleBorderWidth`, `styleCornerRadius`, `styleHoverBg`, `styleActiveBg`, and `styleBorderSides`. Beyond those five surfaces, a `Theme` defines shared semantic colors: `themeAccent`, `themeOnAccent`, `themeMuted`, `themeSelection`, `themeFocusRing`, `themeWindow`, `themeSeparator`, and the success, warning, and danger tones. Construct colors with `colorRGB`, `colorRGBA`, `colorHex "#38bdf8"`, or `colorHexA "#38bdf8cc"`.
 
 The backdrop behind your view is `pageBackground`, which defaults to `themeWindow` unless the theme sets `themePage` (via `pageColor`). Calling `styled panelPage` puts a borderless view directly on the panel surface. The window color itself still peeks through gaps between panels:
 
@@ -24,7 +24,7 @@ The backdrop behind your view is `pageBackground`, which defaults to `themeWindo
 
 A full-window scroller (`scrollWith grow`) paints using this page color instead of drawing a bordered well.
 
-Built-in themes include `defaultTheme` (dark), `defaultLightTheme`, the Tomorrow variants, and Base16 generators (`themeFromBase16`, `themeFromBase16Dark`, `themeFromBase16Light`). Set a theme at startup with `sdlAppTheme = Just appTheme`, change it dynamically per frame with `setUiTheme`, or match the OS appearance automatically with `followSystemTheme` or `lightDark`.
+`defaultTheme` (dark) and `defaultLightTheme` live in `NanoUI`; extra presets (Tomorrow variants) and Base16 generators (`themeFromBase16`, `themeFromBase16Dark`, `themeFromBase16Light`) live in `NanoUI.Themes`. Set a theme at startup with `sdlAppTheme = Just appTheme`, change it dynamically per frame with `setTheme`, or match the OS appearance automatically with `followSystemTheme` or `lightDark`.
 
 ## Scoped styling
 
@@ -36,7 +36,7 @@ Style and theme modifiers compose with `(.)`, and nested `styled` blocks build o
 
 - **Style modifiers** (`Style -> Style`): `background`, `foreground`, `borderColor`, `borderWidth`, `borderSides`, `cornerRadius`, `hoverBackground`, `pressBackground`, and `fillColor`.
 - **Theme modifiers** (`Theme -> Theme`): `buttonStyle`, `inputStyle`, `panelStyle`, `everyStyle`, `accentColor`, `textColor`, `rounded`, `subtle`, `tinted`, and `readableOn`.
-- **Semantic shortcuts**: `primary`, `destructive`, `success`, `warning`, `tone Danger`, and `toneColor Warning`.
+- **Semantic shortcuts**: `primary`, `destructive`, `success`, `warning`, `tone Danger`, `calloutTone Warning`, and `toneColor Warning`.
 
 For example, here is a quiet, borderless button helper:
 
@@ -71,10 +71,12 @@ Compare all four states across dark and light themes:
 
 ## Typography and fonts
 
-Font modifiers compose right alongside layout modifiers on any text widget (`labelWith`, `headingWith`, `textInputWith`, `buttonWith`, and so on):
+Font modifiers compose right alongside layout modifiers on text and labeled widgets (`labelWith`, `buttonWith`, `selectWith`, `textAreaWith`, and `ticLayout` inside `textInputConfigured`):
 
-- `fontSize px`, `fontMono`, `fontBold` (or `fontWeight`), `fontItalic`, `fontUnderline`, `fontStrike`
-- `fontTone Warning`, `fontColor color`
+- **Size and face:** `fontSize px`, `fontSizeScale factor`, `fontRegular`, `fontProportional`, `fontMono`, `fontTabular` (tabular lining digits so numeric columns align without jumping)
+- **Weight, slant, decoration:** `fontBold` (or `fontWeight`), `fontItalic`, `fontUnderline`, `fontStrike`
+- **Color and tone:** `fontTone Warning`, `fontColor color`
+- **Single-line truncation:** `singleLine` keeps a label on one line even inside a column and truncates overflow with an ellipsis; `ellipsisEnd` (default), `ellipsisMiddle` (for file paths), or `ellipsisStart` chooses where the ellipsis sits (`textEllipsis`).
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Styling.hs:font_modifiers}}

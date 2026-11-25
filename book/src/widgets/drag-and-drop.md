@@ -34,10 +34,10 @@ The SDL backend forwards OS drag-and-drop events (the RGFW backend does not). `d
 
 ## Dockable pane grids
 
-`paneGrid` manages splittable, resizable pane layouts. Its response includes `pgrDropTarget`, which reports where a dragged pane or tab would dock under the cursor and pairs naturally with `useDrag`:
+`paneGrid` (imported from `NanoUI.Widgets.PaneGrid`) manages splittable, resizable, tab-groupable pane layouts. Its response includes `pgrDropTarget`, which reports where a dragged pane or tab would dock under the cursor and pairs with `useDrag`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/DragDrop.hs:pane_grid}}
 ```
 
-`pgdLocation` is either `BesidePane paneId edge` or `OutsideGrid edge`, and `pgdRect` / `pgdPane` let you validate or highlight the target. Save `pgrTree` whenever `pgrCommitted` is `True`.
+`pgdLocation` is `BesidePane paneId edge` (on a pane edge), `IntoTabs paneId` (in a pane center when `pgCenterDrop = CenterTab`), or `OutsideGrid edge` (along the outer grid margin). `pgdRect` and `pgdPane` let you validate or highlight the target. Save `pgrTree` whenever `pgrCommitted` is `True`.

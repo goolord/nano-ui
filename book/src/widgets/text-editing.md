@@ -53,3 +53,13 @@ See [Tutorial 2: Build a Notepad](../tutorials/notepad.md) for a full Edit menu 
 > Overwriting a `Var Text` or `Var TextDocument` directly from outside the widget clears its undo stack. If you want a programmatic edit to be undoable, dispatch a `TextCommand` (`InsertText`, `ReplaceAll`, and so on) instead.
 
 When using primed variants (`textArea'`, `textAreaDocument'`), `respChanged` is `True` after actual text edits and `False` after cursor movement or selection changes, making it safe to use for dirty-state tracking. Keep `respId` to target the editor with `runTextCommand` or `requestFocus`.
+
+## Rich text and hyperlinks
+
+For read-only paragraphs mixing bold, italic, monospaced code runs, highlights, tooltips, and clickable links, use `richText` (or `selectableRichText` when users should be able to drag-select and copy):
+
+```haskell
+{{#include ../../../packages/nano-ui-demo/book/Book/TextEditing.hs:rich_text}}
+```
+
+Plain string literals produce `Inline` pieces via `OverloadedStrings`. Combine them with `strong`, `emphasis`, `inlineCode`, `inlineWith`, `restyle`, `inlineBackground`, `inlineTooltip`, and `hyperlink target label`. Both `richText` and `selectableRichText` wrap to their container width and return `Maybe Text` holding the `target` of any link clicked on that frame. For full CommonMark documents, use `nano-ui-markdown`.
