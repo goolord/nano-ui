@@ -54,9 +54,9 @@ module NanoUI.Internal.Widgets.Layout
   )
 where
 
-import Control.Monad (void)
+import Control.Monad (void, when)
 import Data.Text (Text)
-import NanoUI.Internal.Context (Context (..), getPrevRect, intKey, recordLayoutRead)
+import NanoUI.Internal.Context (Context (..), getPrevRect, intKey, recordLayoutRead, registerFocusable)
 import NanoUI.Internal.Layout.ScrollGeometry
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
@@ -416,6 +416,8 @@ scrollAreaIdConfigured wid layout cfg child = do
     idx <- addNodeFromLayout (ctxNodeArena ctx) NodeScrollContainer parent layout
     setWidgetId (ctxNodeArena ctx) idx wid
     setStyleIdx (ctxNodeArena ctx) idx (encodeScrollConfig cfg)
+    when (scrollFocusable cfg) $
+      registerFocusable ctx wid
     pure idx
   -- Unscoped: a scroll container's children keep their parent's id scope.
   withContainerNode False idx child

@@ -2,11 +2,13 @@
 module Cases.Tooltip (tests) where
 
 import Spec
+import NanoUI.Internal.Context (getFocusables)
 import NanoUI.Testing.Sim
 
 tests :: [Spec]
 tests =
   [ simSpec "tooltip-targets" 400 300 targetsUi tooltipTargets
+  , spec "tooltip-passthrough" runTooltipPassThroughTest
   ]
 
 now :: TooltipConfig
@@ -41,3 +43,30 @@ tooltipTargets = do
   (body4, g4) <- gapUnder near "Near tip"
   (body20, g20) <- gapUnder far "Far tip"
   checkEq (Nothing, Just (), 16) (body4, body20, g20 - g4)
+
+-- | A rich tooltip passes pointer events through to widgets underneath and
+-- keeps controls inside its body inert (outside the keyboard focus order).
+runTooltipPassThroughTest :: Context -> IORef Int -> IO ()
+runTooltipPassThroughTest ctx failed = do
+  tipClicks <- newIORef (0 :: Int)
+  underClicks <- newIORef (0 :: Int)
+  let ui = columnWith (tight . gap 4) $ do
+        top <- buttonWith' (fixedWH 140 30) "Top"
+        under <- buttonWith' (fixedWH 140 30) "Underneath"
+        when (respClicked under) (liftIO (modifyIORef' underClicks (+ 1)))
+        _ <- tooltipWidgetConfigured now {tooltipGap = 4} top $ do
+          tipBtn <- buttonWith' (fixedWH 140 30) "TipBtn"
+          when (respClicked tipBtn) (liftIO (modifyIORef' tipClicks (+ 1)))
+          pure (respId tipBtn)
+        pure (top, under)
+  runSim ctx failed (withInput 400 200) ui $ do
+    (top, under) <- result
+    -- Hover "Top" so the tooltip opens directly over "Underneath".
+    _ <- moveTo (On top) >> settle
+    check =<< labelShown "TipBtn"
+    -- Focusables must include only "Top" and "Underneath", never "TipBtn".
+    focs <- onContext getFocusables
+    checkEq [respId top, respId under] focs
+    -- Clicking over "Underneath" (covered visually by the tooltip) reaches "Underneath".
+    _ <- click (On under) >> settle
+    checkEq (0, 1) =<< liftIO ((,) <$> readIORef tipClicks <*> readIORef underClicks)

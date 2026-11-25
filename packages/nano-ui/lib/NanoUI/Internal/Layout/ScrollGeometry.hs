@@ -61,12 +61,16 @@ data ScrollConfig = ScrollConfig
   -- bare scroller with something to scroll also keeps the wheel: an axis it
   -- cannot move passes to no scroller around or inside it.
   , scrollBare :: !Bool
+  -- | Register the scroll container as a keyboard Tab stop and focus it on a
+  -- click on passive content inside it, for keyboard-driven list views
+  -- ('NanoUI.useListNav').
+  , scrollFocusable :: !Bool
   }
   deriving (Eq, Show)
 
--- | Automatic bars on both axes and a painted background.
+-- | Automatic bars on both axes, a painted background, and not focusable.
 defaultScrollConfig :: ScrollConfig
-defaultScrollConfig = ScrollConfig ScrollAuto ScrollAuto False
+defaultScrollConfig = ScrollConfig ScrollAuto ScrollAuto False False
 
 scrollConfigNative2D :: ScrollConfig -> Bool
 scrollConfigNative2D cfg = scrollPolicyX cfg /= ScrollNone && scrollPolicyY cfg /= ScrollNone
@@ -74,11 +78,12 @@ scrollConfigNative2D cfg = scrollPolicyX cfg /= ScrollNone && scrollPolicyY cfg 
 -- | A scroll node's style index. 'SB.scrollMarker' is always set, so that
 -- no scroll node's style index is 0.
 encodeScrollConfig :: ScrollConfig -> Int
-encodeScrollConfig (ScrollConfig px py bare) =
+encodeScrollConfig (ScrollConfig px py bare focusable) =
   SB.fieldMask SB.scrollMarker
     .|. SB.placeField SB.scrollPolicyX (fromEnum px)
     .|. SB.placeField SB.scrollPolicyY (fromEnum py)
     .|. (if bare then SB.fieldMask SB.scrollBare else 0)
+    .|. (if focusable then SB.fieldMask SB.scrollFocusable else 0)
 
 decodeScrollConfig :: Int -> ScrollConfig
 decodeScrollConfig bits =
@@ -86,19 +91,20 @@ decodeScrollConfig bits =
     (toEnum (SB.getField SB.scrollPolicyX bits))
     (toEnum (SB.getField SB.scrollPolicyY bits))
     (SB.testField SB.scrollBare bits)
+    (SB.testField SB.scrollFocusable bits)
 
 scrollDefault1D :: Direction -> ScrollConfig
 scrollDefault1D Column = scrollVerticalAuto
-scrollDefault1D Row = ScrollConfig ScrollAuto ScrollNone False
+scrollDefault1D Row = ScrollConfig ScrollAuto ScrollNone False False
 
 scrollVerticalAuto :: ScrollConfig
-scrollVerticalAuto = ScrollConfig ScrollNone ScrollAuto False
+scrollVerticalAuto = ScrollConfig ScrollNone ScrollAuto False False
 
 scrollVerticalHidden :: ScrollConfig
-scrollVerticalHidden = ScrollConfig ScrollNone ScrollHidden False
+scrollVerticalHidden = ScrollConfig ScrollNone ScrollHidden False False
 
 scrollHorizontalHidden :: ScrollConfig
-scrollHorizontalHidden = ScrollConfig ScrollHidden ScrollNone False
+scrollHorizontalHidden = ScrollConfig ScrollHidden ScrollNone False False
 
 -- | Cross-axis gutter for one bar. @trailPad@ is the scroller's padding on
 -- the bar's side (right for the vertical bar, bottom for the horizontal one).

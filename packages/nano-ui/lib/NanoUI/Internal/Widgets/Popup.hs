@@ -237,7 +237,13 @@ tooltipWidgetConfigured cfg target child = do
   let (anchor, placement)
         | follow = (AnchorRect (Rect mx my 0 pointerClearance), PlacementBelow)
         | otherwise = (AnchorRect rect, tooltipPlacement cfg)
-  result <- snd <$> popupWith' (constVar open) ((defaultPopupConfig anchor) {cfgPlacement = placement, cfgDismissable = False, cfgOffset = tooltipGap cfg}) id child
+  result <-
+    snd
+      <$> popupWith'
+        (constVar open)
+        ((defaultPopupConfig anchor) {cfgPlacement = placement, cfgDismissable = False, cfgOffset = tooltipGap cfg})
+        (pointer PointerPass)
+        (inertView child)
   -- Clear the stored timestamp when a tooltip is no longer declared
   -- ('holdAction'), so if it reappears later it waits for the full delay
   -- rather than opening immediately or ending other tooltips' delays. The

@@ -39,6 +39,7 @@
 -- 0       containerInert    NodeContainer
 -- 1       containerClip
 -- 2       containerShaderEffect
+-- 3       containerButtonGroup
 -- 8-9     chromePart        tab strip chrome
 -- 10-11   chromeStyle
 -- 12-13   chromeOrient
@@ -47,6 +48,7 @@
 -- 3-5     scrollPolicyY
 -- 6       scrollMarker      always set
 -- 7       scrollBare
+-- 8       scrollFocusable
 -- 0-1     pickerPart        NodeColorPicker
 -- @
 --
@@ -101,6 +103,7 @@ module NanoUI.Internal.StyleBits
   , containerInert
   , containerClip
   , containerShaderEffect
+  , containerButtonGroup
   , chromePart
   , chromeStyle
   , chromeOrient
@@ -109,6 +112,7 @@ module NanoUI.Internal.StyleBits
   , scrollPolicyY
   , scrollMarker
   , scrollBare
+  , scrollFocusable
   -- * Colour picker
   , pickerPart
   -- * Layouts
@@ -356,6 +360,12 @@ containerClip = BitField 1 1
 containerShaderEffect :: BitField
 containerShaderEffect = BitField 2 1
 
+-- | Container joins adjacent buttons with outer-only rounding and shared
+-- internal borders ('NanoUI.buttonGroup').
+{-# INLINE containerButtonGroup #-}
+containerButtonGroup :: BitField
+containerButtonGroup = BitField 3 1
+
 -- | The 'NanoUI.Internal.WidgetText.TabChrome' a tab strip's container
 -- paints.
 {-# INLINE chromePart #-}
@@ -388,6 +398,12 @@ scrollMarker = BitField 6 1
 {-# INLINE scrollBare #-}
 scrollBare :: BitField
 scrollBare = BitField 7 1
+
+-- | Scroll container takes keyboard focus as a Tab stop and on click
+-- ('NanoUI.scrollFocusable').
+{-# INLINE scrollFocusable #-}
+scrollFocusable :: BitField
+scrollFocusable = BitField 8 1
 
 -- Colour picker ------------------------------------------------------------
 
@@ -429,6 +445,7 @@ styleLayouts =
     , [ ("containerInert", containerInert)
       , ("containerClip", containerClip)
       , ("containerShaderEffect", containerShaderEffect)
+      , ("containerButtonGroup", containerButtonGroup)
       , ("chromePart", chromePart)
       , ("chromeStyle", chromeStyle)
       , ("chromeOrient", chromeOrient)
@@ -440,6 +457,7 @@ styleLayouts =
       , ("scrollPolicyY", scrollPolicyY)
       , ("scrollMarker", scrollMarker)
       , ("scrollBare", scrollBare)
+      , ("scrollFocusable", scrollFocusable)
       ]
     )
   , ("NodeColorPicker", [("pickerPart", pickerPart)])

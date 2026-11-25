@@ -248,6 +248,7 @@ finalizeFrameInput ctx frameInp layerInp targets focusBefore = do
   finalizeTextInputFocus ctx layerInp targets
   finalizeSelectFocus ctx targets
   finalizeDrawingFocus ctx targets
+  finalizeScrollFocus ctx layerInp targets
   finalizeTextFieldMouse ctx layerInp (ptFieldControl targets)
   closeTextEditMenuOnOutsideClick ctx frameInp
   openTextEditMenu ctx layerInp

@@ -111,14 +111,22 @@ nodeInPanel Context {ctxNodeArena = na} idx panel =
  where
   stop nt = if isFloatingNode nt then Just False else Nothing
 
--- | The window or popup on top at @mouse@. The frame paints every popup over
--- every window, so a popup whose rect holds the point wins; among panels of
--- one kind, the last in arena order.
+-- | The interactive window or popup on top at @mouse@, skipping 'PointerPass'
+-- floating panels such as tooltips. The frame paints every popup over every
+-- window, so a popup whose rect holds the point wins; among panels of one
+-- kind, the last in arena order.
 topmostOverlayAtMouse :: Context -> V2 -> IO (Maybe NodeIdx)
 topmostOverlayAtMouse ctx mouse =
   runMaybeT $
-    MaybeT (topmostFloating ctx (== NodePopup) (`rectContains` mouse))
-      <|> MaybeT (topmostFloating ctx (== NodeWindow) (`rectContains` mouse))
+    MaybeT (topmostPointerFloating ctx (== NodePopup) (`rectContains` mouse))
+      <|> MaybeT (topmostPointerFloating ctx (== NodeWindow) (`rectContains` mouse))
+
+topmostPointerFloating :: Context -> (NodeType -> Bool) -> (Rect -> Bool) -> IO (Maybe NodeIdx)
+topmostPointerFloating Context {ctxNodeArena = na} wanted at =
+  findClassNodeRevM na FloatingNodes $ \idx ->
+    (wanted <$> getNodeType na idx)
+      <&&> ((/= PointerPass) <$> getPointerMode na idx)
+      <&&> (at <$> getNodeRect na idx)
 
 -- | The last floating node in arena order whose type satisfies @wanted@ and
 -- whose rect satisfies @at@. The frame paints the panels of one type in arena

@@ -190,8 +190,35 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
         ButtonMenuBar -> False
         ButtonRow -> False
         _ -> opaqueBg
-  when opaqueBg $ fillStyledRect da style menuRowRect
-  when drawStroke $ strokeStyledRect da style (Rect x y w h)
+  let canGroup =
+        opaqueBg
+          && drawStroke
+          && (nt == NodeSelect || (nt == NodeButton && (bkind == ButtonPlain || bkind == ButtonContent)))
+  grouped <-
+    if not canGroup
+      then pure False
+      else do
+        let na = peNodeArena env
+        p <- getParent na idx
+        if p < 0
+          then pure False
+          else do
+            pt <- getNodeType na p
+            if pt /= NodeContainer
+              then pure False
+              else do
+                psi <- getStyleIdx na p
+                if not (hasFlag containerFlagButtonGroup psi)
+                  then pure False
+                  else do
+                    fc <- getFirstChild na p
+                    ns <- getNextSibling na idx
+                    dir <- getDirection na p
+                    paintGroupedButton da style dir (ns < 0) (fc == idx) (Rect x y w h)
+                    pure True
+  unless grouped $ do
+    when opaqueBg $ fillStyledRect da style menuRowRect
+    when drawStroke $ strokeStyledRect da style (Rect x y w h)
   case nt of
     NodeSlider -> paintSliderBody env x y w h value
     NodeSelect -> drawSelectChevron da False x y w h (styleFg style)

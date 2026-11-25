@@ -43,6 +43,7 @@ module NanoUI.Internal.WidgetText
   , containerFlagInert
   , containerFlagClip
   , containerFlagShaderEffect
+  , containerFlagButtonGroup
   , hasFlag
   , tableSortLane
   , tableHeaderPadX
@@ -507,6 +508,11 @@ containerFlagClip = SB.fieldMask SB.containerClip
 {-# INLINE containerFlagShaderEffect #-}
 containerFlagShaderEffect :: Int
 containerFlagShaderEffect = SB.fieldMask SB.containerShaderEffect
+
+-- | Marks a @NodeContainer@ that joins adjacent buttons ('NanoUI.buttonGroup').
+{-# INLINE containerFlagButtonGroup #-}
+containerFlagButtonGroup :: Int
+containerFlagButtonGroup = SB.fieldMask SB.containerButtonGroup
 
 -- | Whether the packed style index @si@ carries @flag@.
 {-# INLINE hasFlag #-}

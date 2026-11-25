@@ -10,6 +10,7 @@ module NanoUI.Internal.Frame.Chrome
   , fillStyledRect
   , strokeStyledRect
   , paintStyledRect
+  , paintGroupedButton
   , floatingSurface
   , overlayMenuStyle
   , paintMenuPanel
@@ -401,6 +402,35 @@ paintStyledRect :: DrawArena -> Style -> Rect -> IO ()
 paintStyledRect da style rect = do
   fillStyledRect da style rect
   strokeStyledRect da style rect
+
+-- | Paint a button or select inside a connected 'NanoUI.buttonGroup':
+-- outer-only corner rounding and a shared internal border along the leading
+-- seam of every item after the first.
+{-# NOINLINE paintGroupedButton #-}
+paintGroupedButton :: DrawArena -> Style -> DirTag -> Bool -> Bool -> Rect -> IO ()
+paintGroupedButton da style dir isFirst isLast rect@(Rect x y w h)
+  | isFirst && isLast = paintStyledRect da style rect
+  | otherwise = do
+      let bw = if styleBorderWidth style > 0 then max 1 (styleBorderWidth style) else 0
+          rr = clamp 0 (min (w / 2) (h / 2)) (styleCornerRadius style)
+          pad = rr + max 1 bw
+          open = case dir of
+            DirRow ->
+              let extL = if isFirst then 0 else pad
+                  extR = if isLast then 0 else pad
+               in Rect (x - extL) y (w + extL + extR) h
+            DirColumn ->
+              let extT = if isFirst then 0 else pad
+                  extB = if isLast then 0 else pad
+               in Rect x (y - extT) w (h + extT + extB)
+      withClip da rect $ do
+        if rr <= 0
+          then pushRect da open (styleBg style)
+          else pushRoundedRect da open rr (styleBg style)
+        when (bw > 0) $
+          pushRoundedStroke da open rr bw (styleBorder style)
+      when (not isFirst && bw > 0 && colorA (styleBorder style) > 0) $
+        pushRect da (case dir of DirRow -> Rect x y bw h; DirColumn -> Rect x y w bw) (styleBorder style)
 
 -- | Popups, modals, dropdowns and menus: 'themePopup', with a row hover
 -- that shows on it and a pressed row tinted toward the accent.

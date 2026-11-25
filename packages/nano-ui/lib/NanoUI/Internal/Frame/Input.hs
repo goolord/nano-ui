@@ -17,6 +17,7 @@ module NanoUI.Internal.Frame.Input
   , finalizeTextInputFocus
   , finalizeSelectFocus
   , finalizeDrawingFocus
+  , finalizeScrollFocus
   , finalizeFocusRequest
   , PressTargets (..)
   , targetsAt
@@ -48,6 +49,7 @@ import NanoUI.Internal.Frame.TextInput (nodeTextFieldGeom)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
+import NanoUI.Internal.Layout.ScrollGeometry (decodeScrollConfig, scrollFocusable)
 import NanoUI.Internal.Monad (ifM, unlessM, whenM, (<&&>))
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectFullyInside)
 import NanoUI.Internal.WidgetText (hasFlag, buttonFlagMenuBar, buttonFlagMenu, buttonFlagRow, textInputFlagSelectable)
@@ -199,6 +201,7 @@ data PressTargets = PressTargets
   , ptTextField :: !(Maybe WidgetId)
   , ptSelect :: !(Maybe WidgetId)
   , ptFieldControl :: !Bool
+  , ptBlocked :: !Bool
   }
 
 -- | The 'PressTargets' of this frame's left press ('targetsAt'). Runs after
@@ -234,7 +237,7 @@ targetsAt ctx@Context {ctxNodeArena = na} mouse = do
     if layered == 0
       then pure False
       else maybe (pure False) blocking =<< reachedHit ctx takerUnder
-  if blocked then pure none else pressTargetsAt ctx under
+  if blocked then pure none {ptBlocked = True} else pressTargetsAt ctx under
 
 -- | 'targetsAt' once no blocking node took the press. @under@ is the press
 -- hit test.
@@ -243,7 +246,7 @@ pressTargetsAt ctx@Context {ctxNodeArena = na} under = do
   found <- newIORef none
   _ <- findClassNodeM na PointerNodes $ \idx -> do
     nt <- getNodeType na idx
-    PressTargets i t s _ <- readIORef found
+    PressTargets i t s _ _ <- readIORef found
     let wantI = isNothing i && isWidgetNode nt
         wantT = isNothing t && (nt == NodeTextInput || nt == NodeTextArea)
         wantS = isNothing s && nt == NodeSelect
@@ -261,16 +264,17 @@ pressTargetsAt ctx@Context {ctxNodeArena = na} under = do
               (pick wantT fieldWid t)
               (pick wantS selectWid s)
               False
+              False
       writeIORef found r
       pure (isJust (ptInteractive r) && isJust (ptTextField r) && isJust (ptSelect r))
   -- Another widget under the press is drawn inside the field or select, or
   -- over it. The field then takes the press only as the control's
   -- ('ptFieldControl'), and the select takes none.
-  PressTargets i t s _ <- readIORef found
-  pure (PressTargets i t (mfilter (\w -> Just w == i) s) (isJust t && t /= i))
+  PressTargets i t s _ _ <- readIORef found
+  pure (PressTargets i t (mfilter (\w -> Just w == i) s) (isJust t && t /= i) False)
 
 none :: PressTargets
-none = PressTargets Nothing Nothing Nothing False
+none = PressTargets Nothing Nothing Nothing False False
 
 -- | On a left press, make the interactive widget under the pointer the active
 -- widget, unless it is disabled. Runs before the view, against the layout the
@@ -375,6 +379,35 @@ finalizeDrawingFocus ctx targets =
     let na = ctxNodeArena ctx
         drawing = maybe (pure False) (fmap (== NodeDrawing) . getNodeType na) =<< lookupNodeByWidgetId na wid
     whenM (drawing <&&> isFocusable ctx wid) (focusWidget ctx wid))
+
+-- | On a left press that did not focus a text field, select, or focusable
+-- drawing, focus the innermost enabled focusable scroll container
+-- ('NanoUI.scrollFocusable') under the pointer.
+finalizeScrollFocus :: Context -> Input -> PressTargets -> IO ()
+finalizeScrollFocus ctx@Context {ctxNodeArena = na} inp targets =
+  when (pressedIn MouseLeft inp && not (ptBlocked targets)) $ do
+    cur <- readIORef (ctxFocusId ctx)
+    when (hashWidgetId cur == 0) $ do
+      let mouse = inputMousePos inp
+      top <- overlayHitRoot ctx mouse
+      let hit idx = do
+            nt <- getNodeType na idx
+            if nt /= NodeScrollContainer
+              then pure False
+              else do
+                si <- getStyleIdx na idx
+                if not (scrollFocusable (decodeScrollConfig si))
+                  then pure False
+                  else do
+                    wid <- getWidgetId na idx
+                    rect <- getNodeRect na idx
+                    pure (hashWidgetId wid /= 0)
+                      <&&> nodeClippedHit ctx idx rect mouse
+                      <&&> overlayHitAllowed ctx top idx
+                      <&&> (not <$> passesPointer na idx)
+                      <&&> isFocusable ctx wid
+                      <&&> (not <$> isDisabled ctx wid)
+      findClassNodeRevM na PointerNodes hit >>= mapM_ (\idx -> getWidgetId na idx >>= focusWidget ctx)
 
 -- | Apply the view's last focus request this frame
 -- ('NanoUI.Internal.Monad.requestFocus', 'NanoUI.Internal.Monad.focusNext',
@@ -501,6 +534,7 @@ recordFocusKind ctx ime = do
             -- A tree row moves with the arrows; any other button activates.
             NodeButton -> si <&> \s -> FocusControl (if hasFlag buttonFlagRow s then KeysNavigate else KeysActivate)
             NodeDrawing -> FocusControl . maybe KeysNone cdrKeys <$> lookupCustomDrawing ctx focus
+            NodeScrollContainer -> pure (FocusControl KeysNavigate)
             _ -> pure (FocusControl KeysNavigate)
   combo <- if kind == FocusTextLine then isJust <$> focusedComboNode ctx else pure False
   was <- getsInteraction ctx isFocusKind

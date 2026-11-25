@@ -15,19 +15,25 @@ module NanoUI.Internal.Widgets.Button
   , buttonContentWith
   , buttonContentWith'
   , buttonContentStyled
+  , buttonGroup
+  , buttonGroupWith
   )
 where
 
+import Control.Monad (when)
 import Data.Bits ((.|.))
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import NanoUI.Internal.Monad (NanoUI, uiTheme)
-import NanoUI.Internal.Style (Layout (..), Style (..), Theme (..), defaultLayout)
+import Data.Word (Word64)
+import NanoUI.Internal.Context (Context (..))
+import NanoUI.Internal.Layout.Arena (NodeType (..), addNodeFromLayout, getFirstChild, getNextSibling, mixNodePaintHash, setStyleIdx)
+import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, uiTheme, withContext)
+import NanoUI.Internal.Style (Direction (..), Layout (..), Style (..), Theme (..), defaultLayout, gap, tight)
 import NanoUI.Internal.Types (Color)
-import NanoUI.Internal.WidgetText (buttonFlagContent)
+import NanoUI.Internal.WidgetText (buttonFlagContent, containerFlagButtonGroup)
 import NanoUI.Internal.Widgets.Adornment (Adornments, adornButton, adornmentRow, icon, leading)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx)
-import NanoUI.Internal.Widgets.Node (Response, respClicked, respId, withWidgetChildren)
+import NanoUI.Internal.Widgets.Node (Response, currentParent, respClicked, respId, withContainerNode, withWidgetChildren)
 import NanoUI.Svg (Svg)
 
 -- | Button with a text label. 'True' on the frame it is clicked, by pointer
@@ -139,3 +145,40 @@ buttonContentStyled styleIx flags lay content = do
   -- adornment beside an empty label does.
   _ <- withWidgetChildren (respId resp) (adornmentRow lay (labelColor lay theme) content)
   pure resp
+
+-- | A row of adjacent buttons sharing internal 1-pixel borders with outer-only
+-- corner rounding. Works with plain buttons, icon buttons, toggle buttons,
+-- content buttons, and selects.
+--
+-- > buttonGroup $ do
+-- >   whenM (button "Left") alignL
+-- >   whenM (button "Center") alignC
+-- >   whenM (button "Right") alignR
+{-# INLINE buttonGroup #-}
+buttonGroup :: NanoUI a -> NanoUI a
+buttonGroup = buttonGroupWith id
+
+-- | 'buttonGroup' with a layout modifier. Defaults to a tight row with zero
+-- gap; override 'layoutDirection' to @Column@ for a vertical connected group.
+buttonGroupWith :: (Layout -> Layout) -> NanoUI a -> NanoUI a
+buttonGroupWith f child = do
+  base <- askDefaultLayout
+  let lay = f (tight . gap 0 $ base {layoutDirection = Row})
+  idx <- withContext $ \ctx -> do
+    parent <- currentParent ctx
+    idx <- addNodeFromLayout (ctxNodeArena ctx) NodeContainer parent lay
+    idx <$ setStyleIdx (ctxNodeArena ctx) idx containerFlagButtonGroup
+  res <- withContainerNode True idx child
+  -- Mix each direct child's 2-bit (isFirst, isLast) cap mask into its paint
+  -- hash so adding or removing a sibling repaints the neighbour's corner
+  -- rounding and internal seam on partial-damage frames.
+  withContext $ \ctx -> do
+    let na = ctxNodeArena ctx
+    fc <- getFirstChild na idx
+    let go ci = when (ci >= 0) $ do
+          ns <- getNextSibling na ci
+          let !mask = (if ns < 0 then 1 else 0) .|. (if ci == fc then 2 else 0 :: Word64)
+          mixNodePaintHash na ci (0x424700 .|. mask)
+          go ns
+    go fc
+  pure res

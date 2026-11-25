@@ -33,6 +33,7 @@ tests =
   , pixelSpec "scroll-commands" runScrollCommandsTest
   , spec "scroll-wheel-routing" runWheelRoutingTest
   , spec "scroll-grow-and-overlay" runScrollGrowOverlayTest
+  , spec "scroll-focusable-list-nav" runScrollFocusableListNavTest
   ]
 
 -- | Labels @prefix 1@ to @prefix n@.
@@ -673,7 +674,7 @@ runWheelRoutingTest _ failed = do
 runScrollGrowOverlayTest :: Context -> IORef Int -> IO ()
 runScrollGrowOverlayTest ctx failed = do
   let inp = withInputOff 400 300
-      bareVert = ScrollConfig ScrollNone ScrollAuto True
+      bareVert = ScrollConfig ScrollNone ScrollAuto True False
       splitUi =
         columnWith (fixedWH 300 200 . tight . gap 0) $
           (,)
@@ -685,8 +686,8 @@ runScrollGrowOverlayTest ctx failed = do
   assertJustM failed (getPrevRect ctx botId) $ \(Rect _ _ _ bh) ->
     assert failed (abs (bh - 100) <= 1)
   c2 <- newContext
-  let overlayCfg = ScrollConfig ScrollNone ScrollOverlay True
-      autoCfg = ScrollConfig ScrollNone ScrollAuto True
+  let overlayCfg = ScrollConfig ScrollNone ScrollOverlay True False
+      autoCfg = ScrollConfig ScrollNone ScrollAuto True False
       overlayUi = column $ do
         ovResp <- scrollConfigured overlayCfg (fixedWH 200 80 . tight) (buttonWith' (fillW . fixedH 20) "ov-btn" <* numbered "ov " 20)
         auResp <- scrollConfigured autoCfg (fixedWH 200 80 . tight) (buttonWith' (fillW . fixedH 20) "au-btn" <* numbered "au " 20)
@@ -694,3 +695,61 @@ runScrollGrowOverlayTest ctx failed = do
   (Rect _ _ ow _, Rect _ _ aw _) <- warmup2 c2 inp overlayUi
   assert failed (abs (ow - 200) <= 0.5)
   assertLt failed aw 198
+
+-- | Focusable scroll containers ('scrollFocusable') take focus on click and
+-- Tab, isolate keyboard list navigation ('useListNav' / 'useListNavWith') per
+-- focused list, and scroll the selected row into view.
+runScrollFocusableListNavTest :: Context -> IORef Int -> IO ()
+runScrollFocusableListNavTest ctx failed = do
+  selA <- newVar (0 :: Int)
+  selB <- newVar (0 :: Int)
+  actA <- newIORef ([] :: [Int])
+  let rowH = 24 :: Float
+      listCfg = defaultScrollConfig {scrollPolicyX = ScrollNone, scrollFocusable = True}
+      listBox tag selVar onAct useWith = withKey (tag :: T.Text) $ do
+        sid <- currentId
+        sel <- readVar selVar
+        nav <-
+          if useWith
+            then useListNavWith (\i -> Rect 0 (fromIntegral i * rowH) 1 rowH) sid 30 sel
+            else useListNav sid 30 sel rowH
+        when (lnChanged nav) (writeVar selVar (lnIndex nav))
+        when (lnActivated nav) (liftIO (onAct (lnIndex nav)))
+        scrollConfigured listCfg (fixedWH 160 120 . tight . gap 0) $
+          forM_ [0 .. 29 :: Int] $ \i ->
+            void (mouseArea (fillW . fixedH rowH) (label (tag <> "-" <> T.pack (show i))))
+        pure sid
+      ui = rowWith (tight . gap 12) $
+        (,)
+          <$> listBox "A" selA (\i -> modifyIORef' actA (++ [i])) False
+          <*> listBox "B" selB (const (pure ())) True
+  runSim ctx failed (withInput 400 200) ui $ do
+    (sidA, sidB) <- result
+    -- Clicking inside List A focuses List A.
+    _ <- click (At (V2 40 40)) >> settle
+    checkEq sidA =<< focusedId
+    -- Down moves List A to 1 without moving List B.
+    _ <- pressKey KeyDown >> settle
+    checkEq (1, 0) =<< ((,) <$> readV selA <*> readV selB)
+    -- End jumps to row 29 and scrolls List A down; List B stays at 0.
+    _ <- pressKey KeyEnd >> settle
+    checkEq (29, 0) =<< ((,) <$> readV selA <*> readV selB)
+    offA <- onContext (\c -> v2Y <$> getScrollOffset2D c sidA)
+    offB <- onContext (\c -> v2Y <$> getScrollOffset2D c sidB)
+    checkGt offA 400
+    checkEq 0 offB
+    -- PageUp steps back by viewport height / rowH (5 rows), Enter activates.
+    _ <- pressKey KeyPageUp >> settle
+    checkEq 24 =<< readV selA
+    _ <- pressKey KeyEnter >> settle
+    checkEq [24] =<< liftIO (readIORef actA)
+    -- Home jumps back to 0 and scrolls back to top.
+    _ <- pressKey KeyHome >> settle
+    checkEq 0 =<< readV selA
+    offA0 <- onContext (\c -> v2Y <$> getScrollOffset2D c sidA)
+    checkEq 0 offA0
+    -- Tab moves focus to List B; Down now moves List B only (via useListNavWith).
+    _ <- pressKey KeyTab >> settle
+    checkEq sidB =<< focusedId
+    _ <- pressKey KeyDown >> settle
+    checkEq (0, 1) =<< ((,) <$> readV selA <*> readV selB)

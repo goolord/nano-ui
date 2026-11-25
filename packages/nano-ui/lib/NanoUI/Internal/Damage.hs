@@ -41,6 +41,7 @@ import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Frame.Chrome (menuPanelBounds)
 import NanoUI.Internal.Layout.ScrollGeometry (decodeScrollConfig, scrollBare)
 import NanoUI.Internal.Shader (ShaderEffectEntry (..))
+import NanoUI.Internal.Style (PointerMode (..))
 import NanoUI.Internal.WidgetText (containerFlagClip, hasFlag)
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.Internal.Types
@@ -371,6 +372,21 @@ floatingPanelsInOrder Context {ctxNodeArena = na} =
         then pure Nothing
         else Just . (intKey wid,) <$> getNodeRect na idx
 
+-- | Floating panels in paint order that participate in pointer routing:
+-- excludes 'PointerPass' panels such as tooltips so pointer events pass
+-- through them to the layer underneath.
+floatingInteractiveOrder :: Context -> IO [Int]
+floatingInteractiveOrder Context {ctxNodeArena = na} =
+  catMaybes <$> (mapM step =<< floatingNodesInPaintOrder na)
+  where
+    step idx = do
+      wid <- getWidgetId na idx
+      if hashWidgetId wid == 0
+        then pure Nothing
+        else do
+          mode <- getPointerMode na idx
+          pure (if mode == PointerPass then Nothing else Just (intKey wid))
+
 -- | Current floating-panel bounds keyed by widget id, in logical window coordinates.
 floatingPanelRects :: Context -> IO (IM.IntMap Rect)
 floatingPanelRects ctx = IM.fromList <$> floatingPanelsInOrder ctx
@@ -519,9 +535,10 @@ writeDamage ctx inp snap mayReuse layoutFloats = do
       }
   -- Most frames have no panel now or before, and then there is nothing to write.
   prevEmpty <- getsOverlay ctx (IM.null . osPrevFloatingRects)
-  unless (null panels && prevEmpty) $
+  unless (null panels && prevEmpty) $ do
+    interactiveOrder <- floatingInteractiveOrder ctx
     modifyOverlay ctx $ \os ->
-      os {osPrevFloatingRects = newFloatingRects, osPrevFloatingOrder = map fst panels}
+      os {osPrevFloatingRects = newFloatingRects, osPrevFloatingOrder = interactiveOrder}
   -- The follow-up frames these request only settle placement: the flip made
   -- this frame repaint whole, and a floating change did too or, on a frame
   -- that only scrolled, damaged each moved panel where it was and is, so

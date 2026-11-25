@@ -211,6 +211,8 @@ module NanoUI
   , buttonContent'
   , buttonContentWith
   , buttonContentWith'
+  , buttonGroup
+  , buttonGroupWith
   , ButtonConfig (..)
   , defaultButtonConfig
   , buttonConfigured
@@ -1127,6 +1129,9 @@ module NanoUI
   , useKeyNav
   , KeyNav (..)
   , navStep
+  , ListNav (..)
+  , useListNav
+  , useListNavWith
   , keyActivated
   , shortcut
   , shortcutOnce
@@ -1236,7 +1241,7 @@ import NanoUI.Var
 import NanoUI.Internal.Types
 import NanoUI.Internal.WidgetText
 import NanoUI.Internal.Widgets.Animate
-import NanoUI.Internal.Widgets.Behavior (DragAxis (..), KeyNav (..), Reorder (..), focusedKeyPressed, focusedKeyPressedOnce, keyActivated, navStep, useInputMethod, useKeyNav, useReorder)
+import NanoUI.Internal.Widgets.Behavior (DragAxis (..), KeyNav (..), ListNav (..), Reorder (..), focusedKeyPressed, focusedKeyPressedOnce, keyActivated, navStep, useInputMethod, useKeyNav, useListNav, useListNavWith, useReorder)
 import NanoUI.Internal.Widgets.Button
 import NanoUI.Internal.Widgets.Caption
 import NanoUI.Internal.Widgets.Checkbox

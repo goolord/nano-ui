@@ -240,9 +240,12 @@ paintFocusRing env idx nt rect = do
       if nt == NodeColorPicker
         then colorPickerPartRect (peNodeArena env) idx rect
         else pure rect
-    isRow <- if nt == NodeButton then (== ButtonRow) . buttonKindOf <$> getStyleIdx (peNodeArena env) idx else pure False
+    isInset <-
+      if nt == NodeScrollContainer
+        then pure True
+        else if nt == NodeButton then (== ButtonRow) . buttonKindOf <$> getStyleIdx (peNodeArena env) idx else pure False
     let (ring, radius)
-          | isRow = (rectInflate (-1) target, 0)
+          | isInset = (rectInflate (-1) target, 0)
           | otherwise = (rectInflate 2 target, 4)
     pushRoundedStroke (peDrawArena env) ring radius 1.5 (themeFocusRing (peTheme env))
 

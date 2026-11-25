@@ -23,6 +23,7 @@ tests =
   , spec "checkbox-box-center" runCheckboxBoxCenterTest
   , pixelSpec "font-size-scale-relative" runFontSizeScaleRelativeTest
   , pixelSpec "uniform-control-heights" runUniformControlHeightsTest
+  , spec "button-group" runButtonGroupTest
   ]
 
 inp :: Input
@@ -263,3 +264,41 @@ runUniformControlHeightsTest ctx failed = do
   case hsMono of
     h0 : rest -> assert failed (h0 > 0 && all (\h -> abs (h - h0) < 0.5) rest)
     [] -> assert failed False
+
+-- | 'buttonGroup' joins adjacent buttons with zero gap, outer-only rounded
+-- corners, shared 1-pixel internal seams, and automatic neighbour damage when
+-- a button is added or removed.
+runButtonGroupTest :: Context -> IORef Int -> IO ()
+runButtonGroupTest ctx failed = do
+  setDrawRecordOps ctx True
+  let ui showThird = columnWith (tight . gap 0) $
+        buttonGroup $ do
+          a <- buttonWith' (fixedW 60) "Left"
+          b <- buttonWith' (fixedW 60) "Mid"
+          c <- if showThird then Just <$> buttonWith' (fixedW 60) "Right" else pure Nothing
+          pure (a, b, c)
+  ((a, b, mc), _) <- warmupDraw ctx (withInputOff 400 200) (ui True)
+  let ra = respRect a
+      rb = respRect b
+  assertJust failed mc $ \c -> do
+    let rc = respRect c
+    -- Adjacent with zero gap.
+    assertEq failed (rectX ra + rectW ra) (rectX rb)
+    assertEq failed (rectX rb + rectW rb) (rectX rc)
+    theme <- getTheme ctx
+    ops <- drawRecordedOps ctx
+    let borderCol = styleBorder (themeButton theme)
+        -- Shared internal 1px dividers sit at the left edge of Mid and Right, not Left.
+        dividers = [rectX r | RecordedOp _ _ _ (FillRect r col) <- ops, col == borderCol, rectW r <= 1.5, rectH r >= rectH ra - 1]
+    assert failed (any (\x -> abs (x - rectX rb) <= 0.5) dividers)
+    assert failed (any (\x -> abs (x - rectX rc) <= 0.5) dividers)
+    assert failed (not (any (\x -> abs (x - rectX ra) <= 0.5) dividers))
+    -- Middle button's clipped rounded rect extends past both left and right edges.
+    let midFills = [r | RecordedOp _ clip _ (FillRoundedRect r _ _) <- ops, clip == rb]
+    assert failed (any (\r -> rectX r < rectX rb && rectX r + rectW r > rectX rb + rectW rb) midFills)
+  -- Removing "Right" repaints "Mid" on a partial-damage frame because its right
+  -- corners change from square to rounded.
+  writeIORef (ctxPaintFull ctx) False
+  _ <- runFrame ctx (withInputOff 400 200) (ui False)
+  dmg <- takeDamage ctx
+  assert failed (damageCovers dmg rb)
