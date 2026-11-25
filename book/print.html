@@ -37,10 +37,10 @@
             const path_to_root = "";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "searchindex-1039415d.js";
+            window.path_to_searchindex_js = "searchindex-d41be472.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-9b0acd6d.js"></script>
+        <script src="toc-2886a539.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -3142,6 +3142,128 @@ clock = do
 </div>
 <p>For runnable programs, see <a href="#tutorial-3-live-data--background-work">Tutorial 3: Live Data &amp; Background Work</a> along with <code>Tasks.hs</code>, <code>LiveChart.hs</code>, and <code>Animation.hs</code>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="shaders"><a class="header" href="#shaders">Shaders</a></h1>
+<p><code>nano-ui</code> supports typed, composable GPU fragment shaders on layout nodes across all three GPU backends: SDL 3.4+ (Vulkan/Metal via SPIR-V and MSL), RGFW (OpenGL 3.2 via GLSL 150), and the browser backend (WebGL2 via GLSL ES 300).</p>
+<p>The core <code>nano-ui</code> package defines the shader types, std140 uniform packing (<code>Uniforms</code>), and the two widget entry points (<code>shaderBox</code> and <code>withShader</code>). The companion <code>nano-ui-shader</code> package adds a pure-Haskell typed fragment EDSL, compilers for all four GPU formats plus a CPU reference evaluator, algebraic pass fusion, and 21 standard effects.</p>
+<h2 id="two-tiers"><a class="header" href="#two-tiers">Two tiers</a></h2>
+<p>Every shader has a type-level kind (<code>ShaderKind</code>) that separates leaf fills from subtree post-processing:</p>
+<ul>
+<li><strong><code>Surface</code> (Tier 1):</strong> Draws a single layout leaf (<code>shaderBox</code>, <code>shaderConfigured</code>) in one draw call with zero offscreen render targets. Use this for gradients, procedural textures, SDF shapes, and color wheels.</li>
+<li><strong><code>ColorEffect</code>, <code>DistortionEffect</code>, and <code>LayerEffect</code> (Tier 2):</strong> Wrap any widget subtree (<code>withShader</code>) by rendering its children into a pooled 64px-bucketed offscreen texture and compositing the result through one or more shader passes. Controls inside the subtree remain interactive.</li>
+</ul>
+<p>Passing a <code>Surface</code> shader to <code>withShader</code> is a compile-time type error (<code>IsNodeEffect</code>).</p>
+<h2 id="leaf-surface-shaders"><a class="header" href="#leaf-surface-shaders">Leaf surface shaders</a></h2>
+<p>Call <code>shaderBox</code> for a quick leaf fill or <code>shaderConfigured</code> when you need a corner radius, tint, or fallback color for backends without GPU shaders (such as SDL’s software renderer):</p>
+<pre><code class="language-haskell">heroBanner :: NanoUI ()
+heroBanner =
+  shaderConfigured cfg meshGradient4 params
+  where
+    cfg =
+      defaultShaderConfig
+        { scLayout = fixedH 140 . fillW
+        , scCornerRadius = 12
+        , scFallback = colorRGB 40 80 180
+        }
+    params =
+      MeshGradientParams
+        { mgTopLeft = colorRGB 40 90 220
+        , mgTopRight = colorRGB 220 60 150
+        , mgBottomLeft = colorRGB 20 180 160
+        , mgBottomRight = colorRGB 245 190 50
+        }
+</code></pre>
+<p>Define shaders as top-level bindings so the EDSL compiles once per shader, not on every frame. Changing the uniform value re-packs only the uniform bytes and triggers a local damage repaint on that node. Leaving the uniform unchanged produces zero damage, so idle windows remain asleep.</p>
+<h2 id="custom-shaders-and-uniforms"><a class="header" href="#custom-shaders-and-uniforms">Custom shaders and uniforms</a></h2>
+<p>Uniform records derive <code>Uniforms</code> via <code>GHC.Generics</code>. <code>nano-ui</code> packs fields to exact std140 alignment, zero-pads every block to a 16-byte multiple, and hashes the packed bytes for damage diffing:</p>
+<pre><code class="language-haskell">data PulseParams = PulseParams
+  { ppColor :: !Color
+  , ppPhase :: !Float
+  , ppRings :: !Float
+  }
+  deriving (Eq, Generic, Uniforms)
+</code></pre>
+<p>Supported field types are <code>Float</code>, <code>Int32</code>, <code>Word32</code>, <code>Bool</code>, <code>V2</code>, <code>V3</code>, <code>V4</code>, <code>Color</code> (unpacked to normalized RGBA <code>vec4</code>), <code>Rect</code>, <code>Size</code>, tuples, and nested <code>Generic</code> records.</p>
+<p>With <code>OverloadedRecordDot</code>, both uniform fields (<code>u.ppColor</code>) and GLSL-style vector swizzles (<code>u.ppColor.rgb</code>, <code>ctx.uv.xy</code>) resolve at compile time with no Template Haskell:</p>
+<pre><code class="language-haskell">pulseRing :: Shader 'Surface PulseParams
+pulseRing = surfaceShader $ \u ctx -&gt;
+  let centered = ctx.uv *^ floatE 2.0 - vec2 (floatE 1.0) (floatE 1.0)
+      dist = vLength centered
+      wave = floatE 0.5 + floatE 0.5 * sin (dist * u.ppRings - u.ppPhase)
+      half = ctx.size *^ floatE 0.5
+      edge = sdRoundedBox (ctx.pos - half) half ctx.cornerRadius
+      aa = floatE 0.75 / maxE ctx.scale (floatE 1.0)
+      mask = floatE 1.0 - smoothstep (negate aa) aa edge
+   in vec4_31 (u.ppColor.rgb *^ wave) (u.ppColor.a * mask)
+</code></pre>
+<p>Every fragment shader receives a <code>FragCtx</code> containing <code>ctx.uv</code> (normalized <code>[0, 1]</code> over the node rect), <code>ctx.pos</code> (logical pixels from the node’s top-left corner), <code>ctx.size</code> (logical width and height), <code>ctx.origin</code> (window-space logical origin), <code>ctx.scale</code> (device pixels per logical unit), <code>ctx.cornerRadius</code>, and <code>ctx.color</code> (vertex tint).</p>
+<h2 id="subtree-effects-and-pass-fusion"><a class="header" href="#subtree-effects-and-pass-fusion">Subtree effects and pass fusion</a></h2>
+<p>Wrap any view with <code>withShader</code> to apply a post-processing effect to the whole rendered subtree:</p>
+<pre><code class="language-haskell">blurredCard :: Float -&gt; NanoUI () -&gt; NanoUI ()
+blurredCard sigma body =
+  withShader gaussianBlur sigma (panel body)
+</code></pre>
+<p><code>gaussianBlur</code> runs two separable 1D passes (horizontal then vertical) by pinging between pooled offscreen targets. Its bleed margin (<code>3 * sigma</code> pixels on each side) expands the offscreen target, cull test, and partial-damage region automatically so soft halos never clip at the widget edge.</p>
+<p>Compatible effects fuse into a single GPU pass with zero extra offscreen targets:</p>
+<ul>
+<li><code>composeColor :: Shader 'ColorEffect u1 -&gt; Shader 'ColorEffect u2 -&gt; Shader 'ColorEffect (u1, u2)</code></li>
+<li><code>composeDistort :: Shader 'DistortionEffect u1 -&gt; Shader 'DistortionEffect u2 -&gt; Shader 'DistortionEffect (u1, u2)</code></li>
+<li><code>distortThenColor :: Shader 'DistortionEffect u1 -&gt; Shader 'ColorEffect u2 -&gt; Shader 'LayerEffect (u1, u2)</code></li>
+<li><code>chainLayer</code> chains arbitrary multi-pass effects explicitly.</li>
+</ul>
+<pre><code class="language-haskell">disabledTint :: Shader 'ColorEffect (Float, TintParams)
+disabledTint = composeColor grayscale tint
+
+dimmedPanel :: NanoUI () -&gt; NanoUI ()
+dimmedPanel body =
+  withShader disabledTint (0.85, TintParams (colorRGB 30 60 110) 0.25) (panel body)
+</code></pre>
+<h2 id="bounded-loops-in-fragm"><a class="header" href="#bounded-loops-in-fragm">Bounded loops in <code>FragM</code></a></h2>
+<p>Iterative kernels (blurs, shadows, multi-octave noise) use the <code>FragM</code> builder (<code>surfaceShaderM</code>, <code>colorEffectM</code>, <code>distortionEffectM</code>, <code>layerEffectM</code>) with explicit <code>bind</code> and structured <code>forRange</code> loops:</p>
+<pre><code class="language-haskell">boxAverage5 :: Shader 'LayerEffect Float
+boxAverage5 =
+  layerEffectM (\step -&gt; V2 (2 * abs step) (2 * abs step)) $ \u ctx layer -&gt; do
+    step &lt;- bind (maxE (uVal u) (floatE 0.0))
+    zero &lt;- bind (vec4 (floatE 0.0) (floatE 0.0) (floatE 0.0) (floatE 0.0))
+    acc &lt;- forRange (-2) 3 zero $ \iy rowAcc -&gt;
+      forRange (-2) 3 rowAcc $ \ix colAcc -&gt; do
+        let offset = vec2 (intToFloat ix * step) (intToFloat iy * step)
+            sample = sampleLayer layer (ctx.pos + offset)
+        pure (colAcc + sample)
+    pure (acc *^ floatE (1.0 / 25.0))
+</code></pre>
+<p>The first argument to <code>layerEffectM</code> reports the maximum sample offset in logical pixels (<code>V2 marginX marginY</code>) for the current uniform value.</p>
+<h2 id="built-in-effects"><a class="header" href="#built-in-effects">Built-in effects</a></h2>
+<p><code>NanoUI.Shader</code> ships 21 ready-to-use shaders:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Category</th><th>Shaders</th></tr>
+</thead>
+<tbody>
+<tr><td><code>Surface</code></td><td><code>meshGradient4</code>, <code>radialGlow</code>, <code>sdfRoundedBox</code>, <code>colorWheelHsv</code>, <code>noiseGrain</code>, <code>checkerboard</code></td></tr>
+<tr><td><code>ColorEffect</code></td><td><code>groupOpacity</code>, <code>grayscale</code>, <code>tint</code>, <code>brightnessContrast</code>, <code>colorMatrix</code>, <code>vignette</code>, <code>scanlines</code></td></tr>
+<tr><td><code>DistortionEffect</code></td><td><code>waveDistort</code>, <code>rippleDistort</code>, <code>pixelate</code></td></tr>
+<tr><td><code>LayerEffect</code></td><td><code>boxBlur</code>, <code>gaussianBlur</code>, <code>dropShadow</code>, <code>outerGlow</code>, <code>chromaticAberration</code></td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="capabilities-fallbacks-and-svg-export"><a class="header" href="#capabilities-fallbacks-and-svg-export">Capabilities, fallbacks, and SVG export</a></h2>
+<p>On SDL 3.4+, <code>RenderDriverAuto</code> selects SDL’s <code>"gpu"</code> render driver when available (falling back cleanly to standard drivers or software rendering when unavailable). Inspect live GPU support inside a view with <code>askShaderCapabilities</code>:</p>
+<pre><code class="language-haskell">shaderStatus :: NanoUI ()
+shaderStatus = do
+  caps &lt;- askShaderCapabilities
+  if capSurfaceShaders caps
+    then label "GPU shaders active"
+    else label "Using flat fallback color"
+</code></pre>
+<p>When a backend lacks GPU shader support:</p>
+<ul>
+<li><code>shaderBox</code> / <code>shaderConfigured</code> draws a flat rounded rectangle in <code>scFallback</code> (using <code>scCornerRadius</code>).</li>
+<li><code>withShader</code> renders its children directly without offscreen redirection.</li>
+<li><code>nano-ui-svg</code> exports <code>withShader groupOpacity alpha</code> as a native SVG <code>&lt;g opacity="..."&gt;</code> group.</li>
+</ul>
+<p>For a complete runnable program covering both tiers and animated uniforms, see <code>packages/nano-ui-demo/examples/Shaders.hs</code> (<code>cabal run nano-ui-example-shaders</code>).</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="desktop-windows"><a class="header" href="#desktop-windows">Desktop Windows</a></h1>
 <p>This chapter covers configuring native windows, reacting to window events, opening secondary OS windows, building frameless custom title bars, and capturing screenshots.</p>
 <h2 id="configuring-and-running-a-window"><a class="header" href="#configuring-and-running-a-window">Configuring and running a window</a></h2>
@@ -3328,6 +3450,7 @@ view app = do
 <tr><td><code>nano-ui-diagrams</code></td><td>Line, bar, scatter, area, and step charts plus <code>diagrams-lib</code> widgets</td></tr>
 <tr><td><code>nano-ui-form</code></td><td>Validated applicative forms built on <code>ditto</code></td></tr>
 <tr><td><code>nano-ui-markdown</code></td><td>CommonMark rendering with incremental appends for streaming</td></tr>
+<tr><td><code>nano-ui-shader</code></td><td>Pure-Haskell typed fragment shader EDSL, multi-target GPU compiler, and 21 built-in effects</td></tr>
 <tr><td><code>nano-ui-svg</code></td><td><code>DrawOp</code>-to-SVG and full-frame SVG export</td></tr>
 </tbody>
 </table>
@@ -3747,6 +3870,7 @@ cabal test -j1 all
 <tr><td><code>nano-ui-diagrams-test</code></td><td>Chart rendering and <code>diagrams-lib</code> conversion.</td></tr>
 <tr><td><code>nano-ui-form-test</code></td><td>Form validation, submission lifecycles, and resets.</td></tr>
 <tr><td><code>nano-ui-markdown-test</code></td><td>CommonMark parsing, layout, and QuickCheck equivalence between incremental appends and full parses.</td></tr>
+<tr><td><code>nano-ui-shader-test</code></td><td>Typed fragment shader EDSL compilation, algebraic fusion, std140 uniform packing, SPIR-V, GLSL, MSL, and CPU evaluator parity.</td></tr>
 <tr><td><code>nano-ui-rgfw-test</code>, <code>nano-ui-rgfw-bindings-test</code></td><td>RGFW input translation, bitmap font metrics, and frame delivery.</td></tr>
 <tr><td><code>nano-ui-sdl-web-test</code></td><td>Browser backend input decoding, draw batching, font loading, file dialogs, and debug snapshots (run natively against a scripted host).</td></tr>
 <tr><td><code>nano-ui-font-search-test</code>, <code>nano-ui-font-effects-test</code></td><td>SDL font discovery, text shaping, line caches, and handle lifetimes.</td></tr>

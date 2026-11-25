@@ -1195,12 +1195,13 @@ numbers = <span class="k">do</span>
   d &lt;- animateTo bouncy =&lt;&lt; readVar depth
   a &lt;- readVar angle; i &lt;- readVar swatch
   inner &lt;- animateToA fade (colorAt i)
-  outer &lt;- animateToA fade (colorAt (i + <span class="n">1</span>))
-  pure (<span class="t">Bloom</span> p l t d a inner outer)
-resp &lt;- canvasConfigured defaultCanvasConfig
-  { canvasLayout = (grow . minH <span class="n">200</span>) defaultLayout
-  , canvasContent = bloomKey bloom
-  } (drawBloom bloom)
+  mid &lt;- animateToA fade (colorAt (i + <span class="n">1</span>))
+  outer &lt;- animateToA fade (colorAt (i + <span class="n">2</span>))
+  pure (<span class="t">Bloom</span> p l t d a inner mid outer)
+resp &lt;-
+  <span class="k">if</span> capSurfaceShaders caps
+    <span class="k">then</span> withCursorShape <span class="t">UiCursorGrab</span> (shaderBox' (grow . minH <span class="n">200</span>) bloomShader bloom)
+    <span class="k">else</span> canvasConfigured flowerCfg (drawBloom bloom)
 whenM (readVar spin) (keepAnimating resp)
 drag &lt;- useDrag2DOn resp
 when (dragActive drag) (modifyVar angle (+ turned (respRect resp) drag))</code></pre>

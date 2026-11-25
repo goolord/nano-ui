@@ -13,7 +13,7 @@ const EVENT_WORDS = 8; // eventRecordSize / 4
 // little early.
 const FRAME_WAIT_MS = 34;
 const FRAME_SLACK_MS = 4;
-const COMMAND_WORDS = 8; // commandRecordSize / 4
+const COMMAND_WORDS = 12; // commandRecordSize / 4
 
 const EV_RESIZE = 1;
 const EV_MOTION = 2;
@@ -55,10 +55,12 @@ in vec2 aPos;
 in vec4 aColor;
 in vec2 aUv;
 uniform vec2 uScale;
+uniform vec2 uOrigin;
 out vec4 vColor;
 out vec2 vUv;
 void main() {
-  gl_Position = vec4(aPos.x * uScale.x - 1.0, 1.0 - aPos.y * uScale.y, 0.0, 1.0);
+  vec2 p = aPos - uOrigin;
+  gl_Position = vec4(p.x * uScale.x - 1.0, 1.0 - p.y * uScale.y, 0.0, 1.0);
   vColor = aColor;
   vUv = aUv;
 }`;
@@ -93,8 +95,16 @@ class NanoUiSdlWeb {
     this.textInputOn = false;
     this.scale = 1;
     this.backing = [1, 1];
+    this.curSize = [1, 1];
+    this.originX = 0;
+    this.originY = 0;
+    this.uScaleX = 1;
+    this.uScaleY = 1;
     this.textures = [];
     this.textureSizes = [];
+    this.shaders = new Map();
+    this.targets = [];
+    this.uniformData = new Uint8Array(0);
     this.encoder = new TextEncoder();
     this.decoder = new TextDecoder();
     this.localFonts = null;
@@ -201,21 +211,34 @@ class NanoUiSdlWeb {
     if (!gl) throw new Error("nano-ui-sdl-web: WebGL2 is not available");
     this.gl = gl;
     const program = gl.createProgram();
-    for (const [type, src] of [[gl.VERTEX_SHADER, VERTEX_SHADER], [gl.FRAGMENT_SHADER, FRAGMENT_SHADER]]) {
-      const shader = gl.createShader(type);
-      gl.shaderSource(shader, src);
-      gl.compileShader(shader);
-      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(shader));
-      gl.attachShader(program, shader);
-    }
+    const vs = gl.createShader(gl.VERTEX_SHADER);
+    gl.shaderSource(vs, VERTEX_SHADER);
+    gl.compileShader(vs);
+    if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(vs));
+    const fs = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(fs, FRAGMENT_SHADER);
+    gl.compileShader(fs);
+    if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(fs));
+    gl.attachShader(program, vs);
+    gl.attachShader(program, fs);
+    // Pin attribute locations 0/1/2 so custom fragment shader programs share the same VAO.
+    gl.bindAttribLocation(program, 0, "aPos");
+    gl.bindAttribLocation(program, 1, "aColor");
+    gl.bindAttribLocation(program, 2, "aUv");
     gl.linkProgram(program);
+    gl.deleteShader(vs);
+    gl.deleteShader(fs);
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+    this.defaultProgram = program;
     gl.useProgram(program);
     this.uScale = gl.getUniformLocation(program, "uScale");
+    this.uOrigin = gl.getUniformLocation(program, "uOrigin");
     gl.uniform1i(gl.getUniformLocation(program, "uTex"), 0);
     this.vertexBuffer = gl.createBuffer();
     this.indexBuffer = gl.createBuffer();
+    this.shaderUbo = gl.createBuffer();
     const vao = gl.createVertexArray();
+    this.vao = vao;
     gl.bindVertexArray(vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
@@ -224,12 +247,20 @@ class NanoUiSdlWeb {
     // NANO_UI_VERTEX_BYTES in nano-ui-ttf's nano_ui_ttf_shared.h; JavaScript
     // cannot read either, so nano-ui-sdl-web-test checks only that those two
     // agree. Change all three together.
-    const attrs = [["aPos", 2, 0], ["aColor", 4, 8], ["aUv", 2, 24]];
-    for (const [name, size, offset] of attrs) {
-      const loc = gl.getAttribLocation(program, name);
+    const attrs = [[0, 2, 0], [1, 4, 8], [2, 2, 24]];
+    for (const [loc, size, offset] of attrs) {
       gl.enableVertexAttribArray(loc);
       gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 32, offset);
     }
+    this.effectVbo = gl.createBuffer();
+    this.effectVao = gl.createVertexArray();
+    gl.bindVertexArray(this.effectVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.effectVbo);
+    for (const [loc, size, offset] of attrs) {
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 32, offset);
+    }
+    gl.bindVertexArray(this.vao);
     // SDL_BLENDMODE_BLEND: colour by source alpha, alpha accumulating.
     gl.enable(gl.BLEND);
     gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
@@ -237,6 +268,9 @@ class NanoUiSdlWeb {
     this.white = this.makeTexture(1, 1, new Uint8Array([255, 255, 255, 255]));
     this.textures = [];
     this.textureSizes = [];
+    this.shaders = new Map();
+    this.targets = [];
+    this.uniformData = new Uint8Array(0);
   }
 
   makeTexture(w, h, pixels) {
@@ -538,12 +572,191 @@ class NanoUiSdlWeb {
     gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0);
   }
 
+  registerShader(slot, srcPtr, srcLen) {
+    const gl = this.gl;
+    const fragSrc = this.text(srcPtr, srcLen);
+    const vs = gl.createShader(gl.VERTEX_SHADER);
+    gl.shaderSource(vs, VERTEX_SHADER);
+    gl.compileShader(vs);
+    if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
+      console.error("nano-ui-sdl-web: vertex shader compile failed:", gl.getShaderInfoLog(vs));
+      gl.deleteShader(vs);
+      return 0;
+    }
+    const fs = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(fs, fragSrc);
+    gl.compileShader(fs);
+    if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
+      console.error("nano-ui-sdl-web: fragment shader compile failed:", gl.getShaderInfoLog(fs));
+      gl.deleteShader(vs);
+      gl.deleteShader(fs);
+      return 0;
+    }
+    const program = gl.createProgram();
+    gl.attachShader(program, vs);
+    gl.attachShader(program, fs);
+    gl.bindAttribLocation(program, 0, "aPos");
+    gl.bindAttribLocation(program, 1, "aColor");
+    gl.bindAttribLocation(program, 2, "aUv");
+    gl.linkProgram(program);
+    gl.deleteShader(vs);
+    gl.deleteShader(fs);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      console.error("nano-ui-sdl-web: shader link failed:", gl.getProgramInfoLog(program));
+      gl.deleteProgram(program);
+      return 0;
+    }
+    const blk = gl.getUniformBlockIndex(program, "NanoShaderBlock");
+    if (blk !== gl.INVALID_INDEX) {
+      gl.uniformBlockBinding(program, blk, 0);
+    }
+    const uScale = gl.getUniformLocation(program, "uScale");
+    const uOrigin = gl.getUniformLocation(program, "uOrigin");
+    const uInput = gl.getUniformLocation(program, "uInput");
+    this.shaders.set(slot, { program, uScale, uOrigin, uInput });
+    return 1;
+  }
+
+  uploadUniforms(ptr, len) {
+    if (len <= 0) {
+      this.uniformData = new Uint8Array(0);
+    } else {
+      this.uniformData = this.bytes(ptr, len).slice();
+    }
+  }
+
+  acquireTarget(minW, minH, outCapsPtr) {
+    const gl = this.gl;
+    const needW = minW > 0 ? ((minW + 63) & ~63) : 64;
+    const needH = minH > 0 ? ((minH + 63) & ~63) : 64;
+    let best = -1;
+    for (let i = 0; i < this.targets.length; i++) {
+      const s = this.targets[i];
+      if (!s.inUse && s.capW >= needW && s.capH >= needH && s.capW <= needW * 2 && s.capH <= needH * 2) {
+        best = i;
+        break;
+      }
+    }
+    if (best < 0) {
+      const tex = this.makeTexture(needW, needH, null);
+      const fbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      if (status !== gl.FRAMEBUFFER_COMPLETE) {
+        gl.deleteFramebuffer(fbo);
+        gl.deleteTexture(tex);
+        return -1;
+      }
+      best = this.targets.length;
+      this.targets.push({ fbo, tex, capW: needW, capH: needH, inUse: false });
+    }
+    const slot = this.targets[best];
+    slot.inUse = true;
+    const out = new Int32Array(this.memory.buffer, outCapsPtr, 2);
+    out[0] = slot.capW;
+    out[1] = slot.capH;
+    return best;
+  }
+
+  releaseTarget(slot) {
+    if (slot >= 0 && slot < this.targets.length) {
+      this.targets[slot].inUse = false;
+    }
+  }
+
+  bindTarget(slot, clear, ox, oy) {
+    const gl = this.gl;
+    if (slot >= 0 && slot < this.targets.length) {
+      const s = this.targets[slot];
+      gl.bindFramebuffer(gl.FRAMEBUFFER, s.fbo);
+      this.curSize = [s.capW, s.capH];
+    } else {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      this.curSize = [this.backing[0], this.backing[1]];
+    }
+    this.originX = ox;
+    this.originY = oy;
+    this.uScaleX = (2 * this.scale) / this.curSize[0];
+    this.uScaleY = (2 * this.scale) / this.curSize[1];
+    gl.viewport(0, 0, this.curSize[0], this.curSize[1]);
+    gl.disable(gl.SCISSOR_TEST);
+    if (clear) {
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+    gl.useProgram(this.defaultProgram);
+    gl.uniform2f(this.uScale, this.uScaleX, this.uScaleY);
+    gl.uniform2f(this.uOrigin, this.originX, this.originY);
+  }
+
+  compositeEffect(srcSlot, shaderSlot, blendCopy, rectUvPtr, scissorPtr, uPtr, uLen) {
+    const gl = this.gl;
+    if (srcSlot < 0 || srcSlot >= this.targets.length) return;
+    const entry = this.shaders.get(shaderSlot);
+    if (!entry) return;
+    const rv = new Float32Array(this.memory.buffer, rectUvPtr, 8);
+    const sc = new Int32Array(this.memory.buffer, scissorPtr, 5);
+    const [dx, dy, dw, dh, u0, v0, u1, v1] = rv;
+    const quad = new Float32Array([
+      dx,      dy,      1, 1, 1, 1, u0, v0,
+      dx + dw, dy,      1, 1, 1, 1, u1, v0,
+      dx + dw, dy + dh, 1, 1, 1, 1, u1, v1,
+      dx,      dy,      1, 1, 1, 1, u0, v0,
+      dx + dw, dy + dh, 1, 1, 1, 1, u1, v1,
+      dx,      dy + dh, 1, 1, 1, 1, u0, v1,
+    ]);
+    gl.useProgram(entry.program);
+    if (entry.uScale !== null) gl.uniform2f(entry.uScale, 2 / this.curSize[0], 2 / this.curSize[1]);
+    if (entry.uOrigin !== null) gl.uniform2f(entry.uOrigin, 0, 0);
+    if (entry.uInput !== null) gl.uniform1i(entry.uInput, 0);
+    if (uLen > 0) {
+      gl.bindBuffer(gl.UNIFORM_BUFFER, this.shaderUbo);
+      gl.bufferData(gl.UNIFORM_BUFFER, this.bytes(uPtr, uLen), gl.STREAM_DRAW);
+      gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, this.shaderUbo);
+    }
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.targets[srcSlot].tex);
+    if (blendCopy) {
+      gl.disable(gl.BLEND);
+    } else {
+      gl.enable(gl.BLEND);
+      gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    }
+    if (sc[0]) {
+      gl.enable(gl.SCISSOR_TEST);
+      gl.scissor(sc[1], this.curSize[1] - sc[2] - sc[4], sc[3], sc[4]);
+    } else {
+      gl.disable(gl.SCISSOR_TEST);
+    }
+    gl.bindVertexArray(this.effectVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.effectVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STREAM_DRAW);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    gl.bindVertexArray(this.vao);
+    gl.enable(gl.BLEND);
+    gl.disable(gl.SCISSOR_TEST);
+    gl.useProgram(this.defaultProgram);
+    gl.uniform2f(this.uScale, this.uScaleX, this.uScaleY);
+    gl.uniform2f(this.uOrigin, this.originX, this.originY);
+  }
+
   beginFrame(clear, r, g, b, a, scale, w, h) {
     const gl = this.gl;
     this.scale = scale;
     this.backing = [w, h];
+    this.curSize = [w, h];
+    this.originX = 0;
+    this.originY = 0;
+    this.uScaleX = (2 * scale) / w;
+    this.uScaleY = (2 * scale) / h;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, w, h);
-    gl.uniform2f(this.uScale, (2 * scale) / w, (2 * scale) / h);
+    gl.useProgram(this.defaultProgram);
+    gl.uniform2f(this.uScale, this.uScaleX, this.uScaleY);
+    gl.uniform2f(this.uOrigin, 0, 0);
     if (clear) {
       gl.disable(gl.SCISSOR_TEST);
       gl.clearColor(r, g, b, a);
@@ -553,15 +766,41 @@ class NanoUiSdlWeb {
 
   draw(vertices, vertexCount, indices, indexCount, commands, commandCount) {
     const gl = this.gl;
+    gl.bindVertexArray(this.vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, this.bytes(vertices, vertexCount * 32), gl.STREAM_DRAW);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, this.bytes(indices, indexCount * 4), gl.STREAM_DRAW);
     const cmds = new Int32Array(this.memory.buffer, commands, commandCount * COMMAND_WORDS);
-    const height = this.backing[1];
+    const height = this.curSize[1];
+    let activeShader = 0;
     for (let i = 0; i < commandCount; i++) {
       const o = i * COMMAND_WORDS;
       const slot = cmds[o];
+      const shaderSlot = cmds[o + 8];
+      if (shaderSlot > 0) {
+        const entry = this.shaders.get(shaderSlot);
+        if (!entry) continue;
+        if (activeShader !== shaderSlot) {
+          gl.useProgram(entry.program);
+          if (entry.uScale !== null) gl.uniform2f(entry.uScale, this.uScaleX, this.uScaleY);
+          if (entry.uOrigin !== null) gl.uniform2f(entry.uOrigin, this.originX, this.originY);
+          if (entry.uInput !== null) gl.uniform1i(entry.uInput, 0);
+          activeShader = shaderSlot;
+        }
+        const uOff = cmds[o + 9];
+        const uLen = cmds[o + 10];
+        if (uLen > 0 && uOff + uLen <= this.uniformData.length) {
+          gl.bindBuffer(gl.UNIFORM_BUFFER, this.shaderUbo);
+          gl.bufferData(gl.UNIFORM_BUFFER, this.uniformData.subarray(uOff, uOff + uLen), gl.STREAM_DRAW);
+          gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, this.shaderUbo);
+        }
+      } else if (activeShader !== 0) {
+        gl.useProgram(this.defaultProgram);
+        gl.uniform2f(this.uScale, this.uScaleX, this.uScaleY);
+        gl.uniform2f(this.uOrigin, this.originX, this.originY);
+        activeShader = 0;
+      }
       gl.bindTexture(gl.TEXTURE_2D, (slot >= 0 && this.textures[slot]) || this.white);
       if (cmds[o + 3]) {
         gl.enable(gl.SCISSOR_TEST);
@@ -571,6 +810,11 @@ class NanoUiSdlWeb {
         gl.disable(gl.SCISSOR_TEST);
       }
       gl.drawElements(gl.TRIANGLES, cmds[o + 2], gl.UNSIGNED_INT, cmds[o + 1] * 4);
+    }
+    if (activeShader !== 0) {
+      gl.useProgram(this.defaultProgram);
+      gl.uniform2f(this.uScale, this.uScaleX, this.uScaleY);
+      gl.uniform2f(this.uOrigin, this.originX, this.originY);
     }
     gl.disable(gl.SCISSOR_TEST);
   }
