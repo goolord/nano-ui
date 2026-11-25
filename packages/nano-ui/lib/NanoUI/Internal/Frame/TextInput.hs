@@ -40,6 +40,7 @@ import Data.Maybe (isJust, mapMaybe)
 import Data.Sequence qualified as Seq
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Word (Word64)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (DrawArena, pushPreparedTextStyled, pushRect)
 import NanoUI.Internal.Font (FontMetrics (..), caretXIO, centeredTextY, lineWidthIO, prepareFontMetrics, revealSpanInViewport, selectionSpans, textDecorationMetrics, textIndexAtX, widgetContentInset)
@@ -129,7 +130,7 @@ tagTextInputClippedSpans parentClip fieldClip = mapMaybe tagOne
 -- weight and slant are synthesized unless the host drew the face natively
 -- (@native@, from 'NanoUI.Internal.Frame.Node.resolveFontFor').
 {-# INLINE pushFieldText #-}
-pushFieldText :: DrawArena -> FontMetrics -> Bool -> Int -> Float -> Float -> Text -> Color -> IO ()
+pushFieldText :: DrawArena -> FontMetrics -> Bool -> Word64 -> Float -> Float -> Text -> Color -> IO ()
 pushFieldText da fm native si x y txt col = do
   prepared <- prepareFontMetrics fm txt
   let !weight = if native then WeightNormal else textNodeFontWeight si
@@ -241,7 +242,7 @@ data TextInputFrame = TextInputFrame
 
 -- | Resolve font, masked value, composition line, horizontal scroll, centered
 -- row Y, and optional 'FieldEdit' in one pass for a captionless or plain field.
-resolveTextInputFrame :: Context -> NodeIdx -> Int -> Bool -> Rect -> Rect -> IO TextInputFrame
+resolveTextInputFrame :: Context -> NodeIdx -> Word64 -> Bool -> Rect -> Rect -> IO TextInputFrame
 resolveTextInputFrame ctx idx si focus (Rect _ boxY _ boxH) (Rect clipX _ clipW _) = do
   let na = ctxNodeArena ctx
   fontSizeVal <- getNodeFontSize na idx

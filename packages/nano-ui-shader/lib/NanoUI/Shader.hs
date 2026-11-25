@@ -36,12 +36,21 @@ module NanoUI.Shader
   , LoopAcc (..)
   , forRange
   , GpuExpr (..)
+  , GpuFloat
+  , GpuVec
+  , GpuSigned
+  , GpuMinMax
+  , GpuOrd
+  , GpuEq
     -- * Uniform access
   , ExprU
   , UniformLeaf
   , uVal
   , uFst
   , uSnd
+  , uFst3
+  , uSnd3
+  , uThd3
     -- * Fragment context and layer sampling
   , FragCtx (..)
   , Layer
@@ -148,7 +157,13 @@ import NanoUI.Shader.Expr
   , ExprU
   , FragCtx (..)
   , FragM
+  , GpuEq
   , GpuExpr (..)
+  , GpuFloat
+  , GpuMinMax
+  , GpuOrd
+  , GpuSigned
+  , GpuVec
   , Layer
   , LoopAcc (..)
   , UniformLeaf
@@ -193,7 +208,10 @@ import NanoUI.Shader.Expr
   , splat4
   , stepE
   , uFst
+  , uFst3
   , uSnd
+  , uSnd3
+  , uThd3
   , uVal
   , uintE
   , v2E

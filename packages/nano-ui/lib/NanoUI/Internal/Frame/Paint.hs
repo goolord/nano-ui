@@ -28,7 +28,7 @@ import Data.Primitive.PrimArray
   )
 import Data.Primitive.SmallArray (SmallArray)
 import qualified Data.Text as T
-import Data.Word (Word32)
+import Data.Word (Word32, Word64)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Font (ScrollBarSlot (..), fmLineHeight)
@@ -269,7 +269,7 @@ paintContainerNode env@PaintEnv {peContext = ctx, peDrawArena = da} idx rect = d
     emitDrawingOps env rect (build cdc rect)
 
 {-# NOINLINE paintEffectContainer #-}
-paintEffectContainer :: PaintEnv -> NodeIdx -> Rect -> Int -> IO ()
+paintEffectContainer :: PaintEnv -> NodeIdx -> Rect -> Word64 -> IO ()
 paintEffectContainer env@PaintEnv {peContext = ctx, peDrawArena = da} idx rect si = do
   caps <- getShaderCapabilities ctx
   mEntry <- lookupShaderEffectAt ctx idx

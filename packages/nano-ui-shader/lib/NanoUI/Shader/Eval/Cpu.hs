@@ -35,8 +35,8 @@ data Val
   | VTuple ![Val]
 
 -- | Evaluate a 'ShaderIR' at fragment context @ctx@ with packed std140 user
--- uniform bytes @uBytes@ and input sampler @sampleTex@ (taking normalized UV
--- coordinates in @[0, 1] x [0, 1]@), returning RGBA floats in @[0, 1]@.
+-- uniform bytes @uBytes@ and input sampler @sampleTex@ (taking local logical
+-- pixel coordinates), returning straight-alpha RGBA floats in @[0, 1]@.
 evalShaderIR ::
   ShaderIR ->
   ByteArray ->
@@ -207,15 +207,20 @@ zipFloatVal f a b = case (a, b) of
   (VV2 x1 y1, VF s) -> VV2 (f x1 s) (f y1 s)
   (VV3 x1 y1 z1, VF s) -> VV3 (f x1 s) (f y1 s) (f z1 s)
   (VV4 x1 y1 z1 w1, VF s) -> VV4 (f x1 s) (f y1 s) (f z1 s) (f w1 s)
+  (VF s, VV2 x2 y2) -> VV2 (f s x2) (f s y2)
+  (VF s, VV3 x2 y2 z2) -> VV3 (f s x2) (f s y2) (f s z2)
+  (VF s, VV4 x2 y2 z2 w2) -> VV4 (f s x2) (f s y2) (f s z2) (f s w2)
   _ -> a
 
 evalUnary :: UnOp -> Val -> Val
 evalUnary uop v = case uop of
   UNeg -> case v of
     VI n -> VI (negate n)
+    VU w -> VU (negate w)
     _ -> mapFloatVal negate v
   UAbs -> case v of
     VI n -> VI (abs n)
+    VU w -> VU w
     _ -> mapFloatVal abs v
   UFloor -> mapFloatVal (fromIntegral . (floor :: Float -> Int)) v
   UCeil -> mapFloatVal (fromIntegral . (ceiling :: Float -> Int)) v
@@ -229,6 +234,7 @@ evalUnary uop v = case uop of
   ULog2 -> mapFloatVal (logBase 2) v
   USign -> case v of
     VI n -> VI (signum n)
+    VU w -> VU (if w == 0 then 0 else 1)
     _ -> mapFloatVal signum v
   UNot -> case v of
     VB b -> VB (not b)
@@ -238,6 +244,7 @@ evalUnary uop v = case uop of
     _ -> VI 0
   UIntToFloat -> case v of
     VI n -> VF (fromIntegral n)
+    VU w -> VF (fromIntegral w)
     _ -> VF 0
 
 evalBinary :: BinOp -> Val -> Val -> Val
@@ -246,6 +253,10 @@ evalBinary bop a b = case (bop, a, b) of
   (BSub, VI x, VI y) -> VI (x - y)
   (BMul, VI x, VI y) -> VI (x * y)
   (BDiv, VI x, VI y) -> VI (if y == 0 then 0 else x `quot` y)
+  (BAdd, VU x, VU y) -> VU (x + y)
+  (BSub, VU x, VU y) -> VU (x - y)
+  (BMul, VU x, VU y) -> VU (x * y)
+  (BDiv, VU x, VU y) -> VU (if y == 0 then 0 else x `quot` y)
   (BAdd, _, _) -> zipFloatVal (+) a b
   (BSub, _, _) -> zipFloatVal (-) a b
   (BMul, _, _) -> zipFloatVal (*) a b
@@ -253,6 +264,8 @@ evalBinary bop a b = case (bop, a, b) of
   (BMod, _, _) -> zipFloatVal (\x y -> x - y * fromIntegral (floor (x / y) :: Int)) a b
   (BMin, VI x, VI y) -> VI (min x y)
   (BMax, VI x, VI y) -> VI (max x y)
+  (BMin, VU x, VU y) -> VU (min x y)
+  (BMax, VU x, VU y) -> VU (max x y)
   (BMin, _, _) -> zipFloatVal min a b
   (BMax, _, _) -> zipFloatVal max a b
   (BPow, _, _) -> zipFloatVal (**) a b
@@ -260,18 +273,24 @@ evalBinary bop a b = case (bop, a, b) of
   (BStep, VF e, VF x) -> VF (if x < e then 0 else 1)
   (BEq, VF x, VF y) -> VB (x == y)
   (BEq, VI x, VI y) -> VB (x == y)
+  (BEq, VU x, VU y) -> VB (x == y)
   (BEq, VB x, VB y) -> VB (x == y)
   (BNeq, VF x, VF y) -> VB (x /= y)
   (BNeq, VI x, VI y) -> VB (x /= y)
+  (BNeq, VU x, VU y) -> VB (x /= y)
   (BNeq, VB x, VB y) -> VB (x /= y)
   (BLt, VF x, VF y) -> VB (x < y)
   (BLt, VI x, VI y) -> VB (x < y)
+  (BLt, VU x, VU y) -> VB (x < y)
   (BLe, VF x, VF y) -> VB (x <= y)
   (BLe, VI x, VI y) -> VB (x <= y)
+  (BLe, VU x, VU y) -> VB (x <= y)
   (BGt, VF x, VF y) -> VB (x > y)
   (BGt, VI x, VI y) -> VB (x > y)
+  (BGt, VU x, VU y) -> VB (x > y)
   (BGe, VF x, VF y) -> VB (x >= y)
   (BGe, VI x, VI y) -> VB (x >= y)
+  (BGe, VU x, VU y) -> VB (x >= y)
   (BAnd, VB x, VB y) -> VB (x && y)
   (BOr, VB x, VB y) -> VB (x || y)
   (BDot, _, _) -> VF (sum (zipWith (*) (valFloats a) (valFloats b)))
@@ -284,9 +303,12 @@ evalTernary top a b c = case top of
   TMix -> case c of
     VF t -> zipFloatVal (\x y -> x * (1 - t) + y * t) a b
     _ -> a
-  TClamp ->
-    let lo = zipFloatVal max a b
-     in zipFloatVal min lo c
+  TClamp -> case (a, b, c) of
+    (VI x, VI lo, VI hi) -> VI (min hi (max lo x))
+    (VU x, VU lo, VU hi) -> VU (min hi (max lo x))
+    _ ->
+      let lo = zipFloatVal max a b
+       in zipFloatVal min lo c
   TSmoothstep -> case (a, b, c) of
     (VF e0, VF e1, VF x) ->
       let t = clamp01 ((x - e0) / (e1 - e0))

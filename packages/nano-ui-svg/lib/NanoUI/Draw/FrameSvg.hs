@@ -40,7 +40,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.Builder qualified as TB
-import Data.Word (Word32)
+import Data.Word (Word32, Word64)
 import Numeric (showHex)
 import NanoUI
   ( Color (..)
@@ -57,6 +57,10 @@ import NanoUI.Backend
   , FontMetrics (..)
   , Layer (..)
   , collectRasterSpans
+  , textNodeFontStyle
+  , textNodeFontVariant
+  , textNodeFontWeight
+  , textNodeTextDecoration
   )
 import NanoUI.Draw.Svg (SvgConfig (..), defaultSvgConfig, renderDrawOpsSvg)
 import NanoUI.Draw.Svg.Attr
@@ -71,8 +75,10 @@ import NanoUI.Draw.Svg.Attr
 import NanoUI.Internal.Context
   ( Context (..)
   , RecordedOp (..)
+  , activeEffectNodes
   , drawRecordedOps
   , getDrawRecordOps
+  , lookupShaderEffectAt
   , setDrawExternalText
   , setDrawRecordOps
   , setDrawSquareGeometry
@@ -88,12 +94,7 @@ import NanoUI.Internal.Layout.Arena
   , nodeFontBits
   )
 import NanoUI.Internal.Path (ringBox)
-import NanoUI.Testing
-  ( textNodeFontStyle
-  , textNodeFontVariant
-  , textNodeFontWeight
-  , textNodeTextDecoration
-  )
+import NanoUI.Internal.Shader (ShaderEffectEntry (..))
 
 -- | Options for 'frameToSvg'.
 data FrameSvgConfig = FrameSvgConfig
@@ -144,6 +145,7 @@ frameToSvg cfg0 ctx inp dd = do
     cfg = if autoPrefix then cfg0 {fsIdPrefix = idPlaceholder} else cfg0
   (pageSpans, overlaySpans) <- collectRasterSpans ctx inp
   spanStyles <- collectSpanStyles ctx
+  opacityZones <- collectSvgOpacityZones ctx
   recorded <- drawRecordedOps ctx
   let
     (pageShapes, overlayShapes) = frameShapes recorded
@@ -173,8 +175,8 @@ frameToSvg cfg0 ctx inp dd = do
         , svgIdPrefix = fsIdPrefix cfg <> scope
         }
     tclip = TB.fromText (fsIdPrefix cfg) <> "tclip_"
-    (pageTextDefs, pageTextBody, nextTClip) = spanTexts p (fsFontFamily cfg) fm sizeRatio spanStyles tclip 1 pageSpans
-    (overlayTextDefs, overlayTextBody, lastTClip) = spanTexts p (fsFontFamily cfg) fm sizeRatio spanStyles tclip nextTClip overlaySpans
+    (pageTextDefs, pageTextBody, nextTClip) = spanTexts p (fsFontFamily cfg) fm sizeRatio spanStyles opacityZones tclip 1 pageSpans
+    (overlayTextDefs, overlayTextBody, lastTClip) = spanTexts p (fsFontFamily cfg) fm sizeRatio spanStyles opacityZones tclip nextTClip overlaySpans
     allDefs
       | lastTClip == 1 = mempty
       | otherwise = "<defs>" <> pageTextDefs <> overlayTextDefs <> "</defs>"
@@ -299,7 +301,7 @@ pointsBox pad pts
 -- | Packed font-style codes for 'NodeText' spans, keyed by their exact
 -- rects, and for text fields, buttons and selects, whose spans lie inside
 -- them ('nodeFontBits').
-collectSpanStyles :: Context -> IO (M.Map RectKey Int, [(Rect, Int)])
+collectSpanStyles :: Context -> IO (M.Map RectKey Word64, [(Rect, Word64)])
 collectSpanStyles ctx = do
   sc <- readIORef (ctxSpanCache ctx)
   let
@@ -325,17 +327,39 @@ collectSpanStyles ctx = do
   pure (textStyles, [st | Just st <- inputStyles])
 
 
+-- | Collect active Tier 2 'seeSvgOpacity' containers as @(bounds, opacity)@
+-- pairs so text spans inside @withShader groupOpacity@ fade with their group.
+collectSvgOpacityZones :: Context -> IO [(Rect, Float)]
+collectSvgOpacityZones ctx = do
+  effNodes <- activeEffectNodes ctx
+  if null effNodes
+    then pure []
+    else do
+      let na = ctxNodeArena ctx
+      zones <-
+        forM effNodes $ \idx -> do
+          mEntry <- lookupShaderEffectAt ctx idx
+          case mEntry >>= seeSvgOpacity of
+            Just op | op < 0.9999 -> Just . (,max 0 (min 1 op)) <$> getNodeRect na idx
+            _ -> pure Nothing
+      pure [z | Just z <- zones]
+
 -- | Every span as clipped group and fitted text. Spans whose line box is
 -- not fully inside their clip share one @clipPath@ per clip.
 spanTexts ::
-  Int -> Text -> FontMetrics -> Float -> (M.Map RectKey Int, [(Rect, Int)]) -> TB.Builder -> Int -> [(Rect, Text, Color, Color, Rect)] -> (TB.Builder, TB.Builder, Int)
-spanTexts p fontFam fm ratio (textStyles, inputStyles) clipPrefix startId spans = (defs, body, nextId)
+  Int -> Text -> FontMetrics -> Float -> (M.Map RectKey Word64, [(Rect, Word64)]) -> [(Rect, Float)] -> TB.Builder -> Int -> [(Rect, Text, Color, Color, Rect)] -> (TB.Builder, TB.Builder, Int)
+spanTexts p fontFam fm ratio (textStyles, inputStyles) opacityZones clipPrefix startId spans = (defs, body, nextId)
  where
   baseLineH = fmLineHeight fm
   spaceAdv = fmAdvance fm ' '
   lookupStyle r0 = case M.lookup (rectKey r0) textStyles of
     Just si -> si
     Nothing -> maybe 0 snd (find (fullyInside r0 . fst) inputStyles)
+  opacityFor (Rect x y w h) =
+    let cx = x + w / 2
+        cy = y + h / 2
+        inZone (Rect zx zy zw zh) = cx >= zx && cx <= zx + zw && cy >= zy && cy <= zy + zh
+     in foldl' (\acc (zr, op) -> if inZone zr then acc * op else acc) 1 opacityZones
   fontAttrs si =
     attr "font-family" (TB.fromText fam)
       <> fontStyleAttrs (textNodeFontWeight si) (textNodeFontStyle si) (textNodeTextDecoration si)
@@ -354,7 +378,7 @@ spanTexts p fontFam fm ratio (textStyles, inputStyles) clipPrefix startId spans 
     in
       (Rect x' y w' h, t)
   kept =
-    [ (r', t', fg, c, lookupStyle r)
+    [ (r', t', fg, c, lookupStyle r, opacityFor r)
     | (r, t, fg, _, c) <- spans
     , let (r', t') = trimSpan r t
     , not (T.null t')
@@ -362,9 +386,9 @@ spanTexts p fontFam fm ratio (textStyles, inputStyles) clipPrefix startId spans 
     , rectH r > 0.5
     , rectIntersect r c /= Nothing
     ]
-  (defs, wrapClip, nextId) = clipDefs p clipPrefix startId [c | (r, _, _, c, _) <- kept, not (fullyInside r c)]
+  (defs, wrapClip, nextId) = clipDefs p clipPrefix startId [c | (r, _, _, c, _, _) <- kept, not (fullyInside r c)]
   body = mconcat (map el kept)
-  el (r@(Rect x y w h), t, fg, c, si)
+  el (r@(Rect x y w h), t, fg, c, si, op)
     | fullyInside r c = textEl
     | otherwise = wrapClip c textEl
    where
@@ -377,6 +401,7 @@ spanTexts p fontFam fm ratio (textStyles, inputStyles) clipPrefix startId spans 
         <> fontAttrs si
         <> attr "xml:space" "preserve"
         <> fillAttrs p fg
+        <> (if op < 0.9999 then attr "opacity" (fmtNum p op) else mempty)
         <> numAttr p "textLength" (max 1 w)
         <> attr "lengthAdjust" "spacing"
         <> ">"

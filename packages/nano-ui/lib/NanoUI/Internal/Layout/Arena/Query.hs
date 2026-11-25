@@ -6,6 +6,7 @@ module NanoUI.Internal.Layout.Arena.Query
   , forChildNodes_
   , foldFlowChildrenM
   , flowChildrenInOrder
+  , flowChildEnds
   , foldPlacedChildrenM
   , forChildrenInPaintOrder_
   , childrenTopFirst
@@ -106,6 +107,20 @@ foldChildrenInBoxM na skipPinned parentIdx f z = do
 -- last first, so consing them up as they are visited restores that order.
 flowChildrenInOrder :: NodeArena -> NodeIdx -> IO [NodeIdx]
 flowChildrenInOrder na parentIdx = foldFlowChildrenM na parentIdx (\acc ci -> pure (ci : acc)) []
+
+-- | First and last non-floating, non-pinned (flow) child of @parentIdx@ in
+-- declaration order, or @(-1, -1)@ when the container has no flow children.
+-- Sibling links run last to first, so the first flow child visited is the last
+-- declared one and the final one visited is the first declared one.
+flowChildEnds :: NodeArena -> NodeIdx -> IO (NodeIdx, NodeIdx)
+flowChildEnds na parentIdx = do
+  (lastC, firstC) <-
+    foldFlowChildrenM
+      na
+      parentIdx
+      (\(lc, _) ci -> pure (if lc < 0 then ci else lc, ci))
+      (-1, -1)
+  pure (firstC, lastC)
 
 -- | Visit a node's children, floating ones included, in paint order: each is
 -- drawn over those visited before it. A layered container visits unpinned

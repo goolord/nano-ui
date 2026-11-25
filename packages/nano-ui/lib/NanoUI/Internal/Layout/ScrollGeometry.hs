@@ -35,6 +35,7 @@ module NanoUI.Internal.Layout.ScrollGeometry
 import Data.Bits ((.|.))
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
+import Data.Word (Word64)
 import NanoUI.Internal.Font
 import NanoUI.Internal.Types (Color, Rect (..), V2 (..), clamp, rectContains, rectH, rectIntersect, rectW, rectX, rectY, v2X, v2Y)
 import NanoUI.Internal.Layout.Arena (DirTag (..))
@@ -56,15 +57,15 @@ data ScrollPolicy
 data ScrollConfig = ScrollConfig
   { scrollPolicyX :: !ScrollPolicy
   , scrollPolicyY :: !ScrollPolicy
-  -- | Paint only clipped children, without a background or border. Scrollbar
+  , scrollBare :: !Bool
+  -- ^ Paint only clipped children, without a background or border. Scrollbar
   -- policies still apply; combine with 'ScrollHidden' to omit all chrome. A
   -- bare scroller with something to scroll also keeps the wheel: an axis it
   -- cannot move passes to no scroller around or inside it.
-  , scrollBare :: !Bool
-  -- | Register the scroll container as a keyboard Tab stop and focus it on a
-  -- click on passive content inside it, for keyboard-driven list views
-  -- ('NanoUI.useListNav').
   , scrollFocusable :: !Bool
+  -- ^ Register the scroll container as a keyboard Tab stop and focus it on a
+  -- click inside it that did not focus a text field, select, or focusable
+  -- drawing, for keyboard-driven list views ('NanoUI.useListNav').
   }
   deriving (Eq, Show)
 
@@ -77,7 +78,7 @@ scrollConfigNative2D cfg = scrollPolicyX cfg /= ScrollNone && scrollPolicyY cfg 
 
 -- | A scroll node's style index. 'SB.scrollMarker' is always set, so that
 -- no scroll node's style index is 0.
-encodeScrollConfig :: ScrollConfig -> Int
+encodeScrollConfig :: ScrollConfig -> Word64
 encodeScrollConfig (ScrollConfig px py bare focusable) =
   SB.fieldMask SB.scrollMarker
     .|. SB.placeField SB.scrollPolicyX (fromEnum px)
@@ -85,13 +86,17 @@ encodeScrollConfig (ScrollConfig px py bare focusable) =
     .|. (if bare then SB.fieldMask SB.scrollBare else 0)
     .|. (if focusable then SB.fieldMask SB.scrollFocusable else 0)
 
-decodeScrollConfig :: Int -> ScrollConfig
+decodeScrollConfig :: Word64 -> ScrollConfig
 decodeScrollConfig bits =
   ScrollConfig
-    (toEnum (SB.getField SB.scrollPolicyX bits))
-    (toEnum (SB.getField SB.scrollPolicyY bits))
+    (decodePolicy (SB.getField SB.scrollPolicyX bits))
+    (decodePolicy (SB.getField SB.scrollPolicyY bits))
     (SB.testField SB.scrollBare bits)
     (SB.testField SB.scrollFocusable bits)
+  where
+    decodePolicy raw
+      | raw >= fromEnum (minBound :: ScrollPolicy) && raw <= fromEnum (maxBound :: ScrollPolicy) = toEnum raw
+      | otherwise = ScrollAuto
 
 scrollDefault1D :: Direction -> ScrollConfig
 scrollDefault1D Column = scrollVerticalAuto
@@ -141,7 +146,7 @@ scrollGutters2D slot cfg pad contentW contentH innerW innerH =
       gH = gHorz (max 0 (innerW - gW0))
    in (gW, gH)
 
-isScrollStyle2D :: Int -> Bool
+isScrollStyle2D :: Word64 -> Bool
 isScrollStyle2D si = si /= 0 && scrollConfigNative2D (decodeScrollConfig si)
 
 -- | The policy of the axis a scroller laid out along @dir@ scrolls on.

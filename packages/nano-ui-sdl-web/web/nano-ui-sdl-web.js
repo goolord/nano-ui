@@ -718,12 +718,11 @@ class NanoUiSdlWeb {
     }
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.targets[srcSlot].tex);
-    if (blendCopy) {
-      gl.disable(gl.BLEND);
-    } else {
-      gl.enable(gl.BLEND);
-      gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-    }
+    // Always blend straight-alpha output into premultiplied offscreen targets
+    // (cleared to 0,0,0,0) and onto the backbuffer.
+    void blendCopy;
+    gl.enable(gl.BLEND);
+    gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     if (sc[0]) {
       gl.enable(gl.SCISSOR_TEST);
       gl.scissor(sc[1], this.curSize[1] - sc[2] - sc[4], sc[3], sc[4]);

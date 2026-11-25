@@ -119,11 +119,12 @@ module NanoUI.Internal.StyleBits
   , styleLayouts
   ) where
 
-import Data.Bits ((.&.), (.|.), finiteBitSize, shiftL, shiftR)
+import Data.Bits ((.&.), (.|.), shiftL, shiftR)
+import Data.Word (Word64)
 
--- | @bfWidth@ bits of a style index starting at bit @bfShift@. The fields
--- below are INLINE constants, so 'getField' and 'packField' on one of them
--- compile to the shift and mask literals they replace.
+-- | @bfWidth@ bits of a 64-bit style index starting at bit @bfShift@. The
+-- fields below are INLINE constants, so 'getField' and 'packField' on one of
+-- them compile to the shift and mask literals they replace.
 data BitField = BitField
   { bfShift :: !Int
   , bfWidth :: !Int
@@ -136,35 +137,32 @@ fieldEnd :: BitField -> Int
 fieldEnd f = bfShift f + bfWidth f
 
 {-# INLINE lowMask #-}
-lowMask :: BitField -> Int
+lowMask :: BitField -> Word64
 lowMask f = (1 `shiftL` bfWidth f) - 1
 
 -- | A field's bits in place.
 {-# INLINE fieldMask #-}
-fieldMask :: BitField -> Int
+fieldMask :: BitField -> Word64
 fieldMask f = lowMask f `shiftL` bfShift f
 
--- | The value a style index holds in a field. Fields past the platform's
--- 'Int' width read as 0 instead of sign-extending bit 31 on 32-bit targets.
+-- | The value a 64-bit style index holds in a field.
 {-# INLINE getField #-}
-getField :: BitField -> Int -> Int
-getField f si
-  | bfShift f >= finiteBitSize (0 :: Int) = 0
-  | otherwise = (si `shiftR` bfShift f) .&. lowMask f
+getField :: BitField -> Word64 -> Int
+getField f si = fromIntegral ((si `shiftR` bfShift f) .&. lowMask f)
 
 -- | @v@ cut to the field's width and moved into place.
 {-# INLINE packField #-}
-packField :: BitField -> Int -> Int
-packField f v = (v .&. lowMask f) `shiftL` bfShift f
+packField :: BitField -> Int -> Word64
+packField f v = (fromIntegral v .&. lowMask f) `shiftL` bfShift f
 
 -- | @v@ moved into place, for a value already known to fit the field.
 {-# INLINE placeField #-}
-placeField :: BitField -> Int -> Int
-placeField f v = v `shiftL` bfShift f
+placeField :: BitField -> Int -> Word64
+placeField f v = fromIntegral v `shiftL` bfShift f
 
 -- | Whether any bit of the field is set.
 {-# INLINE testField #-}
-testField :: BitField -> Int -> Bool
+testField :: BitField -> Word64 -> Bool
 testField f si = si .&. fieldMask f /= 0
 
 -- Text font ----------------------------------------------------------------
@@ -222,7 +220,7 @@ textFontFields =
 -- | The fields that pick the font a text node is measured in: face, weight,
 -- slant and tabular figures.
 {-# INLINE textFontKeyMask #-}
-textFontKeyMask :: Int
+textFontKeyMask :: Word64
 textFontKeyMask = fieldMask textFace .|. fieldMask textWeight .|. fieldMask textSlant .|. fieldMask textTabular
 
 -- Text field flags ---------------------------------------------------------

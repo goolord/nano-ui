@@ -41,7 +41,6 @@ import NanoUI.Internal.Shader
   , ShaderKind (..)
   , ShaderPass (..)
   , ShaderProgram (..)
-  , hashShaderProgram
   )
 import NanoUI.Internal.Uniforms
   ( Uniforms (..)
@@ -67,7 +66,7 @@ import NanoUI.Shader.Expr
   , sampleLayer
   , sampleLayerUv
   )
-import NanoUI.Shader.IR (ShaderIR (..), emptyIRBuilder, runIRBuilder)
+import NanoUI.Shader.IR (ShaderIR (..), emptyIRBuilder, hashShaderIR, runIRBuilder)
 import System.IO.Unsafe (unsafeDupablePerformIO)
 
 -- | Monomorphic EDSL bodies stored in 'shaderFusion' so compatible effects
@@ -103,7 +102,7 @@ compileIRToShader ::
   Shader k u
 compileIRToShader margin mFusion ir =
   let prog = compileIRToProgram ir
-      !h = hashShaderProgram prog
+      !h = hashShaderIR ir
       !sz = uniformSize (Proxy :: Proxy u)
       pass =
         ShaderPass
@@ -325,7 +324,10 @@ chainPasses s1 s2 =
     , shaderCpuEval = case (shaderCpuEval s1, shaderCpuEval s2) of
         (Just e1, Just e2) ->
           Just $ \(u1, u2) ctx sampler ->
-            let pass1 pos = e1 u1 ctx {cfcPos = pos} sampler
+            let V2 sw sh' = cfcSize ctx
+                pass1 pos@(V2 px py) =
+                  let uv' = V2 (px / max 1 sw) (py / max 1 sh')
+                   in e1 u1 ctx {cfcPos = pos, cfcUv = uv'} sampler
              in e2 u2 ctx pass1
         _ -> Nothing
     , shaderSvgOpacity = Nothing

@@ -30,6 +30,7 @@ import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Word (Word64)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (DrawArena, pushRect, pushRoundedRect, pushRoundedStroke, withClip)
 import NanoUI.Internal.Layout.ScrollGeometry (ScrollBarLayout (..), ScrollConfig (..), ScrollPolicy (..), defaultScrollConfig)
@@ -116,7 +117,7 @@ closeButtonStyle theme hotT =
 -- Fills are the label colour at a low alpha where they can, so a strip reads
 -- the same on a panel, a card or the window. The label is muted until the
 -- tab is selected.
-tabHeaderVisualStyle :: Theme -> Int -> Bool -> Style
+tabHeaderVisualStyle :: Theme -> Word64 -> Bool -> Style
 tabHeaderVisualStyle theme packed isActive =
   let panel = themePanel theme
       fg = styleFg panel
@@ -195,7 +196,7 @@ tableHeaderVisualStyle theme isSorted =
 -- contained headers meet the strip's rule on the side facing the body
 -- ('tabEdgeStrip'): an underlined header marks the selection with an accent bar
 -- there, and a contained one opens onto the body through it.
-paintTabHeader :: DrawArena -> Theme -> Int -> Bool -> Style -> Rect -> IO ()
+paintTabHeader :: DrawArena -> Theme -> Word64 -> Bool -> Style -> Rect -> IO ()
 paintTabHeader da theme packed isActive style rect@(Rect x y w h) = do
   let (tabStyle, orient) = tabDecodeStyle packed
       bg = styleBg style
@@ -227,7 +228,7 @@ paintTabHeader da theme packed isActive style rect@(Rect x y w h) = do
 -- ('tabChromeDecode'): the rule the headers sit on, the segmented track, or a
 -- contained body's fill and its border on the sides away from the headers.
 {-# NOINLINE paintTabChrome #-}
-paintTabChrome :: DrawArena -> Theme -> Int -> Rect -> IO ()
+paintTabChrome :: DrawArena -> Theme -> Word64 -> Rect -> IO ()
 paintTabChrome da theme si rect@(Rect _ _ w h) = do
   let (part, tabStyle, orient) = tabChromeDecode si
       panel = themePanel theme

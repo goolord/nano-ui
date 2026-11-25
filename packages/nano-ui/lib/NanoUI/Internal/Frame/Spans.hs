@@ -16,6 +16,7 @@ import Data.IORef (readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
+import Data.Word (Word64)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Damage (floatingPanelRects)
 import NanoUI.Internal.Draw (DrawArena (..))
@@ -251,7 +252,7 @@ textNodeSpanEntry ctx@Context {ctxNodeArena = arena} idx x y w h = do
 -- shares), otherwise one line, truncated to fit a node that grows or has a
 -- maximum width.
 nodeTextLines ::
-  Context -> T.Text -> Int -> Float -> SizingTag -> Float -> Float -> Bool -> Float -> Float -> IO (FontMetrics, SpanLines)
+  Context -> T.Text -> Word64 -> Float -> SizingTag -> Float -> Float -> Bool -> Float -> Float -> IO (FontMetrics, SpanLines)
 nodeTextLines ctx raw si fontSize wTag maxW effMaxW isRowChild ix w
   | T.null raw = pure (ctxFontMetrics ctx, SpanWrapped [])
   | otherwise = do
@@ -398,7 +399,7 @@ cachedWidgetLabel ctx nt idx labelAlign w h = do
 
 -- All coordinates here are local. centeredTextY snaps the baseline offset,
 -- not the origin; final device-pixel snapping stays in the draw backend.
-computeWidgetLabel :: Context -> NodeType -> T.Text -> Int -> Float -> AlignX -> Float -> Float -> IO (Maybe WidgetTextPlacement)
+computeWidgetLabel :: Context -> NodeType -> T.Text -> Word64 -> Float -> AlignX -> Float -> Float -> IO (Maybe WidgetTextPlacement)
 computeWidgetLabel ctx nt txt si fontSizeVal ax w h
   | kind == ButtonClose = pure Nothing
   | otherwise = do
@@ -458,7 +459,7 @@ selectableTextGeometry fm x y h =
 -- hit-testing start too. Paint needs exactly this; only the span path also
 -- needs the measured width, so the host measurement stays there.
 plainFieldPen ::
-  Context -> NodeIdx -> Int -> FontMetrics -> Float -> Float -> Float -> Float -> IO (T.Text, Float, Float, Rect)
+  Context -> NodeIdx -> Word64 -> FontMetrics -> Float -> Float -> Float -> Float -> IO (T.Text, Float, Float, Rect)
 plainFieldPen ctx idx si fm x y w h = do
   ph <- if hasFlag textInputFlagNumeric si then pure "" else getText (ctxNodeArena ctx) idx
   -- The value, including any input method composition in progress.

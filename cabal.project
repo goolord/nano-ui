@@ -50,3 +50,6 @@ package nano-ui-form
 
 package nano-ui-markdown
   flags: +sdl
+
+package nano-ui-svg
+  flags: +glossary

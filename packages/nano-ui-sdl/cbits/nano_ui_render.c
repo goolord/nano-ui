@@ -693,21 +693,8 @@ int nano_ui_batch_composite_effect(
     if (src_slot < 0 || src_slot >= batch->target_count || !batch->targets[src_slot].tex) {
         return 0;
     }
-    SDL_GPUDevice *dev = SDL_GetGPURendererDevice(batch->renderer);
-    if (!dev) return 0;
-    NanoUiGpuShaderEntry *entry = get_gpu_shader(
-        batch, dev, hash, spirv, spirv_len, msl, msl_len, 1);
-    if (!entry || entry->failed || !entry->state) {
-        return 0;
-    }
-    if (uniform_len > 0 && uniform_bytes != NULL) {
-        if (!SDL_SetGPURenderStateFragmentUniforms(entry->state, 0u, uniform_bytes, (Uint32)uniform_len)) {
-            fprintf(stderr, "nano-ui-sdl: effect uniform upload failed: %s\n", SDL_GetError());
-            return 0;
-        }
-    }
+    (void)blend_copy;
     SDL_Texture *src_tex = batch->targets[src_slot].tex;
-    SDL_SetTextureBlendMode(src_tex, blend_copy ? SDL_BLENDMODE_NONE : SDL_BLENDMODE_BLEND);
 
     SDL_Vertex quad[4];
     quad[0].position.x = px;      quad[0].position.y = py;
@@ -725,13 +712,34 @@ int nano_ui_batch_composite_effect(
         quad[i].color.a = 1.f;
     }
     static const int indices[6] = { 0, 1, 2, 0, 2, 3 };
+
+    SDL_GPUDevice *dev = SDL_GetGPURendererDevice(batch->renderer);
+    NanoUiGpuShaderEntry *entry = dev ? get_gpu_shader(
+        batch, dev, hash, spirv, spirv_len, msl, msl_len, 1) : NULL;
+    if (!entry || entry->failed || !entry->state) {
+        /* Fallback: blit the offscreen premultiplied target unshaded so the
+         * wrapped subtree never disappears on shader compile failure. */
+        SDL_SetTextureBlendMode(src_tex, SDL_BLENDMODE_BLEND_PREMULTIPLIED);
+        bool ok = SDL_RenderGeometry(batch->renderer, src_tex, quad, 4, indices, 6);
+        SDL_SetTextureBlendMode(src_tex, SDL_BLENDMODE_BLEND);
+        return ok ? 1 : 0;
+    }
+    if (uniform_len > 0 && uniform_bytes != NULL) {
+        if (!SDL_SetGPURenderStateFragmentUniforms(entry->state, 0u, uniform_bytes, (Uint32)uniform_len)) {
+            fprintf(stderr, "nano-ui-sdl: effect uniform upload failed: %s\n", SDL_GetError());
+            return 0;
+        }
+    }
+    /* Always blend with straight-alpha-to-premultiplied SDL_BLENDMODE_BLEND
+     * so both intermediate offscreen targets (cleared to 0,0,0,0) and the
+     * final composite stay in premultiplied offscreen space. */
+    SDL_SetTextureBlendMode(src_tex, SDL_BLENDMODE_BLEND);
     if (!SDL_SetGPURenderState(batch->renderer, entry->state)) {
         fprintf(stderr, "nano-ui-sdl: SDL_SetGPURenderState failed: %s\n", SDL_GetError());
         return 0;
     }
     bool ok = SDL_RenderGeometry(batch->renderer, src_tex, quad, 4, indices, 6);
     SDL_SetGPURenderState(batch->renderer, NULL);
-    SDL_SetTextureBlendMode(src_tex, SDL_BLENDMODE_BLEND);
     return ok ? 1 : 0;
 #else
     (void)src_slot; (void)px; (void)py; (void)pw; (void)ph;

@@ -108,11 +108,12 @@ module NanoUI.Internal.Layout.Arena.Types
   , setArenaScope
   , getScopeSignature
   , getInputSignature
+  , readStyleIdx
   , getStyleIdx
   ) where
 
 import Control.Monad (mfilter)
-import Data.Bits (finiteBitSize, shiftL, shiftR, xor, (.&.))
+import Data.Bits (shiftL, shiftR, xor, (.&.))
 import Data.IORef (IORef, readIORef, writeIORef)
 import Data.Primitive.Array (MutableArray, copyMutableArray, newArray, readArray)
 import Data.Primitive.PrimArray
@@ -282,17 +283,14 @@ packsNodeFont nt = nt == NodeText || nt == NodeTextInput
 labelFontShift :: Int
 labelFontShift = bfShift SB.labelFont
 
--- | The font bits of a node's style index @si@, in a text node's packing:
--- all of a text node's or text field's, the label font of a button or select
--- ('labelFontShift'), and none for any other type. On 32-bit targets
--- ('wasm32'), 'Int' has no upper half above bit 31, so the shift returns 0
--- rather than sign-extending negative flag bits such as 'SB.buttonTable'.
+-- | The font bits of a node's 64-bit style index @si@, in a text node's
+-- packing: all of a text node's or text field's, the label font of a button
+-- or select ('labelFontShift'), and none for any other type.
 {-# INLINE nodeFontBits #-}
-nodeFontBits :: NodeType -> Int -> Int
+nodeFontBits :: NodeType -> Word64 -> Word64
 nodeFontBits nt si
   | packsNodeFont nt = si
-  | hasCenteredLabel nt =
-      if labelFontShift >= finiteBitSize (0 :: Int) then 0 else si `shiftR` labelFontShift
+  | hasCenteredLabel nt = si `shiftR` labelFontShift
   | otherwise = 0
 
 -- | Whether the node paints one line of label text centered vertically in its
@@ -395,7 +393,11 @@ data NodeArenaArrays = NodeArenaArrays
   , naArrTags :: !(IOArr Word8)
   -- ^ Enum values, 16 bytes per node. See 'TagCol'.
   , naArrTree :: !(IOArr Int)
-  -- ^ Tree links and other integers, 8 per node. See 'TreeCol'.
+  -- ^ Tree links and other integers, 7 per node. See 'TreeCol'.
+  , naArrStyleIdx :: !(IOArr Word64)
+  -- ^ Each node's 64-bit packed style index ('getStyleIdx'). Stored in its own
+  -- 'Word64' array so upper bits ('SB.labelFont') are preserved on 32-bit
+  -- targets such as @wasm32@.
   , naArrTextStore :: !(MutableArray RealWorld Text)
   -- ^ Each node's text. 'addNode' does not clear a slot, so read it with
   -- 'getText', which checks that the node set a text.
@@ -404,9 +406,10 @@ data NodeArenaArrays = NodeArenaArrays
   , naArrOptionsLast :: !(MutableArray RealWorld [Text])
   -- ^ The option list each node last hashed ('setOptions'), which 'addNode'
   -- leaves alone, so the same list next frame reuses its hash.
-  , naArrFontColor :: !(IOArr Int)
-  -- ^ Each node's font colour: 0 for none, and otherwise the colour's 32-bit
-  -- word with bit 32 set. See 'getNodeFontColor'.
+  , naArrFontColor :: !(IOArr Word64)
+  -- ^ Each node's font color: 0 for none, and otherwise the color's 32-bit
+  -- word with bit 32 set. Stored as 'Word64' so bit 32 is preserved on 32-bit
+  -- targets such as @wasm32@. See 'getNodeFontColor'.
   , naArrScope :: !(IOArr Int)
   -- ^ The scope each node was added under: the theme that a @styled@ or
   -- @disabledWhen@ block around the node selected, whether the node is
@@ -584,7 +587,7 @@ geomStride, styleStride, tagStride, treeStride :: Int
 geomStride = 9
 styleStride = 20
 tagStride = 16
-treeStride = 8
+treeStride = 7
 
 -- | Columns of 'naArrGeom', in logical pixels and window coordinates.
 --
@@ -687,13 +690,12 @@ data TagCol
 --   these links therefore visits a node's children from the last to the first.
 -- * 'TreeChildCount': the number of children, floating ones included.
 -- * 'TreeWidgetId': the 'WidgetId' converted to an 'Int', or 0 for none.
--- * 'TreeStyleIdx': the style index ('getStyleIdx').
 -- * 'TreeTextIdx': the node's slot in 'naArrTextStore', which is its own
 --   index, or -1 when the node has no text.
 -- * 'TreeGridCols': the column count of a grid, or 0.
 data TreeCol
   = TreeParent | TreeFirstChild | TreeNextSibling | TreeChildCount
-  | TreeWidgetId | TreeStyleIdx | TreeTextIdx | TreeGridCols
+  | TreeWidgetId | TreeTextIdx | TreeGridCols
   deriving (Enum, Bounded)
 
 -- | Read geometry column @col@ of node @idx@. Like the other raw accessors
@@ -752,6 +754,7 @@ newNodeArenaArrays cap = do
   naArrStyle <- newPrimArray (cap * styleStride)
   naArrTags <- newPrimArray (cap * tagStride)
   naArrTree <- newPrimArray (cap * treeStride)
+  naArrStyleIdx <- newPrimArray cap
   naArrTextStore <- newArray cap T.empty
   naArrOptionsStore <- newArray cap []
   naArrOptionsLast <- newArray cap []
@@ -1133,8 +1136,8 @@ getText na idx = do
 {-# INLINE getImageNode #-}
 getImageNode :: NodeArena -> NodeIdx -> IO (Maybe ImageNode)
 getImageNode na idx = do
-  si <- arenaArrays na >>= \a -> readTree a idx TreeStyleIdx
-  if si <= 0 then pure Nothing else Just <$> (readIORef (naImages na) >>= \arr -> readArray arr (si - 1))
+  si <- arenaArrays na >>= \a -> readPrimArray (naArrStyleIdx a) idx
+  if si == 0 then pure Nothing else Just <$> (readIORef (naImages na) >>= \arr -> readArray arr (fromIntegral si - 1))
 
 -- | Image node @idx@'s image id ('setImageId'). Only valid on a 'NodeImage'.
 {-# INLINE getImageId #-}
@@ -1261,8 +1264,13 @@ getScopeSignature na = readIORef (naScopeSig na)
 getInputSignature :: NodeArena -> IO Word64
 getInputSignature na = readPrimArray (naInputSig na) 0
 
--- | Type-specific style code. Its encoding depends on 'getNodeType', such as
--- button flags, a radio option index, or packed text styling.
+-- | Read the 64-bit style index of node @idx@ from already-fetched arena arrays.
+{-# INLINE readStyleIdx #-}
+readStyleIdx :: NodeArenaArrays -> NodeIdx -> IO Word64
+readStyleIdx a = readPrimArray (naArrStyleIdx a)
+
+-- | Type-specific 64-bit style code. Its encoding depends on 'getNodeType',
+-- such as button flags, a radio option index, or packed text styling.
 {-# INLINE getStyleIdx #-}
-getStyleIdx :: NodeArena -> NodeIdx -> IO Int
-getStyleIdx na idx = arenaArrays na >>= \a -> readTree a idx TreeStyleIdx
+getStyleIdx :: NodeArena -> NodeIdx -> IO Word64
+getStyleIdx na idx = arenaArrays na >>= \a -> readPrimArray (naArrStyleIdx a) idx

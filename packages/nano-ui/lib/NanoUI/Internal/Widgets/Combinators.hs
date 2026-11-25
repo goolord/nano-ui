@@ -13,6 +13,7 @@ where
 import Control.Monad (when)
 import Data.IORef (modifyIORef', readIORef)
 import Data.Text (Text)
+import Data.Word (Word64)
 import NanoUI.Internal.Derived (DerivedField, lookupDerived, insertDerived)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Id (WidgetId)
@@ -30,7 +31,7 @@ import NanoUI.Internal.Widgets.Node
 -- Disabled controls keep their identity and geometry but cannot take focus or
 -- activate, including through a click queued before they became disabled.
 {-# INLINE buttonStyledEx #-}
-buttonStyledEx :: Bool -> Text -> Float -> Layout -> Int -> NanoUI Response
+buttonStyledEx :: Bool -> Text -> Float -> Layout -> Word64 -> NanoUI Response
 buttonStyledEx enabled txt value layout styleIdx = do
   (wid, ctx) <- freshWidget
   disabled <- liftIO (isDisabled ctx wid)
@@ -47,7 +48,7 @@ buttonStyledEx enabled txt value layout styleIdx = do
 -- lays out and styles the node, resolves toggle clicks and keyboard activation,
 -- and updates the node's visual value when toggled.
 {-# INLINE choiceToggleWidget #-}
-choiceToggleWidget :: Text -> Layout -> Int -> Bool -> NanoUI (Response, Bool)
+choiceToggleWidget :: Text -> Layout -> Word64 -> Bool -> NanoUI (Response, Bool)
 choiceToggleWidget txt lay flag on = do
   (wid, ctx) <- freshWidget
   liftIO $ registerFocusable ctx wid

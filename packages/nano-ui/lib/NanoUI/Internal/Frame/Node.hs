@@ -13,6 +13,7 @@ module NanoUI.Internal.Frame.Node
   ) where
 
 import Data.Text (Text)
+import Data.Word (Word64)
 import NanoUI.Internal.Context (Context (..), nodeTheme)
 import NanoUI.Internal.Draw.Types (TextFont (..))
 import NanoUI.Internal.Font (FontMetrics, isDefaultNodeFont, measureTextIO, tabularFontMetrics)
@@ -34,7 +35,7 @@ import NanoUI.Internal.WidgetText (containerFlagClip, hasFlag, panelSurface, tex
 -- Only the font bits of the style are read ('nodeFontBits'): a label's or
 -- field's whole style, a button's or select's label font.
 {-# INLINE resolveFontFor #-}
-resolveFontFor :: Context -> NodeType -> Float -> Int -> IO (FontMetrics, Bool, Text -> IO (Float, Float))
+resolveFontFor :: Context -> NodeType -> Float -> Word64 -> IO (FontMetrics, Bool, Text -> IO (Float, Float))
 resolveFontFor ctx nt rawSize packed = do
   let !size = resolveFontSize (ctxFontSize ctx) rawSize
       font@(TextFont _ variant weight style _ tabular) =
@@ -51,12 +52,12 @@ resolveFontFor ctx nt rawSize packed = do
 -- @size@ and packed style @si@ is set in ('resolveFontFor'), for paint, which
 -- takes the metrics from the span cache.
 {-# INLINE nodeFontNative #-}
-nodeFontNative :: Context -> Float -> Int -> IO Bool
+nodeFontNative :: Context -> Float -> Word64 -> IO Bool
 nodeFontNative ctx size si = snd <$> resolveTextFont ctx (packedTextFont size si)
 
 -- | The font of a text node of @size@ and packed style @si@.
 {-# INLINE packedTextFont #-}
-packedTextFont :: Float -> Int -> TextFont
+packedTextFont :: Float -> Word64 -> TextFont
 packedTextFont size si =
   TextFont size (textNodeFontVariant si) (textNodeFontWeight si) (textNodeFontStyle si) DecorationNone (textNodeFontTabular si)
 

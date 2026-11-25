@@ -124,7 +124,7 @@ snapNode na a s i = do
   writeGeom a i GeomH (max 0 (gridSpan s y (y + h)))
   nt <- readTagEnum a i TagNodeType
   when (nt == NodeScrollContainer) $ do
-    si <- readTree a i TreeStyleIdx
+    si <- readStyleIdx a i
     dir <- readTagEnum a i TagDirection
     padL <- readStyle a i StylePadL
     padT <- readStyle a i StylePadT

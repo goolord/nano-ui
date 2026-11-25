@@ -138,7 +138,7 @@ distributeScratch na n avail gapSum horizontal = do
             then pure False
             else do
               nt <- readTagEnum a ci TagNodeType
-              si <- readTree a ci TreeStyleIdx
+              si <- readStyleIdx a ci
               dir <- readTagEnum a ci TagDirection
               pure (nt == NodeScrollContainer && (isScrollStyle2D si || (dir == DirRow) == horizontal))
         writePrimArray gfArr i (if scrolls then 1 else shrinkFactor ax)

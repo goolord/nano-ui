@@ -38,7 +38,7 @@ import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Int (Int32)
 import Data.List (sortOn)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Primitive.ByteArray (ByteArray, copyByteArrayToAddr, sizeofByteArray)
 import Data.Primitive.PrimArray (indexPrimArray)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromList)
@@ -366,7 +366,8 @@ execGlRange h !scale !fbW !fbH spans cmds shaderCalls uBytes drawSpanText parent
           !eh = bh + 2 * my
           passes = esPasses sp
           !nPasses = sizeofSmallArray passes
-      if nPasses <= 0 || ew <= 0 || eh <= 0
+          passesSupported = all (\i -> isJust (spGlsl150 (scProgram (indexSmallArray passes i)))) [0 .. nPasses - 1]
+      if nPasses <= 0 || ew <= 0 || eh <= 0 || not passesSupported
         then do
           execGlRange h scale fbW fbH spans cmds shaderCalls uBytes drawSpanText (esId sp) parentSlot parentW parentH parentOx parentOy s e
           drawSpanText (esId sp)

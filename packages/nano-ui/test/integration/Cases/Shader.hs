@@ -233,24 +233,33 @@ runEffectDamageTest ctx failed = do
           }
       marginEffect :: Shader 'LayerEffect Float
       marginEffect = rawLayerShader (\m -> V2 m m) blurProg
-      ui col =
+      ui showEff col =
         columnWith (padAll 40 . tight) $
-          withShader marginEffect 12.0 $
-            box (fixedWH 40 30) col
+          if showEff
+            then withShader marginEffect 12.0 (box (fixedWH 40 30) col)
+            else box (fixedWH 40 30) col
       red = colorRGBA 220 30 30 255
       green = colorRGBA 30 220 30 255
-      step col = runFrame ctx (withInput 320 200) (ui col) >> takeDamage ctx
-  _ <- step red
+      step showEff col = runFrame ctx (withInput 320 200) (ui showEff col) >> takeDamage ctx
+  _ <- step True red
   -- Identical subtree + uniform: zero damage.
-  dIdle <- step red
+  dIdle <- step True red
   assert failed (damageIsEmpty dIdle)
   -- Child change inside margin effect: damage rect expands by (12, 12) around (40, 40, 40, 30) -> covers [28..92] x [28..82].
-  dDirty <- step green
+  dDirty <- step True green
   case dDirty of
     DamageClip (Rect dx dy dw dh) -> do
       assert failed (dx <= 28.5 && dy <= 28.5)
       assert failed (dx + dw >= 91.5 && dy + dh >= 81.5)
     other -> putStrLn ("expected margin-expanded DamageClip, got " ++ show other) >> bump failed
   -- Settles back to zero damage.
-  dSettle <- step green
+  dSettle <- step True green
   assert failed (damageIsEmpty dSettle)
+  -- Unmounting the effect must still damage the previous frame's margin-expanded halo [28..92] x [28..82].
+  dUnmount <- step False green
+  assert failed (not (damageIsEmpty dUnmount))
+  case dUnmount of
+    DamageClip (Rect dx dy dw dh) -> do
+      assert failed (dx <= 28.5 && dy <= 28.5)
+      assert failed (dx + dw >= 91.5 && dy + dh >= 81.5)
+    DamageFull -> pure ()

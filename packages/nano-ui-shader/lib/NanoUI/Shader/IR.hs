@@ -24,18 +24,17 @@ module NanoUI.Shader.IR
   , runIRBuilder
   , emitNode
   , emitLoop
-  , markNeedsInput
-  , irUniformField
+  , hashShaderIR
   ) where
 
+import Data.Bits (shiftL, xor, (.|.))
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HM
 import Data.Hashable (Hashable (..))
 import Data.Int (Int32)
 import Data.Vector (Vector)
 import Data.Vector qualified as V
-import Data.Word (Word32)
-import GHC.Float (castFloatToWord32)
+import Data.Word (Word32, Word64)
 import GHC.Generics (Generic)
 import NanoUI.Internal.Uniforms (GpuType (..), UniformField (..))
 
@@ -330,10 +329,19 @@ emitLoop start end inits stateTypes buildBody b =
           }
    in emitNode (case stateTypes of (t : _) -> t; [] -> TFloat) (OpLoop lb) b1
 
--- | Mark the shader as requiring the @uInput@ sampler.
-markNeedsInput :: IRBuilder -> IRBuilder
-markNeedsInput b = b {irbNeedsInput = True}
-
--- | Helper for constructing a float literal op.
-irUniformField :: Float -> ExprOp
-irUniformField = OpLitFloat . castFloatToWord32
+-- | Deterministic non-zero 64-bit structural hash of a lowered 'ShaderIR'.
+-- Hashing the IR rather than compiled backend strings keeps 'ShaderProgram'
+-- fields lazy so each backend only compiles the target format it consumes.
+hashShaderIR :: ShaderIR -> Word64
+hashShaderIR ir =
+  let hashWith s =
+        s
+          `hashWithSalt` irNeedsInput ir
+          `hashWithSalt` irUniformBytes ir
+          `hashWithSalt` irOutput ir
+          `hashWithSalt` [(fromEnum (ufType f), ufOffset f) | f <- irUniforms ir]
+          `hashWithSalt` V.toList (irNodes ir)
+      !h1 = fromIntegral (hashWith (0x517cc1b7 :: Int)) :: Word64
+      !h2 = fromIntegral (hashWith (0x27d4eb2f :: Int)) :: Word64
+      !h = (h1 `shiftL` 32) .|. (h2 `xor` (h1 * 0x9e3779b97f4a7c15))
+   in if h == 0 then 1 else h

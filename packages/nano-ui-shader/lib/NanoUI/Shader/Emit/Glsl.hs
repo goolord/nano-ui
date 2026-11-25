@@ -43,7 +43,14 @@ emitGlsl :: GlslTarget -> ShaderIR -> Text
 emitGlsl target ir = TL.toStrict . TB.toLazyText $ mconcat
   [ header
   , uniformBlock (irUniforms ir)
-  , if irNeedsInput ir then "uniform sampler2D uInput;\n" else ""
+  , if irNeedsInput ir
+      then
+        "uniform sampler2D uInput;\n"
+          <> "vec4 nanoSampleInput(vec2 uv) {\n"
+          <> "  vec4 s = texture(uInput, uv);\n"
+          <> "  return vec4(min(s.rgb / max(s.a, 1e-5), vec3(1.0)), s.a);\n"
+          <> "}\n"
+      else ""
   , "void main() {\n"
   , emitNodes target 0 (irNodes ir)
   , "  fragColor = " <> nodeVar 0 (irOutput ir) <> ";\n"
@@ -238,7 +245,7 @@ emitExpr target depth ty op =
           TSelect -> "(" <> ref a <> " ? " <> ref b <> " : " <> ref c <> ")"
         OpLength a -> "length(" <> ref a <> ")"
         OpNormalize a -> "normalize(" <> ref a <> ")"
-        OpSampleInput uv -> "texture(uInput, " <> ref uv <> ")"
+        OpSampleInput uv -> "nanoSampleInput(" <> ref uv <> ")"
         OpOuterRef d nid -> nodeVar d nid
         OpLoopVar lid -> loopIdxVar lid
         OpLoopState lid slot -> loopStateVar lid slot

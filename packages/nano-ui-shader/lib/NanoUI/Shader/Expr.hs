@@ -28,12 +28,21 @@ module NanoUI.Shader.Expr
   , LoopAcc (..)
   , forRange
   , GpuExpr (..)
+  , GpuFloat
+  , GpuVec
+  , GpuSigned
+  , GpuMinMax
+  , GpuOrd
+  , GpuEq
     -- * Uniform access
   , ExprU (..)
   , UniformLeaf (..)
   , uVal
   , uFst
   , uSnd
+  , uFst3
+  , uSnd3
+  , uThd3
     -- * Built-in fragment context and layer sampling
   , FragCtx (..)
   , mkFragCtx
@@ -192,6 +201,49 @@ instance GpuExpr V2 where exprIRType _ = TVec2
 instance GpuExpr V3 where exprIRType _ = TVec3
 instance GpuExpr V4 where exprIRType _ = TVec4
 
+-- | Floating-point scalar and vector expression types.
+class GpuExpr a => GpuFloat a
+instance GpuFloat Float
+instance GpuFloat V2
+instance GpuFloat V3
+instance GpuFloat V4
+
+-- | Floating-point vector expression types (@V2@, @V3@, @V4@).
+class GpuFloat a => GpuVec a
+instance GpuVec V2
+instance GpuVec V3
+instance GpuVec V4
+
+-- | Signed expression types supporting 'absE' and 'signE'.
+class GpuExpr a => GpuSigned a
+instance GpuSigned Float
+instance GpuSigned V2
+instance GpuSigned V3
+instance GpuSigned V4
+instance GpuSigned Int32
+
+-- | Numeric expression types supporting 'minE', 'maxE', and 'clampE'.
+class GpuExpr a => GpuMinMax a
+instance GpuMinMax Float
+instance GpuMinMax V2
+instance GpuMinMax V3
+instance GpuMinMax V4
+instance GpuMinMax Int32
+instance GpuMinMax Word32
+
+-- | Ordered scalar expression types supporting @.<@, @.<=@, @.>@, and @.>=@.
+class GpuExpr a => GpuOrd a
+instance GpuOrd Float
+instance GpuOrd Int32
+instance GpuOrd Word32
+
+-- | Scalar expression types supporting @.==@ and @./=@.
+class GpuExpr a => GpuEq a
+instance GpuEq Float
+instance GpuEq Int32
+instance GpuEq Word32
+instance GpuEq Bool
+
 -- | Reference an already-emitted SSA node from scope depth @defDepth@.
 refNode :: forall a. GpuExpr a => Int -> NodeId -> Expr a
 refNode defDepth nid = Expr $ \curDepth b ->
@@ -332,6 +384,27 @@ uFst (ExprU base) = ExprU base
 uSnd :: forall a b. KnownNat (UniformLeafCount a) => ExprU (a, b) -> ExprU b
 uSnd (ExprU base) = ExprU (base + fromIntegral (natVal (Proxy @(UniformLeafCount a))))
 
+-- | Project the first component of a 3-tuple uniform handle.
+uFst3 :: ExprU (a, b, c) -> ExprU a
+uFst3 (ExprU base) = ExprU base
+
+-- | Project the second component of a 3-tuple uniform handle.
+uSnd3 :: forall a b c. KnownNat (UniformLeafCount a) => ExprU (a, b, c) -> ExprU b
+uSnd3 (ExprU base) = ExprU (base + fromIntegral (natVal (Proxy @(UniformLeafCount a))))
+
+-- | Project the third component of a 3-tuple uniform handle.
+uThd3 ::
+  forall a b c.
+  (KnownNat (UniformLeafCount a), KnownNat (UniformLeafCount b)) =>
+  ExprU (a, b, c) ->
+  ExprU c
+uThd3 (ExprU base) =
+  ExprU
+    ( base
+        + fromIntegral (natVal (Proxy @(UniformLeafCount a)))
+        + fromIntegral (natVal (Proxy @(UniformLeafCount b)))
+    )
+
 -- | Type-level count of flattened primitive uniform fields in @a@.
 type family UniformLeafCount (a :: Type) :: Nat where
   UniformLeafCount () = 0
@@ -383,16 +456,39 @@ type family RequireField (u :: Type) (name :: Symbol) (m :: Maybe (Nat, Type)) :
           ':<>: 'Text "'."
       )
 
+type family IsUniformLeaf (a :: Type) :: Bool where
+  IsUniformLeaf Float = 'True
+  IsUniformLeaf Int32 = 'True
+  IsUniformLeaf Word32 = 'True
+  IsUniformLeaf Bool = 'True
+  IsUniformLeaf V2 = 'True
+  IsUniformLeaf V3 = 'True
+  IsUniformLeaf V4 = 'True
+  IsUniformLeaf Color = 'True
+  IsUniformLeaf Rect = 'True
+  IsUniformLeaf Size = 'True
+  IsUniformLeaf _ = 'False
+
+class ProjectUniform (isLeaf :: Bool) (fieldTy :: Type) (res :: Type) | isLeaf fieldTy -> res where
+  projectUniform :: Proxy isLeaf -> Proxy fieldTy -> Int -> res
+
+instance UniformLeaf fieldTy r => ProjectUniform 'True fieldTy (Expr r) where
+  projectUniform _ _ fieldIdx = Expr $ \_ b ->
+    emitNode (exprIRType (Proxy @r)) (OpUniform fieldIdx (leafGpuType (Proxy @fieldTy))) b
+
+instance ProjectUniform 'False fieldTy (ExprU fieldTy) where
+  projectUniform _ _ = ExprU
+
 instance
   ( '(idx, fieldTy) ~ RequireField u name (GLookupField name (Rep u) 0)
   , KnownNat idx
-  , UniformLeaf fieldTy r
+  , isLeaf ~ IsUniformLeaf fieldTy
+  , ProjectUniform isLeaf fieldTy res
   ) =>
-  HasField name (ExprU u) (Expr r)
+  HasField name (ExprU u) res
   where
-  getField (ExprU base) = Expr $ \_ b ->
-    let !fieldIdx = base + fromIntegral (natVal (Proxy @idx))
-     in emitNode (exprIRType (Proxy @r)) (OpUniform fieldIdx (leafGpuType (Proxy @fieldTy))) b
+  getField (ExprU base) =
+    projectUniform (Proxy @isLeaf) (Proxy @fieldTy) (base + fromIntegral (natVal (Proxy @idx)))
 
 -- ---------------------------------------------------------------------------
 -- Fragment context and input layer sampling
@@ -616,23 +712,23 @@ infixl 7 *^, ^*, /^
 infixl 6 +^, -^
 
 -- | Multiply a vector expression by a scalar float expression.
-(*^) :: GpuExpr v => Expr v -> Expr Float -> Expr v
+(*^) :: GpuVec v => Expr v -> Expr Float -> Expr v
 (*^) = binOpE BMul
 
 -- | Multiply a scalar float expression by a vector expression.
-(^*) :: GpuExpr v => Expr Float -> Expr v -> Expr v
+(^*) :: GpuVec v => Expr Float -> Expr v -> Expr v
 (^*) = binOpE BMul
 
 -- | Divide a vector expression by a scalar float expression.
-(/^) :: GpuExpr v => Expr v -> Expr Float -> Expr v
+(/^) :: GpuVec v => Expr v -> Expr Float -> Expr v
 (/^) = binOpE BDiv
 
 -- | Add a scalar float expression to every component of a vector expression.
-(+^) :: GpuExpr v => Expr v -> Expr Float -> Expr v
+(+^) :: GpuVec v => Expr v -> Expr Float -> Expr v
 (+^) = binOpE BAdd
 
 -- | Subtract a scalar float expression from every component of a vector expression.
-(-^) :: GpuExpr v => Expr v -> Expr Float -> Expr v
+(-^) :: GpuVec v => Expr v -> Expr Float -> Expr v
 (-^) = binOpE BSub
 
 instance Num (Expr Float) where
@@ -675,6 +771,15 @@ instance Num (Expr Int32) where
   signum = unOpE USign
   fromInteger = intE . fromInteger
 
+instance Num (Expr Word32) where
+  (+) = binOpE BAdd
+  (-) = binOpE BSub
+  (*) = binOpE BMul
+  negate = unOpE UNeg
+  abs = id
+  signum u = select (u .== uintE 0) (uintE 0) (uintE 1)
+  fromInteger = uintE . fromInteger
+
 instance Num (Expr V2) where
   (+) = binOpE BAdd
   (-) = binOpE BSub
@@ -715,39 +820,39 @@ instance Fractional (Expr V4) where
   fromRational = splat4 . floatE . fromRational
 
 -- | Componentwise absolute value.
-absE :: GpuExpr a => Expr a -> Expr a
+absE :: GpuSigned a => Expr a -> Expr a
 absE = unOpE UAbs
 
 -- | Componentwise sign (@-1@, @0@, or @1@).
-signE :: GpuExpr a => Expr a -> Expr a
+signE :: GpuSigned a => Expr a -> Expr a
 signE = unOpE USign
 
 -- | Componentwise floor.
-floorE :: GpuExpr a => Expr a -> Expr a
+floorE :: GpuFloat a => Expr a -> Expr a
 floorE = unOpE UFloor
 
 -- | Componentwise ceil.
-ceilE :: GpuExpr a => Expr a -> Expr a
+ceilE :: GpuFloat a => Expr a -> Expr a
 ceilE = unOpE UCeil
 
 -- | Componentwise fractional part (@x - floor x@).
-fractE :: GpuExpr a => Expr a -> Expr a
+fractE :: GpuFloat a => Expr a -> Expr a
 fractE = unOpE UFract
 
 -- | Floating-point modulo (@x - y * floor(x / y)@).
-modE :: GpuExpr a => Expr a -> Expr a -> Expr a
+modE :: GpuFloat a => Expr a -> Expr a -> Expr a
 modE = binOpE BMod
 
 -- | Componentwise minimum.
-minE :: GpuExpr a => Expr a -> Expr a -> Expr a
+minE :: GpuMinMax a => Expr a -> Expr a -> Expr a
 minE = binOpE BMin
 
 -- | Componentwise maximum.
-maxE :: GpuExpr a => Expr a -> Expr a -> Expr a
+maxE :: GpuMinMax a => Expr a -> Expr a -> Expr a
 maxE = binOpE BMax
 
 -- | Componentwise clamp to @[lo, hi]@.
-clampE :: GpuExpr a => Expr a -> Expr a -> Expr a -> Expr a
+clampE :: GpuMinMax a => Expr a -> Expr a -> Expr a -> Expr a
 clampE x lo hi = triOpE TClamp x lo hi
 
 -- | Clamp a float expression to @[0, 1]@.
@@ -755,10 +860,10 @@ clamp01E :: Expr Float -> Expr Float
 clamp01E x = clampE x 0 1
 
 -- | Linear interpolation @a * (1 - t) + b * t@.
-mix :: GpuExpr a => Expr a -> Expr a -> Expr Float -> Expr a
+mix :: GpuFloat a => Expr a -> Expr a -> Expr Float -> Expr a
 mix = triOpE TMix
 
--- | Step function: @0@ when @x < edge@, else @1@.
+-- | Step function @stepE edge x@: @0@ when @x < edge@, else @1@.
 stepE :: Expr Float -> Expr Float -> Expr Float
 stepE = binOpE BStep
 
@@ -767,7 +872,7 @@ smoothstep :: Expr Float -> Expr Float -> Expr Float -> Expr Float
 smoothstep = triOpE TSmoothstep
 
 -- | Componentwise exponentiation.
-powE :: GpuExpr a => Expr a -> Expr a -> Expr a
+powE :: GpuFloat a => Expr a -> Expr a -> Expr a
 powE = binOpE BPow
 
 -- | Two-argument arctangent @atan2 y x@.
@@ -775,25 +880,29 @@ atan2E :: Expr Float -> Expr Float -> Expr Float
 atan2E = binOpE BAtan2
 
 -- | Vector dot product.
-dot :: Expr a -> Expr a -> Expr Float
-dot = binOpE BDot
+dot :: forall a. GpuVec a => Expr a -> Expr a -> Expr Float
+dot a b =
+  let !_ = exprIRType (Proxy @a)
+   in binOpE BDot a b
 
 -- | 3D vector cross product.
 cross :: Expr V3 -> Expr V3 -> Expr V3
 cross = binOpE BCross
 
 -- | Euclidean vector length.
-vLength :: Expr a -> Expr Float
-vLength v = Expr $ \d b0 ->
-  let (vid, b1) = runExpr d v b0
-   in emitNode TFloat (OpLength vid) b1
+vLength :: forall a. GpuVec a => Expr a -> Expr Float
+vLength v =
+  let !_ = exprIRType (Proxy @a)
+   in Expr $ \d b0 ->
+        let (vid, b1) = runExpr d v b0
+         in emitNode TFloat (OpLength vid) b1
 
 -- | Euclidean distance between two vectors.
-vDistance :: Num (Expr a) => Expr a -> Expr a -> Expr Float
+vDistance :: (GpuVec a, Num (Expr a)) => Expr a -> Expr a -> Expr Float
 vDistance a b = vLength (a - b)
 
 -- | Unit-length vector in the direction of @v@.
-normalize :: forall a. GpuExpr a => Expr a -> Expr a
+normalize :: forall a. GpuVec a => Expr a -> Expr a
 normalize v = Expr $ \d b0 ->
   let (vid, b1) = runExpr d v b0
    in emitNode (exprIRType (Proxy @a)) (OpNormalize vid) b1
@@ -806,29 +915,39 @@ infix 4 .<, .<=, .>, .>=, .==, ./=
 infixr 3 .&&
 infixr 2 .||
 
+ordOp :: forall a. GpuOrd a => BinOp -> Expr a -> Expr a -> Expr Bool
+ordOp op a b =
+  let !_ = exprIRType (Proxy @a)
+   in binOpE op a b
+
+eqOp :: forall a. GpuEq a => BinOp -> Expr a -> Expr a -> Expr Bool
+eqOp op a b =
+  let !_ = exprIRType (Proxy @a)
+   in binOpE op a b
+
 -- | Less-than comparison.
-(.<) :: Expr a -> Expr a -> Expr Bool
-(.<) = binOpE BLt
+(.<) :: GpuOrd a => Expr a -> Expr a -> Expr Bool
+(.<) = ordOp BLt
 
 -- | Less-than-or-equal comparison.
-(.<=) :: Expr a -> Expr a -> Expr Bool
-(.<=) = binOpE BLe
+(.<=) :: GpuOrd a => Expr a -> Expr a -> Expr Bool
+(.<=) = ordOp BLe
 
 -- | Greater-than comparison.
-(.>) :: Expr a -> Expr a -> Expr Bool
-(.>) = binOpE BGt
+(.>) :: GpuOrd a => Expr a -> Expr a -> Expr Bool
+(.>) = ordOp BGt
 
 -- | Greater-than-or-equal comparison.
-(.>=) :: Expr a -> Expr a -> Expr Bool
-(.>=) = binOpE BGe
+(.>=) :: GpuOrd a => Expr a -> Expr a -> Expr Bool
+(.>=) = ordOp BGe
 
 -- | Equality comparison.
-(.==) :: Expr a -> Expr a -> Expr Bool
-(.==) = binOpE BEq
+(.==) :: GpuEq a => Expr a -> Expr a -> Expr Bool
+(.==) = eqOp BEq
 
 -- | Inequality comparison.
-(./=) :: Expr a -> Expr a -> Expr Bool
-(./=) = binOpE BNeq
+(./=) :: GpuEq a => Expr a -> Expr a -> Expr Bool
+(./=) = eqOp BNeq
 
 -- | Logical conjunction.
 (.&&) :: Expr Bool -> Expr Bool -> Expr Bool

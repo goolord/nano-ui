@@ -302,3 +302,19 @@ runButtonGroupTest ctx failed = do
   _ <- runFrame ctx (withInputOff 400 200) (ui False)
   dmg <- takeDamage ctx
   assert failed (damageCovers dmg rb)
+  -- A trailing select with an open dropdown (NodePopup attached to the group)
+  -- keeps its outer right corners rounded.
+  selV <- newVar (0 :: Int)
+  let selUi = columnWith (tight . gap 0) $
+        buttonGroup $ do
+          _ <- buttonWith' (fixedW 60) "Left"
+          selectWith' (fixedW 80) ["One", "Two"] selV
+  (selR, _) <- warmupDraw ctx (withInputOff 400 200) selUi
+  let sr = respRect selR
+      clickPt = centerOf selR
+  _ <- runClick ctx (withInput 400 200) selUi clickPt
+  _ <- runFrame ctx (withInputOff 400 200) selUi
+  opsOpen <- drawRecordedOps ctx
+  let selFills = [r | RecordedOp _ clip _ (FillRoundedRect r _ _) <- opsOpen, clip == sr]
+  -- Trailing select extends past its left edge (shared seam) but NOT past its right edge (rounded cap).
+  assert failed (any (\r -> rectX r < rectX sr && rectX r + rectW r <= rectX sr + rectW sr + 0.5) selFills)

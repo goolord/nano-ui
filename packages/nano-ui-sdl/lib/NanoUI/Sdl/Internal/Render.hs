@@ -17,6 +17,7 @@ import Data.ByteString.Unsafe qualified as BSU
 import Data.Foldable (for_)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (sortOn)
+import Data.Maybe (isJust)
 import Data.Primitive.ByteArray (ByteArray, copyByteArrayToAddr, sizeofByteArray)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray)
 import Data.Text.Encoding qualified as TE
@@ -218,13 +219,17 @@ execEffectRange batch ren clipRef scale rootTarget spans cmds uBytes emitCmd par
           expanded@(Rect ex ey ew eh) = Rect (bx - mx) (by - my) (bw + 2 * mx) (bh + 2 * my)
           passes = esPasses sp
           !nPasses = sizeofSmallArray passes
+          passesSupported =
+            all
+              (\i -> let p = scProgram (indexSmallArray passes i) in isJust (spSpirv p) || isJust (spMsl p))
+              [0 .. nPasses - 1]
           inDamage = case parentDmg of
             Nothing -> True
             Just dmg -> case rectIntersect dmg expanded of
               Just _ -> True
               Nothing -> False
       when inDamage $
-        if nPasses <= 0 || ew <= 0 || eh <= 0
+        if nPasses <= 0 || ew <= 0 || eh <= 0 || not passesSupported
           then
             execEffectRange
               batch ren clipRef scale rootTarget spans cmds uBytes
@@ -385,17 +390,18 @@ drawShaderCmd batchPtr vp vc ip idxStart idxCount tex hasDmg dx dy dw dh sc unif
       withOptText Nothing k = k nullPtr 0
       withOptText (Just t) k = withOptBS (Just (TE.encodeUtf8 t)) k
   withOptBS (spSpirv prog) $ \spvPtr spvLen ->
-    withOptText (spMsl prog) $ \mslPtr mslLen ->
-      if uLen > 0
-        then allocaBytes uLen $ \uPtr -> do
-          copyByteArrayToAddr uPtr uniformBytes uOff uLen
-          void $
+    withOptText (spMsl prog) $ \mslPtr mslLen -> do
+      ok <-
+        if uLen > 0
+          then allocaBytes uLen $ \uPtr -> do
+            copyByteArrayToAddr uPtr uniformBytes uOff uLen
             batchDrawShader batchPtr vp vc ip idxStart idxCount tex hasDmg dx dy dw dh
               (scHash sc) spvPtr spvLen mslPtr mslLen needsTex uPtr (fromIntegral uLen)
-        else
-          void $
+          else
             batchDrawShader batchPtr vp vc ip idxStart idxCount tex hasDmg dx dy dw dh
               (scHash sc) spvPtr spvLen mslPtr mslLen needsTex nullPtr 0
+      when (ok == 0) $
+        batchDrawRange batchPtr vp vc ip idxStart idxCount nullPtr hasDmg dx dy dw dh
 
 -- | Queue a command: the batch, the vertices and their count, the indices,
 -- the command's first index and index count, its texture, then whether to

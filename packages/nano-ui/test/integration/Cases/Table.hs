@@ -129,7 +129,7 @@ runTableWidgetCellsTest ctx failed = do
     let na = ctxNodeArena ctx
         stripe acc i = do
           nt <- getNodeType na i
-          if nt == NodePanel then (: acc) . (\si -> (si `div` 16) .&. 0x0F) <$> getStyleIdx na i else pure acc
+          if nt == NodePanel then (: acc) . fromIntegral . (\si -> (si `div` 16) .&. 0x0F) <$> getStyleIdx na i else pure acc
     striped <- filter (/= 0) <$> liftIO (foldNodesM na stripe [])
     checkEq (IS.fromList [1, 2], 6) (IS.fromList striped, length striped)
     _ <- click "Eat apple"

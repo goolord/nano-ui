@@ -44,6 +44,7 @@ import Data.Maybe (fromMaybe, isNothing, listToMaybe)
 import Data.Sequence qualified as Seq
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Word (Word64)
 import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Id (WidgetId)
@@ -156,7 +157,7 @@ fieldTextCommands ctx mode inp = do
       else inputTextCommands mode inp
 
 -- | The editor mode of a single-line field with these style flags.
-textInputMode :: Int -> EditorMode
+textInputMode :: Word64 -> EditorMode
 textInputMode si =
   singleLineMode
     { modeEditable = not (hasFlag textInputFlagSelectable si)
@@ -292,7 +293,7 @@ editTextField wid mode initial unfocusedText = do
 -- pulse is delayed until the text has been idle for that long (immediate for
 -- clear clicks).
 buildTextInput ::
-  Int ->
+  Word64 ->
   Layout ->
   Text ->
   Text ->

@@ -33,6 +33,13 @@ emitMsl ir = TL.toStrict . TB.toLazyText $ mconcat
   , "  float2 v_uv [[user(locn1)]];\n"
   , "};\n"
   , mslUniformStruct (irUniforms ir) (irUniformBytes ir)
+  , if irNeedsInput ir
+      then
+        "inline float4 nanoSampleInput(texture2d<float> tex, sampler samp, float2 uv) {\n"
+          <> "  float4 s = tex.sample(samp, uv);\n"
+          <> "  return float4(min(s.rgb / max(s.a, 1e-5f), float3(1.0f)), s.a);\n"
+          <> "}\n"
+      else ""
   , "fragment float4 main0(\n"
   , "  FragIn in [[stage_in]],\n"
   , "  constant NanoShaderBlock& u [[buffer(0)]]"
@@ -236,7 +243,7 @@ emitExpr depth ty op =
           TSelect -> "(" <> ref a <> " ? " <> ref b <> " : " <> ref c <> ")"
         OpLength a -> "length(" <> ref a <> ")"
         OpNormalize a -> "normalize(" <> ref a <> ")"
-        OpSampleInput uv -> "uInput.sample(uSampler, " <> ref uv <> ")"
+        OpSampleInput uv -> "nanoSampleInput(uInput, uSampler, " <> ref uv <> ")"
         OpOuterRef d nid -> nodeVar d nid
         OpLoopVar lid -> loopIdxVar lid
         OpLoopState lid slot -> loopStateVar lid slot

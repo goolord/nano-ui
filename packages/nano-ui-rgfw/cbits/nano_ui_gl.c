@@ -856,8 +856,8 @@ int32_t nano_ui_gl_composite_effect(
   if (r == NULL || srcSlot < 0 || srcSlot >= r->targetCount || !r->targets[srcSlot].tex) {
     return 0;
   }
+  (void)blendCopy;
   ngl_shader_entry* entry = ngl_get_shader(r, hash, fragSrc, fragLen);
-  if (entry == NULL || entry->failed || entry->program == 0) return 0;
   ngl_api* gl = &r->gl;
   const ngl_vertex quad[6] = {
     { dx,      dy,      1.f, 1.f, 1.f, 1.f, u0, v0 },
@@ -867,6 +867,37 @@ int32_t nano_ui_gl_composite_effect(
     { dx + dw, dy + dh, 1.f, 1.f, 1.f, 1.f, u1, v1 },
     { dx,      dy + dh, 1.f, 1.f, 1.f, 1.f, u0, v1 },
   };
+  if (hasScissor) {
+    gl->Enable(GL_SCISSOR_TEST);
+    gl->Scissor(sx0, r->curH - sy1, sx1 - sx0, sy1 - sy0);
+  } else {
+    gl->Disable(GL_SCISSOR_TEST);
+  }
+  gl->Enable(GL_BLEND);
+  if (entry == NULL || entry->failed || entry->program == 0) {
+    /* Fallback: blit the offscreen premultiplied target unshaded so the
+     * wrapped subtree stays visible if shader compilation fails. */
+    gl->UseProgram(r->program);
+    gl->Uniform2f(r->uViewport, (GLfloat)r->curW, (GLfloat)r->curH);
+    gl->Uniform2f(r->uOrigin, 0.0f, 0.0f);
+    gl->Uniform1f(r->uScale, 1.0f);
+    gl->Uniform1f(r->uTextured, 2.0f);
+    gl->ActiveTexture(GL_TEXTURE1);
+    gl->BindTexture(GL_TEXTURE_2D, r->targets[srcSlot].tex);
+    gl->BlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    gl->BindVertexArray(r->effectVao);
+    gl->BindBuffer(GL_ARRAY_BUFFER, r->effectVbo);
+    gl->BufferData(GL_ARRAY_BUFFER, (GLsizeiptr)sizeof(quad), quad, GL_STREAM_DRAW);
+    gl->DrawArrays(GL_TRIANGLES, 0, 6);
+    gl->BindTexture(GL_TEXTURE_2D, r->images);
+    gl->ActiveTexture(GL_TEXTURE0);
+    gl->BlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    gl->Disable(GL_SCISSOR_TEST);
+    gl->Uniform2f(r->uOrigin, r->originX, r->originY);
+    gl->Uniform1f(r->uScale, r->scale);
+    r->mode = NGL_MODE_NONE;
+    return 1;
+  }
   gl->UseProgram(entry->program);
   if (entry->uViewport >= 0) gl->Uniform2f(entry->uViewport, (GLfloat)r->curW, (GLfloat)r->curH);
   if (entry->uOrigin >= 0) gl->Uniform2f(entry->uOrigin, 0.0f, 0.0f);
@@ -879,18 +910,10 @@ int32_t nano_ui_gl_composite_effect(
   }
   gl->ActiveTexture(GL_TEXTURE0);
   gl->BindTexture(GL_TEXTURE_2D, r->targets[srcSlot].tex);
-  if (blendCopy) {
-    gl->Disable(GL_BLEND);
-  } else {
-    gl->Enable(GL_BLEND);
-    gl->BlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-  }
-  if (hasScissor) {
-    gl->Enable(GL_SCISSOR_TEST);
-    gl->Scissor(sx0, r->curH - sy1, sx1 - sx0, sy1 - sy0);
-  } else {
-    gl->Disable(GL_SCISSOR_TEST);
-  }
+  /* Always blend with straight-alpha-to-premultiplied (SRC_ALPHA, 1-SRC_ALPHA,
+   * ONE, 1-SRC_ALPHA) so both intermediate cleared targets and the final
+   * composite share premultiplied offscreen representation. */
+  gl->BlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
   gl->BindVertexArray(r->effectVao);
   gl->BindBuffer(GL_ARRAY_BUFFER, r->effectVbo);
   gl->BufferData(GL_ARRAY_BUFFER, (GLsizeiptr)sizeof(quad), quad, GL_STREAM_DRAW);

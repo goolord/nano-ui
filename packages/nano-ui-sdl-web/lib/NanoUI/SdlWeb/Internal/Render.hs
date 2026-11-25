@@ -21,7 +21,7 @@ import Data.Int (Int32)
 import Data.List (sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Primitive.ByteArray (ByteArray, copyByteArrayToAddr, sizeofByteArray)
-import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray)
+import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromListN)
 import qualified Data.Text.Encoding as TE
 import qualified Data.Vector.Unboxed as U
 import Data.Word (Word64, Word8)
@@ -327,9 +327,14 @@ execWebRange host r dd scale vp ip spans rawCmds uBytes parentId parentSlot pare
             Just dmg -> case rectIntersect dmg expanded of
               Just _ -> True
               Nothing -> False
-      when inDamage $
-        if nPasses <= 0 || ew <= 0 || eh <= 0
+      when inDamage $ do
+        passSlots <-
+          if nPasses <= 0 || ew <= 0 || eh <= 0
+            then pure []
+            else mapM (ensureShaderSlot host r . indexSmallArray passes) [0 .. nPasses - 1]
+        if null passSlots || any (<= 0) passSlots
           then
+            -- Graceful fallback when any pass lacks GLSL ES 300 or fails to compile.
             execWebRange host r dd scale vp ip spans rawCmds uBytes (esId sp) parentSlot parentSize parentOx parentOy parentDmg s e
           else do
             let !px0 = floor (ex * scale) :: Int
@@ -340,6 +345,7 @@ execWebRange host r dd scale vp ip spans rawCmds uBytes parentId parentSlot pare
                 !ph = max 1 (py1 - py0)
                 !ox = fromIntegral px0 / scale
                 !oy = fromIntegral py0 / scale
+                slotArr = smallArrayFromListN nPasses passSlots
             (slot0, cap0W, cap0H) <- acquireWebTarget host pw ph
             if slot0 < 0
               then
@@ -367,41 +373,40 @@ execWebRange host r dd scale vp ip spans rawCmds uBytes parentId parentSlot pare
                                     !nodeUSpan = nodePw / fromIntegral srcCapW
                                     !nodeVSpan = negate (nodePh / fromIntegral srcCapH)
                                     sc = indexSmallArray passes passIdx
-                                shSlot <- ensureShaderSlot host r sc
-                                when (shSlot > 0) $
-                                  if passIdx < nPasses - 1 && dstSlot >= 0
-                                    then do
-                                      whBindTarget host dstSlot True 0 0
-                                      compositeWebPass
-                                        host srcSlot shSlot True
-                                        0 0 (fromIntegral pw) (fromIntegral ph)
-                                        0 v0 u1 v1 Nothing
-                                        sc uBytes nodeU0 nodeV0 nodeUSpan nodeVSpan
-                                        (fromIntegral srcCapW) (fromIntegral srcCapH)
-                                      runPasses dstSlot dstCapW dstCapH srcSlot srcCapW srcCapH (passIdx + 1)
-                                    else do
-                                      whBindTarget host parentSlot False (realToFrac parentOx) (realToFrac parentOy)
-                                      forM_ (spanEffectiveClip parentDmg (esClip sp)) $ \mClip -> do
-                                        let shifted =
-                                              if parentOx == 0 && parentOy == 0
-                                                then mClip
-                                                else fmap (\(Rect x y w h) -> Rect (x - parentOx) (y - parentOy) w h) mClip
-                                            toPix clipR =
-                                              let (x0, y0, x1, y1) = clipPixelEdges scale clipR
-                                                  cx0 = max 0 x0
-                                                  cy0 = max 0 y0
-                                               in (cx0, cy0, min parentW x1 - cx0, min parentH y1 - cy0)
-                                            mScissor = fmap toPix shifted
-                                            nonEmpty = case mScissor of
-                                              Just (_, _, sw, sh) -> sw > 0 && sh > 0
-                                              Nothing -> True
-                                        when nonEmpty $
-                                          compositeWebPass
-                                            host srcSlot shSlot False
-                                            destPx destPy (fromIntegral pw) (fromIntegral ph)
-                                            0 v0 u1 v1 mScissor
-                                            sc uBytes nodeU0 nodeV0 nodeUSpan nodeVSpan
-                                            (fromIntegral srcCapW) (fromIntegral srcCapH)
+                                    !shSlot = indexSmallArray slotArr passIdx
+                                if passIdx < nPasses - 1 && dstSlot >= 0
+                                  then do
+                                    whBindTarget host dstSlot True 0 0
+                                    compositeWebPass
+                                      host srcSlot shSlot True
+                                      0 0 (fromIntegral pw) (fromIntegral ph)
+                                      0 v0 u1 v1 Nothing
+                                      sc uBytes nodeU0 nodeV0 nodeUSpan nodeVSpan
+                                      (fromIntegral srcCapW) (fromIntegral srcCapH)
+                                    runPasses dstSlot dstCapW dstCapH srcSlot srcCapW srcCapH (passIdx + 1)
+                                  else do
+                                    whBindTarget host parentSlot False (realToFrac parentOx) (realToFrac parentOy)
+                                    forM_ (spanEffectiveClip parentDmg (esClip sp)) $ \mClip -> do
+                                      let shifted =
+                                            if parentOx == 0 && parentOy == 0
+                                              then mClip
+                                              else fmap (\(Rect x y w h) -> Rect (x - parentOx) (y - parentOy) w h) mClip
+                                          toPix clipR =
+                                            let (x0, y0, x1, y1) = clipPixelEdges scale clipR
+                                                cx0 = max 0 x0
+                                                cy0 = max 0 y0
+                                             in (cx0, cy0, min parentW x1 - cx0, min parentH y1 - cy0)
+                                          mScissor = fmap toPix shifted
+                                          nonEmpty = case mScissor of
+                                            Just (_, _, sw, sh) -> sw > 0 && sh > 0
+                                            Nothing -> True
+                                      when nonEmpty $
+                                        compositeWebPass
+                                          host srcSlot shSlot False
+                                          destPx destPy (fromIntegral pw) (fromIntegral ph)
+                                          0 v0 u1 v1 mScissor
+                                          sc uBytes nodeU0 nodeV0 nodeUSpan nodeVSpan
+                                          (fromIntegral srcCapW) (fromIntegral srcCapH)
                       if nPasses > 1
                         then do
                           (slot1, cap1W, cap1H) <- acquireWebTarget host pw ph

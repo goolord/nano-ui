@@ -305,11 +305,15 @@ data PrevFrame = PrevFrame
   -- ('NanoUI.Internal.Layout.Arena.getNodePaintHash'): its text, value,
   -- style, colours, scope, image and options. A key whose hash changed is
   -- repainted.
+  , pfEffectRects :: !(IntMap Rect)
+  -- ^ Margin-expanded bounds of each active Tier 2 'NanoUI.withShader'
+  -- container by widget key, so unmounting or shrinking a shader margin
+  -- damages the full previous halo. Empty when no effects are active.
   }
 
 -- | A 'PrevFrame' with no recorded nodes, as before the first frame.
 emptyPrevFrame :: PrevFrame
-emptyPrevFrame = PrevFrame IM.empty IM.empty IM.empty IM.empty
+emptyPrevFrame = PrevFrame IM.empty IM.empty IM.empty IM.empty IM.empty
 
 -- | What the last completed 'NanoUI.Internal.Damage.updatePrevRects' walk
 -- recorded at each arena index: the key and the rect, clip and paint hash it
@@ -607,7 +611,7 @@ data SpanCacheEntry = SpanCacheEntry
   { sceText :: !Text
   , sceFg :: {-# UNPACK #-} !Color
   , sceBg :: {-# UNPACK #-} !Color
-  , sceStyle :: {-# UNPACK #-} !Int
+  , sceStyle :: {-# UNPACK #-} !Word64
   , sceFontSize :: {-# UNPACK #-} !Float
   , sceAlign :: {-# UNPACK #-} !Int
   , sceWidthTag :: {-# UNPACK #-} !Int
@@ -646,7 +650,7 @@ data WidgetTextPlacement = WidgetTextPlacement
 -- Position is excluded so scrolling can reuse the measurement.
 data WidgetTextCacheEntry = WidgetTextCacheEntry
   { wtcNodeType :: {-# UNPACK #-} !Int
-  , wtcStyle :: {-# UNPACK #-} !Int
+  , wtcStyle :: {-# UNPACK #-} !Word64
   , wtcFontSize :: {-# UNPACK #-} !Float
   , wtcText :: !Text
   , wtcWidth :: {-# UNPACK #-} !Float

@@ -18,6 +18,8 @@ import Data.ByteString (ByteString)
 import Data.ByteString.Builder qualified as BSB
 import Data.ByteString.Lazy qualified as BSL
 import Data.Int (Int32)
+import Data.IntMap.Strict (IntMap)
+import Data.IntMap.Strict qualified as IM
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Text.Encoding qualified as TE
@@ -90,7 +92,7 @@ opConvertFToS, opConvertSToF :: Word32
 opConvertFToS = 110
 opConvertSToF = 111
 
-opSNegate, opFNegate, opIAdd, opFAdd, opISub, opFSub, opIMul, opFMul, opSDiv, opFDiv, opFMod :: Word32
+opSNegate, opFNegate, opIAdd, opFAdd, opISub, opFSub, opIMul, opFMul, opUDiv, opSDiv, opFDiv, opFMod :: Word32
 opSNegate = 126
 opFNegate = 127
 opIAdd = 128
@@ -99,6 +101,7 @@ opISub = 130
 opFSub = 131
 opIMul = 132
 opFMul = 133
+opUDiv = 134
 opSDiv = 135
 opFDiv = 136
 opFMod = 141
@@ -192,8 +195,9 @@ glslFMax = 40
 glslUMax = 41
 glslSMax = 42
 
-glslFClamp, glslSClamp, glslFMix, glslStep, glslSmoothStep, glslLength, glslCross, glslNormalize :: Word32
+glslFClamp, glslUClamp, glslSClamp, glslFMix, glslStep, glslSmoothStep, glslLength, glslCross, glslNormalize :: Word32
 glslFClamp = 43
+glslUClamp = 44
 glslSClamp = 45
 glslFMix = 46
 glslStep = 48
@@ -576,33 +580,33 @@ emitMain ir env0 =
    in (outId, env1)
 
 emitBlock :: ScopeCtx -> Vector (IRType, ExprOp) -> SpvEnv -> (Vector (IRType, Word32), SpvEnv)
-emitBlock scope nodes env0 = go 0 [] Map.empty env0
+emitBlock scope nodes env0 = go 0 IM.empty Map.empty env0
   where
     !n = V.length nodes
     go !i !acc !loopRes !e
-      | i >= n = (V.fromList (reverse acc), e)
+      | i >= n = (V.generate n (acc IM.!), e)
       | otherwise =
           let (ty, op) = nodes V.! i
-              curVals = V.fromList (reverse acc)
               scope' = scope {scLoopResults = loopRes}
            in case op of
                 OpLoop lb ->
-                  let (resList, e1) = emitLoopSpv scope' curVals lb e
+                  let (resList, e1) = emitLoopSpv scope' i acc lb e
                       firstVal = case resList of
                         ((_, v) : _) -> v
                         [] -> 0
-                   in go (i + 1) ((ty, firstVal) : acc) (Map.insert i resList loopRes) e1
+                   in go (i + 1) (IM.insert i (ty, firstVal) acc) (Map.insert i resList loopRes) e1
                 _ ->
-                  let (vid, e1) = emitOpSpv scope' curVals ty op e
-                   in go (i + 1) ((ty, vid) : acc) loopRes e1
+                  let (vid, e1) = emitOpSpv scope' acc ty op e
+                   in go (i + 1) (IM.insert i (ty, vid) acc) loopRes e1
 
 emitLoopSpv ::
   ScopeCtx ->
-  Vector (IRType, Word32) ->
+  Int ->
+  IntMap (IRType, Word32) ->
   LoopBody ->
   SpvEnv ->
   ([(IRType, Word32)], SpvEnv)
-emitLoopSpv scope curVals lb e0 =
+emitLoopSpv scope outerCount curVals lb e0 =
   let lid = lbLoopId lb
       -- Allocate function-scope variables for the loop counter and accumulators.
       (iVar, e1) = emitFuncVar (sePtrFunc e0 Map.! TInt) e0
@@ -614,7 +618,7 @@ emitLoopSpv scope curVals lb e0 =
       e6 = emitBody (inst opStore [iVar, startConst]) e5
       e7 =
         foldl'
-          (\e (vPtr, initNid) -> emitBody (inst opStore [vPtr, snd (curVals V.! unNodeId initNid)]) e)
+          (\e (vPtr, initNid) -> emitBody (inst opStore [vPtr, snd (curVals IM.! unNodeId initNid)]) e)
           e6
           (zip accVars (lbInits lb))
       (headerLbl, e8) = allocId e7
@@ -635,9 +639,10 @@ emitLoopSpv scope curVals lb e0 =
       -- Body: load accumulators, emit body nodes, store updated accumulators.
       e17 = emitBody (inst opLabel [bodyLbl]) e16
       (loadedStates, e18) = loadAccVars (zip (lbStateTypes lb) accVars) e17
+      outerVec = V.generate outerCount (curVals IM.!)
       innerScope =
         ScopeCtx
-          { scFrames = scFrames scope ++ [curVals]
+          { scFrames = scFrames scope ++ [outerVec]
           , scLoopVars = Map.insert lid iVal (scLoopVars scope)
           , scLoopStates =
               foldl'
@@ -702,7 +707,7 @@ emitUboMember memberIdx gt e0 =
 -- ---------------------------------------------------------------------------
 -- Individual instruction lowering
 
-emitOpSpv :: ScopeCtx -> Vector (IRType, Word32) -> IRType -> ExprOp -> SpvEnv -> (Word32, SpvEnv)
+emitOpSpv :: ScopeCtx -> IntMap (IRType, Word32) -> IRType -> ExprOp -> SpvEnv -> (Word32, SpvEnv)
 emitOpSpv scope vals ty op e0 = case op of
   OpLitFloat bits -> constWord (CKFloat bits) e0
   OpLitInt n -> constWord (CKInt n) e0
@@ -730,18 +735,35 @@ emitOpSpv scope vals ty op e0 = case op of
   OpBinary bo a b -> emitBinary vals ty bo a b e0
   OpTernary to a b c -> emitTernary vals ty to a b c e0
   OpLength a ->
-    let (_, aId) = vals V.! unNodeId a
+    let (_, aId) = vals IM.! unNodeId a
      in emitGlslExt (seTFloat e0) glslLength [aId] e0
   OpNormalize a ->
-    let (_, aId) = vals V.! unNodeId a
+    let (_, aId) = vals IM.! unNodeId a
      in emitGlslExt (irTypeId e0 ty) glslNormalize [aId] e0
   OpSampleInput uvNid ->
     case (seTexVar e0, seTSampledImg e0) of
       (Just texVar, Just sampTy) ->
-        let (_, uvId) = vals V.! unNodeId uvNid
+        let (_, uvId) = vals IM.! unNodeId uvNid
             (sampId, e1) = emitLoad sampTy texVar e0
-            (resId, e2) = allocId e1
-         in (resId, emitBody (inst opImageSampleImplicitLod [seTVec4 e2, resId, sampId, uvId]) e2)
+            (rawId, e2) = allocId e1
+            e3 = emitBody (inst opImageSampleImplicitLod [seTVec4 e2, rawId, sampId, uvId]) e2
+            -- Offscreen targets hold premultiplied RGBA; un-premultiply to straight alpha.
+            (aId, e4) = allocId e3
+            e5 = emitBody (inst opCompositeExtract [seTFloat e4, aId, rawId, 3]) e4
+            (epsId, e6) = constFloat 1.0e-5 e5
+            (denomId, e7) = emitGlslExt (seTFloat e6) glslFMax [aId, epsId] e6
+            (denom3Id, e8) = allocId e7
+            e9 = emitBody (inst opCompositeConstruct [seTVec3 e8, denom3Id, denomId, denomId, denomId]) e8
+            (rgbId, e10) = allocId e9
+            e11 = emitBody (inst opVectorShuffle [seTVec3 e10, rgbId, rawId, rawId, 0, 1, 2]) e10
+            (divId, e12) = allocId e11
+            e13 = emitBody (inst opFDiv [seTVec3 e12, divId, rgbId, denom3Id]) e12
+            (oneId, e14) = constFloat 1.0 e13
+            (one3Id, e15) = allocId e14
+            e16 = emitBody (inst opCompositeConstruct [seTVec3 e15, one3Id, oneId, oneId, oneId]) e15
+            (clampedId, e17) = emitGlslExt (seTVec3 e16) glslFMin [divId, one3Id] e16
+            (resId, e18) = allocId e17
+         in (resId, emitBody (inst opCompositeConstruct [seTVec4 e18, resId, clampedId, aId]) e18)
       _ ->
         let (z, e1) = constFloat 0 e0
             (resId, e2) = allocId e1
@@ -753,9 +775,9 @@ emitGlslExt resTy extOp args e0 =
    in (resId, emitBody (inst opExtInst ([resTy, resId, seExtGlsl e1, extOp] ++ args)) e1)
 
 -- | Flatten vector arguments to scalar components and handle scalar splat.
-emitConstruct :: Vector (IRType, Word32) -> IRType -> [NodeId] -> SpvEnv -> (Word32, SpvEnv)
+emitConstruct :: IntMap (IRType, Word32) -> IRType -> [NodeId] -> SpvEnv -> (Word32, SpvEnv)
 emitConstruct vals outTy args e0 =
-  let resolved = [vals V.! unNodeId a | a <- args]
+  let resolved = [vals IM.! unNodeId a | a <- args]
       !outComps = irTypeComps outTy
    in case resolved of
         [(TFloat, sId)] | outComps > 1 ->
@@ -786,9 +808,9 @@ emitConstruct vals outTy args e0 =
                   (more, st3) = go (j + 1) st2
                in (cid : more, st3)
 
-emitSwizzle :: Vector (IRType, Word32) -> IRType -> NodeId -> [Int] -> SpvEnv -> (Word32, SpvEnv)
+emitSwizzle :: IntMap (IRType, Word32) -> IRType -> NodeId -> [Int] -> SpvEnv -> (Word32, SpvEnv)
 emitSwizzle vals outTy src cs e0 =
-  let (srcTy, srcId) = vals V.! unNodeId src
+  let (srcTy, srcId) = vals IM.! unNodeId src
    in case cs of
         [c]
           | irTypeComps srcTy == 1 -> (srcId, e0)
@@ -818,15 +840,15 @@ commonVecTy a b
   | irTypeComps a >= irTypeComps b = a
   | otherwise = b
 
-emitUnary :: Vector (IRType, Word32) -> IRType -> UnOp -> NodeId -> SpvEnv -> (Word32, SpvEnv)
+emitUnary :: IntMap (IRType, Word32) -> IRType -> UnOp -> NodeId -> SpvEnv -> (Word32, SpvEnv)
 emitUnary vals ty uo a e0 =
-  let (aTy, aId) = vals V.! unNodeId a
+  let (aTy, aId) = vals IM.! unNodeId a
       tyId = irTypeId e0 ty
       emit1 opcode =
         let (resId, e1) = allocId e0
          in (resId, emitBody (inst opcode [tyId, resId, aId]) e1)
    in case uo of
-        UNeg -> emit1 (if aTy == TInt then opSNegate else opFNegate)
+        UNeg -> emit1 (if aTy == TInt || aTy == TUInt then opSNegate else opFNegate)
         UAbs -> emitGlslExt tyId (if aTy == TInt then glslSAbs else glslFAbs) [aId] e0
         UFloor -> emitGlslExt tyId glslFloor [aId] e0
         UCeil -> emitGlslExt tyId glslCeil [aId] e0
@@ -843,10 +865,10 @@ emitUnary vals ty uo a e0 =
         UFloatToInt -> emit1 opConvertFToS
         UIntToFloat -> emit1 opConvertSToF
 
-emitBinary :: Vector (IRType, Word32) -> IRType -> BinOp -> NodeId -> NodeId -> SpvEnv -> (Word32, SpvEnv)
+emitBinary :: IntMap (IRType, Word32) -> IRType -> BinOp -> NodeId -> NodeId -> SpvEnv -> (Word32, SpvEnv)
 emitBinary vals ty bo a b e0 =
-  let av@(aTy, aRaw) = vals V.! unNodeId a
-      bv@(bTy, bRaw) = vals V.! unNodeId b
+  let av@(aTy, aRaw) = vals IM.! unNodeId a
+      bv@(bTy, bRaw) = vals IM.! unNodeId b
       opTy = commonVecTy aTy bTy
       (aId, e1) = splatTo opTy av e0
       (bId, e2) = splatTo opTy bv e1
@@ -861,7 +883,7 @@ emitBinary vals ty bo a b e0 =
         BAdd -> emit2 (if isInt || isUInt then opIAdd else opFAdd)
         BSub -> emit2 (if isInt || isUInt then opISub else opFSub)
         BMul -> emit2 (if isInt || isUInt then opIMul else opFMul)
-        BDiv -> emit2 (if isInt then opSDiv else opFDiv)
+        BDiv -> emit2 (if isInt then opSDiv else if isUInt then opUDiv else opFDiv)
         BMod -> emit2 opFMod
         BMin -> emitGlslExt tyId (if isInt then glslSMin else if isUInt then glslUMin else glslFMin) [aId, bId] e2
         BMax -> emitGlslExt tyId (if isInt then glslSMax else if isUInt then glslUMax else glslFMax) [aId, bId] e2
@@ -881,11 +903,11 @@ emitBinary vals ty bo a b e0 =
            in (resId, emitBody (inst opDot [seTFloat e3, resId, aRaw, bRaw]) e3)
         BCross -> emitGlslExt tyId glslCross [aRaw, bRaw] e0
 
-emitTernary :: Vector (IRType, Word32) -> IRType -> TriOp -> NodeId -> NodeId -> NodeId -> SpvEnv -> (Word32, SpvEnv)
+emitTernary :: IntMap (IRType, Word32) -> IRType -> TriOp -> NodeId -> NodeId -> NodeId -> SpvEnv -> (Word32, SpvEnv)
 emitTernary vals ty to a b c e0 =
-  let av = vals V.! unNodeId a
-      bv = vals V.! unNodeId b
-      cv = vals V.! unNodeId c
+  let av = vals IM.! unNodeId a
+      bv = vals IM.! unNodeId b
+      cv = vals IM.! unNodeId c
       tyId = irTypeId e0 ty
    in case to of
         TMix ->
@@ -897,7 +919,7 @@ emitTernary vals ty to a b c e0 =
           let (aId, e1) = splatTo ty av e0
               (bId, e2) = splatTo ty bv e1
               (cId, e3) = splatTo ty cv e2
-              extOp = if ty == TInt then glslSClamp else glslFClamp
+              extOp = if ty == TInt then glslSClamp else if ty == TUInt then glslUClamp else glslFClamp
            in emitGlslExt tyId extOp [aId, bId, cId] e3
         TSmoothstep ->
           let (aId, e1) = splatTo ty av e0

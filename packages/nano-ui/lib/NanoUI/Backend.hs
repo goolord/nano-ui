@@ -206,6 +206,11 @@ module NanoUI.Backend
   , ShapedGlyphs (..)
   , clearMeasureCache
   , wrapMeasureCache
+  , textNodeFontVariant
+  , textNodeFontTone
+  , textNodeFontWeight
+  , textNodeFontStyle
+  , textNodeTextDecoration
 
     -- * Damage
 
@@ -440,6 +445,7 @@ import NanoUI.Internal.NativeWindow
 import NanoUI.Internal.Style (Appearance (..), windowMargin, windowPad)
 import NanoUI.Internal.Tasks (cancelTasks)
 import NanoUI.Internal.Types
+import NanoUI.Internal.WidgetText (textNodeFontStyle, textNodeFontTone, textNodeFontVariant, textNodeFontWeight, textNodeTextDecoration)
 
 -- | Run an action on a bound thread, one OS thread for the whole run, or
 -- as it is under the non-threaded runtime, which runs Haskell on one OS

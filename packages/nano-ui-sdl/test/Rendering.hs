@@ -436,7 +436,17 @@ shaderChecks env ctx draw = do
         unless (farPx == (0, 0, 0)) $
           fail ("Tier 2 gaussianBlur leaked past margin at (5,50): " ++ show farPx)
 
-        -- 4. Nested subtree effects: groupOpacity 0.5 around grayscale 1.0
+        -- 4. Translucent child under Tier 2 effects verifies premultiplied-alpha
+        -- offscreen targets do not double-darken on composite.
+        let halfCol = colorRGBA 200 100 50 128
+        (_, ddAlpha) <- warmupDraw ctx (withInput 800 600) $
+          columnWith tight (withShader groupOpacity 1.0 (box (fixedWH 80 60) halfCol))
+        draw ddAlpha
+        alphaPx <- pixel env 40 30
+        unless (near3 alphaPx halfCol) $
+          fail ("Tier 2 translucent groupOpacity 1.0 double-darkened: gpu=" ++ show alphaPx ++ " expected=" ++ show halfCol)
+
+        -- 5. Nested subtree effects: groupOpacity 0.5 around grayscale 1.0
         (_, ddNest) <- warmupDraw ctx (withInput 800 600) $
           columnWith tight $
             withShader groupOpacity 0.5 $

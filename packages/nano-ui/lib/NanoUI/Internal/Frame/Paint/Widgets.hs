@@ -16,6 +16,7 @@ import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe)
 import Data.Primitive.PrimArray (PrimArray)
 import qualified Data.Text as T
+import Data.Word (Word64)
 import NanoUI.Internal.Context (Context (..), activeEffectNodes, getAnimationValue, getStore)
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Font
@@ -166,7 +167,7 @@ paintWidget env@PaintEnv {peContext = ctx} idx nt rect@(Rect _ ry _ rh) = do
 -- passed in: a flags record crossing this NOINLINE seam would be allocated
 -- for every widget on every painted frame.
 {-# NOINLINE paintWidgetBackground #-}
-paintWidgetBackground :: PaintEnv -> NodeIdx -> NodeType -> Style -> Int -> Rect -> Float -> Rect -> IO ()
+paintWidgetBackground :: PaintEnv -> NodeIdx -> NodeType -> Style -> Word64 -> Rect -> Float -> Rect -> IO ()
 paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
   let ctx = peContext env
       da = peDrawArena env
@@ -211,10 +212,9 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
                 if not (hasFlag containerFlagButtonGroup psi)
                   then pure False
                   else do
-                    fc <- getFirstChild na p
-                    ns <- getNextSibling na idx
+                    (firstC, lastC) <- flowChildEnds na p
                     dir <- getDirection na p
-                    paintGroupedButton da style dir (ns < 0) (fc == idx) (Rect x y w h)
+                    paintGroupedButton da style dir (idx == firstC) (idx == lastC) (Rect x y w h)
                     pure True
   unless grouped $ do
     when opaqueBg $ fillStyledRect da style menuRowRect
@@ -320,7 +320,7 @@ paintSliderBody PaintEnv {peDrawArena = da, peTheme = theme} x y w h value = do
   pushRoundedStroke da (Rect (handleCx - handleD / 2) handleHy handleD handleD) (handleD / 2) bw outline
 
 {-# NOINLINE paintWidgetForeground #-}
-paintWidgetForeground :: PaintEnv -> NodeIdx -> NodeType -> Style -> Int -> Rect -> IO ()
+paintWidgetForeground :: PaintEnv -> NodeIdx -> NodeType -> Style -> Word64 -> Rect -> IO ()
 paintWidgetForeground env idx nt style si (Rect x y w h) = do
   let ctx = peContext env
       da = peDrawArena env
@@ -349,7 +349,7 @@ paintWidgetForeground env idx nt style si (Rect x y w h) = do
 -- ('pushFieldText'). Out of line: inlined, it costs every plain label
 -- (measured: 260 bytes per label per frame).
 {-# NOINLINE pushStyledLabel #-}
-pushStyledLabel :: DrawArena -> FontMetrics -> Bool -> Int -> Float -> Float -> T.Text -> Color -> IO ()
+pushStyledLabel :: DrawArena -> FontMetrics -> Bool -> Word64 -> Float -> Float -> T.Text -> Color -> IO ()
 pushStyledLabel = pushFieldText
 
 -- | Sort direction triangle for a table header: up when ascending, down when
@@ -368,7 +368,7 @@ paintClippedFieldText ::
   DrawArena ->
   FontMetrics ->
   Bool ->
-  Int ->
+  Word64 ->
   Style ->
   NodeIdx ->
   Maybe FieldEdit ->

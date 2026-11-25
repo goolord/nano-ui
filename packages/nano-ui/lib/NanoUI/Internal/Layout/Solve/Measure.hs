@@ -130,7 +130,7 @@ data TextMeasurer = TextMeasurer
 -- text: in the font its style packs ('nodeFontBits'), else in its font size
 -- in the default face, as
 -- 'NanoUI.Internal.Frame.Node.resolveFontFor' draws them.
-nodeMeasurer :: SolveEnv -> NodeIdx -> NodeType -> Int -> IO TextMeasurer
+nodeMeasurer :: SolveEnv -> NodeIdx -> NodeType -> Word64 -> IO TextMeasurer
 nodeMeasurer SolveEnv {seArena = na, seMs = ms} idx nt nodeSi = do
   let si = nodeFontBits nt nodeSi
   rawSize <- getNodeFontSize na idx
@@ -568,7 +568,7 @@ measureWidget :: SolveEnv -> NodeIdx -> IO ()
 measureWidget env@SolveEnv {seArena = na, seArrays = a, seMs = Measurers {msFm = baseFm}} idx = do
   nt <- readTagEnum a idx TagNodeType
   txt <- getText na idx
-  si <- readTree a idx TreeStyleIdx
+  si <- readStyleIdx a idx
   wAx <- readAxisSizing a idx True
   hAx <- readAxisSizing a idx False
   measurer@TextMeasurer {tmMetrics = fm} <- nodeMeasurer env idx nt si
@@ -640,7 +640,7 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seMs = Measurers {msFm =
 -- its size without them, @rawW@ by @rawH@. A field widens by each row and a
 -- gap. A button fits one group ('adornedButtonGroup'), padded as a label
 -- except an icon alone, which the vertical padding squares.
-measureAdorned :: SolveEnv -> TextMeasurer -> NodeIdx -> NodeType -> Int -> Text -> Float -> Float -> IO (Float, Float)
+measureAdorned :: SolveEnv -> TextMeasurer -> NodeIdx -> NodeType -> Word64 -> Text -> Float -> Float -> IO (Float, Float)
 measureAdorned SolveEnv {seArena = na, seArrays = a} measurer@TextMeasurer {tmMetrics = fm} idx nt si txt rawW rawH = do
   gap <- readStyle a idx StyleGap
   rows@(AdornRows li lw ti tw rowH) <- adornRows na idx

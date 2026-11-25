@@ -39,14 +39,15 @@ import Data.Text.Encoding (decodeUtf8)
 import Data.Word (Word8)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Storable (peekByteOff)
+import System.Directory (doesFileExist)
 import NanoUI
 import NanoUI.Backend (DrawData (..), FontMetrics (..), collectRasterSpans, damageFullNow, monospaceMetrics, vertexSize)
 import NanoUI.Draw.FrameSvg (FrameSvgConfig (..), defaultFrameSvgConfig, enableSvgExport, frameToSvg)
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Testing (newPixelContext, runFrame, withFontMetrics, withMonoFontMetrics)
 import NanoUI.Testing.Harness (clickPair, pressAt, withInputOff)
+import NanoUI.Ttf.Internal.Inter (fontInterBytes)
 import Paths_nano_ui_svg (getDataFileName)
-import System.Directory (doesFileExist)
 import System.IO.Unsafe (unsafePerformIO)
 
 -- ---------------------------------------------------------------------------
@@ -131,23 +132,11 @@ encodeBase64 bs = T.pack (go 0)
            in [b64Char (n `shiftR` 18), b64Char (n `shiftR` 12), '=', '=']
 
 loadInterFontCss :: IO Text
-loadInterFontCss = do
-  let candidates =
-        [ "packages/nano-ui-sdl/data/inter.ttf"
-        , "../nano-ui-sdl/data/inter.ttf"
-        , "data/inter.ttf"
-        ]
-      findFirst [] = pure Nothing
-      findFirst (p : ps) = do
-        ok <- doesFileExist p
-        if ok then Just <$> BS.readFile p else findFirst ps
-  mBytes <- findFirst candidates
-  pure $ case mBytes of
-    Nothing -> ""
-    Just bytes ->
-      "@font-face { font-family: 'Inter'; font-style: normal; font-weight: 100 900; font-display: block; src: url('data:font/ttf;base64,"
-        <> encodeBase64 bytes
-        <> "') format('truetype'); }"
+loadInterFontCss =
+  pure $
+    "@font-face { font-family: 'Inter'; font-style: normal; font-weight: 100 900; font-display: block; src: url('data:font/ttf;base64,"
+      <> encodeBase64 fontInterBytes
+      <> "') format('truetype'); }"
 
 -- | Static assets that live beside the source instead of inside it: the
 -- stylesheet and script are edited as plain CSS and JavaScript and spliced

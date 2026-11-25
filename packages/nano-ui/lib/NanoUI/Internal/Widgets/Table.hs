@@ -50,6 +50,7 @@ import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe)
 import Data.Ord (Down (..))
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Word (Word64)
 import Data.Primitive.PrimArray (PrimArray, copyMutablePrimArray, copyPrimArray, generatePrimArray, indexPrimArray, newPrimArray, primArrayFromList, readPrimArray, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
 import Data.Primitive.SmallArray (SmallArray, SmallMutableArray, emptySmallArray, indexSmallArray, mapSmallArray', newSmallArray, sizeofSmallArray, smallArrayFromList, smallArrayFromListN, unsafeFreezeSmallArray, writeSmallArray)
 import Data.Primitive.Types (Prim)
@@ -134,7 +135,7 @@ clampSortCol n (SortCol idx dir) = SortCol (clamp 0 (max 0 (n - 1)) idx) dir
 
 -- The sort mark of column @idx@ in its header's style ('SB.headerSortMark',
 -- read back by 'NanoUI.Internal.WidgetText.tableSortMarkOf').
-sortMarkStyle :: SortCol -> Int -> Int
+sortMarkStyle :: SortCol -> Int -> Word64
 sortMarkStyle sort idx
   | sortColIndex sort /= idx = 0
   | sortColDir sort == SortDesc = SB.placeField SB.headerSortMark 2
@@ -840,7 +841,7 @@ tablePanes
         Just hdrAct -> buttonContentStyled styleIx flags cellLay hdrAct
     textCellAt ri i t = do
       wid <- nextId
-      void (addWidgetStyled wid NodeText t 0 (cellLayout i) (rowStripe ri))
+      void (addWidgetStyled wid NodeText t 0 (cellLayout i) (fromIntegral (rowStripe ri)))
     -- Text cells show their cached text; only a column with widget views
     -- encodes its visible cells again, for the views.
     renderCell ri r i

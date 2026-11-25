@@ -6,6 +6,7 @@ module Main (main) where
 
 import Control.Exception (IOException, evaluate, finally, try)
 import Control.Monad (forM_, void)
+import Data.ByteString qualified as BS
 import Data.IORef (IORef, writeIORef)
 import Data.List (isInfixOf)
 import Data.Primitive.PrimArray (indexPrimArray, primArrayToList, sizeofPrimArray)
@@ -21,7 +22,8 @@ import NanoUI.Internal.Context (ctxResolveFont, ctxResolveMeasure)
 import NanoUI.Sdl.Internal.Window (sdlFontRequestRef)
 import NanoUI.Testing (textIndexAtX)
 import NanoUI.Testing.Runner (check, runChecks)
-import System.Directory (copyFile, createDirectory, getTemporaryDirectory, removeFile, removePathForcibly)
+import NanoUI.Ttf.Internal.Inter (fontInterBytes)
+import System.Directory (createDirectory, getTemporaryDirectory, removeFile, removePathForcibly)
 import System.Environment (setEnv)
 import System.FilePath ((</>))
 import System.IO (hClose, openTempFile)
@@ -69,8 +71,8 @@ sessionFontChecks ctx0 failed = do
     pure path
   let regularFile = fixtures </> "NanoFixture-Regular.ttf"
       text = "AV To fi café λ"
-  copyFile "data/inter.ttf" regularFile
-  copyFile "data/inter.ttf" (fixtures </> "NanoFixture-Bold.ttf")
+  BS.writeFile regularFile fontInterBytes
+  BS.writeFile (fixtures </> "NanoFixture-Bold.ttf") fontInterBytes
   (font, snapshot, width, quad) <- (`finally` removePathForcibly fixtures) . withSdlBench ctx0 $ \ctx env -> do
     let resolve c w s = ctxResolveFont c 16 w s FontRegular
         measure c w s = fst <$> ctxResolveMeasure c 16 w s FontRegular text

@@ -20,13 +20,13 @@ module NanoUI.Internal.Widgets.Button
   )
 where
 
-import Control.Monad (when)
+import Control.Monad (void, when)
 import Data.Bits ((.|.))
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Word (Word64)
 import NanoUI.Internal.Context (Context (..))
-import NanoUI.Internal.Layout.Arena (NodeType (..), addNodeFromLayout, getFirstChild, getNextSibling, mixNodePaintHash, setStyleIdx)
+import NanoUI.Internal.Layout.Arena (NodeType (..), addNodeFromLayout, flowChildEnds, foldFlowChildrenM, mixNodePaintHash, setStyleIdx)
 import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, uiTheme, withContext)
 import NanoUI.Internal.Style (Direction (..), Layout (..), Style (..), Theme (..), defaultLayout, gap, tight)
 import NanoUI.Internal.Types (Color)
@@ -137,7 +137,7 @@ buttonContentWith' f = buttonContentStyled 0 0 (f defaultLayout)
 
 -- | A content button with style index @styleIx@ and the extra button
 -- @flags@, as a table's header passes them.
-buttonContentStyled :: Float -> Int -> Layout -> NanoUI () -> NanoUI Response
+buttonContentStyled :: Float -> Word64 -> Layout -> NanoUI () -> NanoUI Response
 buttonContentStyled styleIx flags lay content = do
   resp <- buttonStyledEx True "" styleIx lay (flags .|. buttonFlagContent)
   theme <- uiTheme
@@ -169,16 +169,16 @@ buttonGroupWith f child = do
     idx <- addNodeFromLayout (ctxNodeArena ctx) NodeContainer parent lay
     idx <$ setStyleIdx (ctxNodeArena ctx) idx containerFlagButtonGroup
   res <- withContainerNode True idx child
-  -- Mix each direct child's 2-bit (isFirst, isLast) cap mask into its paint
-  -- hash so adding or removing a sibling repaints the neighbour's corner
-  -- rounding and internal seam on partial-damage frames.
+  -- Mix each direct flow child's 2-bit (isFirst, isLast) cap mask into its
+  -- paint hash so adding or removing a sibling repaints the neighbor's corner
+  -- rounding and internal seam on partial-damage frames, while ignoring open
+  -- dropdowns or tooltips attached to the container.
   withContext $ \ctx -> do
     let na = ctxNodeArena ctx
-    fc <- getFirstChild na idx
-    let go ci = when (ci >= 0) $ do
-          ns <- getNextSibling na ci
-          let !mask = (if ns < 0 then 1 else 0) .|. (if ci == fc then 2 else 0 :: Word64)
-          mixNodePaintHash na ci (0x424700 .|. mask)
-          go ns
-    go fc
+    (firstC, lastC) <- flowChildEnds na idx
+    when (firstC >= 0) $
+      void $
+        foldFlowChildrenM na idx (\() ci -> do
+          let !mask = (if ci == firstC then 1 else 0) .|. (if ci == lastC then 2 else 0 :: Word64)
+          mixNodePaintHash na ci (0x424700 .|. mask)) ()
   pure res

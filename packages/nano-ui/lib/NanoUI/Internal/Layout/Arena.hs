@@ -109,6 +109,7 @@ module NanoUI.Internal.Layout.Arena
   , lookupNodeByWidgetId
   , lookupNodeByKey
   , getIdSuperseded
+  , readStyleIdx
   , getStyleIdx
   , setStyleIdx
   , getNodeValue
@@ -132,6 +133,7 @@ module NanoUI.Internal.Layout.Arena
   , forChildNodes_
   , foldFlowChildrenM
   , flowChildrenInOrder
+  , flowChildEnds
   , foldPlacedChildrenM
   , forChildrenInPaintOrder_
   , childrenTopFirst
@@ -335,6 +337,7 @@ growNodeArenaArrays cap newCap a = do
   naArrOptionsStore <- growBoxedStoreCopy [] (naArrOptionsStore a) cap newCap
   naArrOptionsLast <- growBoxedStoreCopy [] (naArrOptionsLast a) cap newCap
   naArrFontColor <- growPrimArrayCopy (naArrFontColor a) cap newCap 0
+  naArrStyleIdx <- growPrimArrayCopy (naArrStyleIdx a) cap newCap 0
   naArrScope <- growPrimArrayCopy (naArrScope a) cap newCap 0
   naArrImageId <- growPrimArrayCopy (naArrImageId a) cap newCap 0
   pure NodeArenaArrays {..}
@@ -421,6 +424,7 @@ addNode na nt parent Layout {..} = do
   writeTagEnum a idx TagLineAlign layoutLineAlign
 
   setPrimArray (naArrTree a) (idx * treeStride) treeStride 0
+  writePrimArray (naArrStyleIdx a) idx 0
   writeTree a idx TreeParent parent
   writeTree a idx TreeFirstChild (-1)
   writeTree a idx TreeNextSibling (-1)
@@ -558,7 +562,7 @@ setImageNode na idx node@ImageNode {inWidth = w, inHeight = h} = do
   writeArray arr k node
   writePrimArray (naImageCount na) 0 (k + 1)
   a <- arenaArrays na
-  writeTree a idx TreeStyleIdx (k + 1)
+  writePrimArray (naArrStyleIdx a) idx (fromIntegral (k + 1))
   mixNodeInput na idx 0x494d (fromIntegral (castFloatToWord32 w) `shiftL` 32 .|. fromIntegral (castFloatToWord32 h))
   mixPaintSig na idx 0x4c4b (lookWord (inLook node))
 
@@ -780,14 +784,14 @@ positionArrays na = (,,) <$> readIORef (naOffered na) <*> readIORef (naUnsnapped
 -- is paint data (a colour, a version), which goes in the paint signature
 -- ('getPaintSignature') instead.
 {-# INLINE setStyleIdx #-}
-setStyleIdx :: NodeArena -> NodeIdx -> Int -> IO ()
+setStyleIdx :: NodeArena -> NodeIdx -> Word64 -> IO ()
 setStyleIdx na idx v = do
   a <- arenaArrays na
-  writeTree a idx TreeStyleIdx v
+  writePrimArray (naArrStyleIdx a) idx v
   nt <- readTagEnum a idx TagNodeType
   if nt == NodeBox || nt == NodeImage || nt == NodeDrawing || nt == NodeShader
-    then mixPaintSig na idx 0x5354 (fromIntegral v)
-    else mixNodeInput na idx 0x5354 (fromIntegral v)
+    then mixPaintSig na idx 0x5354 v
+    else mixNodeInput na idx 0x5354 v
 
 -- | The snapshot buffers for nesting depth @depth@, with room for at least
 -- @needed@ entries. Each depth keeps its buffers across frames, so nothing is

@@ -20,7 +20,7 @@ where
 import Control.Monad (forM_, guard, void, when)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
-import Data.Word (Word8)
+import Data.Word (Word8, Word64)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Font
@@ -54,7 +54,7 @@ data ColorPickerPart = PickerSv | PickerHue | PickerAlpha | PickerPreview
   deriving (Eq, Show, Enum, Bounded)
 
 {-# INLINE colorPickerPartOf #-}
-colorPickerPartOf :: Int -> ColorPickerPart
+colorPickerPartOf :: Word64 -> ColorPickerPart
 colorPickerPartOf si = toEnum (SB.getField SB.pickerPart si)
 
 -- | The id of the container holding a picker's parts, derived from the
@@ -314,7 +314,7 @@ colorPickerWith showAlpha value = do
     writeColor col = writePicker col (rgbToHsv col)
     -- Without the alpha bar the colour stays opaque.
     alphaOf c = if showAlpha then colorA c else 255
-    part pid p lay = (,) pid <$> addWidgetStyled pid NodeColorPicker "" 0 lay (fromEnum p)
+    part pid p lay = (,) pid <$> addWidgetStyled pid NodeColorPicker "" 0 lay (fromIntegral (fromEnum p))
     column w = fixedW w colorPickerSvLayout
   liftIO $ do
     adoptColorPickerValue ctx wid value

@@ -4,12 +4,9 @@ version:            0.2.0.0
 synopsis:           SDL3 window backend for nano-ui
 description:
     Runs nano-ui views in an SDL3 window with TrueType text and native file
-    dialogs. Requires SDL3, SDL3_ttf, and pkg-config. The bundled Inter font,
-    which applications embed, is under the SIL Open Font License 1.1.
-license:            MIT AND OFL-1.1
-license-files:
-    LICENSE
-    LICENSE-Inter
+    dialogs. Requires SDL3, SDL3_ttf, and pkg-config.
+license:            MIT
+license-file:       LICENSE
 author:             goolord
 maintainer:         zacharyachurchill@gmail.com
 homepage:           https://github.com/goolord/nano-ui
@@ -22,7 +19,6 @@ extra-doc-files:
     README.md
 
 extra-source-files:
-    data/inter.ttf
     cbits/*.h
 
 source-repository head
@@ -70,17 +66,20 @@ library
     import:           warnings
     exposed-modules:
         NanoUI.Backend.Sdl
+        NanoUI.Sdl.Internal.Cursor
+        NanoUI.Sdl.Internal.DialogState
+        NanoUI.Sdl.Internal.Error
+        NanoUI.Sdl.Internal.Image
         NanoUI.Sdl.Internal.Input
         NanoUI.Sdl.Internal.NanoUIFont
+        NanoUI.Sdl.Internal.Render
         NanoUI.Sdl.Internal.Window
     other-modules:
         NanoUI.Sdl.Internal.Session
         NanoUI.Sdl.Internal.Children
         NanoUI.Sdl.Internal.Runner
-        NanoUI.Sdl.Internal.Cursor
         NanoUI.Sdl.Internal.Debug
         NanoUI.Sdl.Internal.Dialog
-        NanoUI.Sdl.Internal.DialogState
         NanoUI.Sdl.Internal.Chrome
         NanoUI.Sdl.Internal.Chrome.Types
         NanoUI.Sdl.Internal.Frame
@@ -89,12 +88,9 @@ library
         NanoUI.Sdl.Internal.Pacing
         NanoUI.Sdl.Internal.Screenshot
         NanoUI.Sdl.Internal.Target
-        NanoUI.Sdl.Internal.Error
         NanoUI.Sdl.Internal.Font
         NanoUI.Sdl.Internal.Font.Search
-        NanoUI.Sdl.Internal.Image
         NanoUI.Sdl.Internal.Url
-        NanoUI.Sdl.Internal.Render
         NanoUI.Sdl.Internal.WindowOptions
     build-depends:
         base >=4.20 && <4.23,
@@ -130,8 +126,8 @@ test-suite nano-ui-render-test
     import:           extensions, warnings, rts-options
     type:             exitcode-stdio-1.0
     main-is:          Rendering.hs
-    hs-source-dirs:   test, lib
-    other-modules:    NanoUI.Sdl.Internal.Render, NanoUI.Sdl.Internal.Error, NanoUI.Sdl.Internal.Image, NanoUI.Sdl.Internal.Cursor, NanoUI.Sdl.Internal.DialogState, Input, WindowChecks
+    hs-source-dirs:   test
+    other-modules:    Input, WindowChecks
     if os(windows)
         ghc-options: -optl-mconsole
     build-depends:
@@ -143,7 +139,6 @@ test-suite nano-ui-render-test
         nano-ui-shader,
         primitive ^>=0.9,
         sdl3-bindgen-sys ^>=0.0.0.2,
-        text ^>=2.1,
         vector ^>=0.13
     if !flag(sdl)
         buildable: False
@@ -169,10 +164,12 @@ test-suite nano-ui-font-effects-test
         ghc-options: -optl-mconsole
     build-depends:
         base >=4.20 && <4.23,
+        bytestring ^>=0.12,
         directory ^>=1.3,
         filepath ^>=1.5,
         nano-ui,
         nano-ui-sdl,
+        nano-ui-ttf,
         primitive ^>=0.9,
         text ^>=2.1
     if !flag(sdl)

@@ -17,7 +17,7 @@ module NanoUI.Internal.Damage
 
 import Control.Applicative ((<|>))
 import Control.Exception (evaluate)
-import Control.Monad (filterM, forM_, unless, when)
+import Control.Monad (filterM, foldM, forM_, unless, when)
 import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.Trans.Reader (ReaderT (..))
 import Data.Bits (xor)
@@ -177,7 +177,7 @@ scanBackdropPrevRects na window oldRects oldOuters oldHashes = do
 -- an empty map for an empty arena. 'pruneUnmountedCaches' takes it.
 updatePrevRects :: Context -> Size -> IO (IM.IntMap Rect)
 updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
-  PrevFrame oldRects oldClips oldOuters oldHashes <- getsDamage ctx dsPrev
+  PrevFrame oldRects oldClips oldOuters oldHashes oldEffects <- getsDamage ctx dsPrev
   count <- arenaCount na
   let setPrev p = modifyDamage ctx (\ds -> ds {dsPrev = p})
   if count <= 0
@@ -185,34 +185,24 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
     else do
       (m0, om, hm0, foundContainers, foundOuter, droppedContainer) <-
         scanBackdropPrevRects na (Rect 0 0 winW winH) oldRects oldOuters oldHashes
-      -- Second pass, every node with a widget id. Seeded with last frame's
-      -- maps and touching only changed entries, so frames with stable rects
-      -- (hover, text churn, animations) allocate nothing. The walk cannot
-      -- delete keys that left the arena, so when the key set changed it
-      -- clears the maps and walks again from empty ones, where no key counts
-      -- as old. Of nodes sharing a key (a table's frozen and scrolling panes)
-      -- only the last, the one 'lookupNodeByKey' finds, is walked
-      -- ('getIdSuperseded'). Counting each would mask a key that went away,
-      -- and writing each would rewrite the maps every frame.
-      --
-      -- A node with the key and kinds of entries the last walk saw at its
-      -- index ('PrevWalk') already has its entries in the maps: it is
-      -- compared with that record instead of looked up, and writes only the
-      -- entries that changed. The record's keys and rects also answer
-      -- 'NanoUI.Internal.Context.Core.getPrevRectAt'.
       (walk, known) <- prevWalkFor ctx count oldRects
-      -- A scroll node's content size, which sizes its bars, reaches damage
-      -- through the range it publishes ('scrollOffsetDamage').
       hashes <- readIORef (naPaintHash na)
       let go !i !m !cm !hm !foundOld !dropped
             | i >= count =
                 if dropped || foundOld /= IM.size oldRects || foundOuter /= IM.size oldOuters
                   then setPrev emptyPrevFrame >> updatePrevRects ctx size
                   else do
+                    effRects <- collectEffectRects ctx oldEffects
                     writeIORef (pwFor walk) m
                     writePrimVar (pwValid walk) count
-                    unless (ptrEq m oldRects && ptrEq cm oldClips && ptrEq om oldOuters && ptrEq hm oldHashes) $
-                      setPrev (PrevFrame m cm om hm)
+                    unless
+                      ( ptrEq m oldRects
+                          && ptrEq cm oldClips
+                          && ptrEq om oldOuters
+                          && ptrEq hm oldHashes
+                          && ptrEq effRects oldEffects
+                      )
+                      (setPrev (PrevFrame m cm om hm effRects))
                     pure m
             | otherwise = do
                 wid <- getWidgetId na i
@@ -567,8 +557,8 @@ writeDamage ctx inp snap mayReuse layoutFloats = do
 -- | Whether 'updatePrevRects' left every map of @old@ as it was. Compared by
 -- map, not by record: GHC may rebuild a record passed unboxed.
 samePrev :: PrevFrame -> PrevFrame -> Bool
-samePrev (PrevFrame !r0 !c0 !o0 !h0) (PrevFrame !r1 !c1 !o1 !h1) =
-  ptrEq r0 r1 && ptrEq c0 c1 && ptrEq o0 o1 && ptrEq h0 h1
+samePrev (PrevFrame !r0 !c0 !o0 !h0 !e0) (PrevFrame !r1 !c1 !o1 !h1 !e1) =
+  ptrEq r0 r1 && ptrEq c0 c1 && ptrEq o0 o1 && ptrEq h0 h1 && ptrEq e0 e1
 
 -- | Settle every drawing's ops for this frame and return the keys of those
 -- that now draw something else at an unchanged rect. A drawing follows state
@@ -753,9 +743,18 @@ clipDamage ctx snap d owners = do
     let addFloating a b = IM.foldrWithKey (\k r rest -> unless (IM.lookup k b == Just r) (addDamageRect (menuPanelBounds r)) >> rest) (pure ()) a
     addFloating (fsFloatingRects snap) (fdFloatingRects d)
     addFloating (fdFloatingRects d) (fsFloatingRects snap)
+    -- Tier 2 shader effects paint halos out to their margin-expanded bounds;
+    -- unmount, mount, or margin resize must damage both old and new expanded rects.
+    let oldEffects = pfEffectRects old
+        newEffects = pfEffectRects new
+    unless (ptrEq oldEffects newEffects) $ do
+      let addDiffEffects a b =
+            IM.foldrWithKey (\k r rest -> unless (IM.lookup k b == Just r) (addDamageRect r) >> rest) (pure ()) a
+      addDiffEffects oldEffects newEffects
+      addDiffEffects newEffects oldEffects
   -- Only what lands in the window counts: an empty rect, or one off the
   -- window, would stretch the bounds over pixels nothing changed.
-  added' <- if null added then pure added else expandEffectDamage ctx old added
+  let added' = if null added then added else expandEffectDamage old new added
   let visible = filter rectNonEmpty (map (clipRectToWindow winW winH) added')
       clip = rectBounds visible
       winArea = winW * winH
@@ -772,36 +771,54 @@ clipDamage ctx snap d owners = do
     then (DamageFull, []) <$ traceDamage "DAMAGE full area"
     else (DamageClip clip, pieces) <$ traceDamage "DAMAGE clip"
 
--- | When the current frame uses Tier 2 shader effects ('NanoUI.withShader'),
--- expand any damage rect touching an effect container to cover its full
--- margin-expanded bounds (at both its new and previous positions) so blurs,
--- shadows, and distortions repaint without clipped halos or stale trails.
--- Frames without effects return immediately without allocation.
-{-# NOINLINE expandEffectDamage #-}
-expandEffectDamage :: Context -> PrevFrame -> [Rect] -> IO [Rect]
-expandEffectDamage ctx old rects = do
+-- | Collect margin-expanded bounds of every active Tier 2 'NanoUI.withShader'
+-- container, reusing @oldEffects@ when unchanged so still frames allocate
+-- nothing and frames without effects return 'IM.empty' immediately.
+{-# NOINLINE collectEffectRects #-}
+collectEffectRects :: Context -> IM.IntMap Rect -> IO (IM.IntMap Rect)
+collectEffectRects ctx oldEffects = do
   effNodes <- activeEffectNodes ctx
   if null effNodes
-    then pure rects
-    else go effNodes rects
+    then pure (if IM.null oldEffects then oldEffects else IM.empty)
+    else do
+      let na = ctxNodeArena ctx
+          inflateXY (V2 mx my) (Rect x y w h) = Rect (x - mx) (y - my) (w + 2 * mx) (h + 2 * my)
+          step acc idx = do
+            mEntry <- lookupShaderEffectAt ctx idx
+            case mEntry of
+              Nothing -> pure acc
+              Just entry -> do
+                r <- inflateXY (seeMargin entry) <$> getNodeRect na idx
+                wid <- getWidgetId na idx
+                let !k = intKey wid
+                pure (if k /= 0 && rectNonEmpty r then IM.insert k r acc else acc)
+      effs <- foldM step IM.empty effNodes
+      pure (if effs == oldEffects then oldEffects else effs)
+
+-- | When either the previous or current frame uses Tier 2 shader effects
+-- ('NanoUI.withShader'), expand any damage rect touching an effect container
+-- to cover its full margin-expanded bounds (at both its new and previous
+-- positions) so blurs, shadows, and distortions repaint without clipped halos
+-- or stale trails.
+expandEffectDamage :: PrevFrame -> PrevFrame -> [Rect] -> [Rect]
+expandEffectDamage old new rects
+  | IM.null oldEffs && IM.null newEffs = rects
+  | otherwise =
+      let touches rs r = any (isJust . rectIntersect r) rs
+          expandWith acc k curR =
+            let mOldR = IM.lookup k oldEffs
+             in if touches acc curR || maybe False (touches acc) mOldR
+                  then curR : maybe acc (: acc) mOldR
+                  else acc
+          acc1 = IM.foldlWithKey' expandWith rects newEffs
+          expandOld acc k oldR
+            | IM.member k newEffs = acc
+            | touches acc oldR = oldR : acc
+            | otherwise = acc
+       in IM.foldlWithKey' expandOld acc1 oldEffs
   where
-    na = ctxNodeArena ctx
-    inflateXY (V2 mx my) (Rect x y w h) = Rect (x - mx) (y - my) (w + 2 * mx) (h + 2 * my)
-    touches rs r = any (isJust . rectIntersect r) rs
-    go [] acc = pure acc
-    go (idx : rest) acc = do
-      mEntry <- lookupShaderEffectAt ctx idx
-      case mEntry of
-        Nothing -> go rest acc
-        Just entry -> do
-          let margin = seeMargin entry
-          curR <- inflateXY margin <$> getNodeRect na idx
-          wid <- getWidgetId na idx
-          let mOldR = inflateXY margin <$> IM.lookup (intKey wid) (pfRects old)
-              hit = touches acc curR || maybe False (touches acc) mOldR
-          if hit
-            then go rest (curR : maybe acc (: acc) mOldR)
-            else go rest acc
+    oldEffs = pfEffectRects old
+    newEffs = pfEffectRects new
 
 -- | Most rects a frame's damage splits into.
 maxDamagePieces :: Int

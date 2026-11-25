@@ -49,6 +49,7 @@ import Data.IntSet qualified as IS
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
+import Data.Word (Word64)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Id (WidgetId (..), enterScope, hashWidgetId, initialIdContext, mix64, scopeIdContext, scopeTag)
 import NanoUI.Internal.Id.Cursor (readIdCursor, writeIdCursor)
@@ -217,7 +218,7 @@ clipContainer layout child = do
 
 -- | A 'container' of type @nt@ with style index @si@: a plain container's
 -- flags, or a panel's row fill ('panelSurface').
-styledContainer :: NodeType -> Int -> Layout -> NanoUI a -> NanoUI a
+styledContainer :: NodeType -> Word64 -> Layout -> NanoUI a -> NanoUI a
 styledContainer nt si layout child = do
   idx <- withContext $ \ctx -> do
     parent <- currentParent ctx
@@ -357,12 +358,12 @@ addWidgetStyled ::
   -> Text
   -> Float
   -> Layout
-  -> Int
+  -> Word64
   -> NanoUI Response
 addWidgetStyled wid nt txt value layout styleIdx =
   addWidgetNode wid nt txt value layout $ \arena idx ->
     setStyleIdx arena idx $ case nt of
-      NodeText -> packTextNodeStyle layout styleIdx
+      NodeText -> packTextNodeStyle layout (fromIntegral styleIdx)
       NodeButton -> styleIdx .|. labelFontStyle layout
       _ -> styleIdx
 

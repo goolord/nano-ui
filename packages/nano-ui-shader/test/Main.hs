@@ -42,6 +42,18 @@ import NanoUI.Shader.Emit.Spirv (emitSpirvWords)
 import NanoUI.Shader.IR (ShaderIR (..))
 import System.Exit (exitFailure)
 
+data InnerUniforms = InnerUniforms
+  { iuColor :: !Color
+  , iuScale :: !Float
+  }
+  deriving (Eq, Show, Generic, Uniforms)
+
+data NestedUniforms = NestedUniforms
+  { nuInner :: !InnerUniforms
+  , nuCount :: !Word32
+  }
+  deriving (Eq, Show, Generic, Uniforms)
+
 data DemoUniforms = DemoUniforms
   { duTint :: !Color
   , duMix :: !Float
@@ -244,6 +256,46 @@ main = do
       && nearByte 200 (fromIntegral (colorG gBlurred))
       && nearByte 80 (fromIntegral (colorB gBlurred))
       && nearByte 255 (fromIntegral (colorA gBlurred))
+
+  -- 6. Multi-pass gaussianBlur actually blurs a step edge on CPU (verifies cfcUv propagation)
+  let stepImg (V2 px py) =
+        if px < 50 && py < 50 then colorRGBA 255 0 0 255 else colorRGBA 0 0 0 255
+      stepEdge = evalAt gaussianBlur 4.0 (V2 50 50) (V2 100 100) stepImg
+  check failed ("gaussianBlur blurs 2D step edge on CPU (" ++ show (colorR stepEdge) ++ ")") $
+    colorR stepEdge > 20 && colorR stepEdge < 200
+
+  -- 7. Scalar-times-vector (^*), Word32 uniforms, nested Generic records, and 3-tuples
+  let nestedSh :: Shader 'Surface NestedUniforms
+      nestedSh = surfaceShader $ \u _ ->
+        let scaled = u.nuInner.iuScale ^* u.nuInner.iuColor.rgb
+            clamped = clampE (u.nuCount + uintE 1) (uintE 0) (uintE 10)
+            hi = clamped .> uintE 2
+            rgb = select hi scaled (vec3 0 0 0)
+         in vec4_31 rgb 1.0
+  checkAllTargets failed "nested + Word32 + (^*) shader" nestedSh
+  let nVal = NestedUniforms (InnerUniforms (colorRGBA 200 100 40 255) 0.5) 3
+      nPx = evalAt nestedSh nVal (V2 10 10) (V2 50 50) (const colorWhite)
+  check failed "nested record + (^*) + Word32 CPU eval" $
+    nearByte 100 (fromIntegral (colorR nPx))
+      && nearByte 50 (fromIntegral (colorG nPx))
+      && nearByte 20 (fromIntegral (colorB nPx))
+
+  let tripleSh :: Shader 'Surface (Float, Float, Float)
+      tripleSh = surfaceShader $ \u _ ->
+        vec4 (uVal (uFst3 u)) (uVal (uSnd3 u)) (uVal (uThd3 u)) 1.0
+  checkAllTargets failed "3-tuple uniform shader" tripleSh
+  let tPx = evalAt tripleSh (0.2, 0.4, 0.8) (V2 5 5) (V2 10 10) (const colorWhite)
+  check failed "3-tuple uniform CPU eval" $
+    nearByte 51 (fromIntegral (colorR tPx))
+      && nearByte 102 (fromIntegral (colorG tPx))
+      && nearByte 204 (fromIntegral (colorB tPx))
+
+  -- 8. GLSL/MSL emitters include premultiplied-alpha un-premultiply helper
+  let (glslBlur, mslBlur) = case shaderPasses boxBlur of
+        (p : _) -> (maybe "" id (spGlsl150 (spProgram p)), maybe "" id (spMsl (spProgram p)))
+        [] -> ("", "")
+  check failed "GLSL un-premultiplies uInput samples" ("nanoSampleInput(" `T.isInfixOf` glslBlur)
+  check failed "MSL un-premultiplies uInput samples" ("nanoSampleInput(" `T.isInfixOf` mslBlur)
 
   n <- readIORef failed
   when (n > 0) $ do
