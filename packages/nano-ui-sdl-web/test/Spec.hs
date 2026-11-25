@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 -- | Sessions run natively against a scripted host: it answers the canvas
 -- queries, queues each step's events when the session waits, and records
 -- the texture uploads and draws the session sends.
@@ -37,9 +38,10 @@ import Data.Word (Word8)
 import Foreign.ForeignPtr (newForeignPtr_)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (peekByteOff, pokeByteOff, pokeElemOff)
-import NanoUI (NanoUI, Rect (..), UiCursorKind (..), askInput, button, column, label, colorRGB)
+import NanoUI (NanoUI, Rect (..), Shader, ShaderKind (..), UiCursorKind (..), V2 (..), askInput, box, button, column, colorRGB, emptyShaderProgram, fixedWH, label, rawLayerShader, rawShader, shaderBox, withShader)
 import NanoUI.Backend
-  ( Composition (..), Damage (..), DrawCmd (..), DrawData (..), Input (..), Key (..), Layer (..), glyphAtlasPages
+  ( Composition (..), Damage (..), DrawCmd (..), DrawData (..), Input (..), Key (..), Layer (..), ShaderProgram (..), glyphAtlasPages
+  , emptyEffectSpans, emptyShaderCalls, emptyUniformBytes
   , glyphPageTextureId, pixelEdges, snapDamage, vertexSize
   )
 import NanoUI.SdlWeb.Internal.Host
@@ -63,7 +65,14 @@ type Step = (Maybe (Float, Float, Float), [Record])
 data Upload = Upload {upSlot :: Int, upW :: Int, upRect :: (Int, Int, Int, Int), upInk :: Bool}
   deriving (Show)
 
-data Frame = Frame {frClear :: Bool, frScale :: Double, frSize :: (Int, Int), frDraws :: [(Int, Int, Int, Maybe (Int, Int, Int, Int))], frIndexCount :: Int}
+data Frame = Frame
+  { frClear :: Bool
+  , frScale :: Double
+  , frSize :: (Int, Int)
+  , frDraws :: [(Int, Int, Int, Maybe (Int, Int, Int, Int))]
+  , frShaderDraws :: [(Int, Int, Int)]
+  , frIndexCount :: Int
+  }
   deriving (Show)
 
 data Recorded = Recorded
@@ -76,6 +85,10 @@ data Recorded = Recorded
   , recFilters :: IORef [T.Text]
   , recSaved :: IORef [(T.Text, BS.ByteString)]
   , recDiscovery :: IORef [Int]
+  , recShaders :: IORef [(Int, T.Text)]
+  , recUniforms :: IORef [BS.ByteString]
+  , recTargets :: IORef [(String, Int)]
+  , recComposites :: IORef [(Int, Int, Bool, Int)]
   }
 
 data ScriptDone = ScriptDone deriving (Show)
@@ -91,7 +104,8 @@ scriptedHost canvas steps0 = do
   steps <- newIORef steps0
   queue <- newIORef []
   idle <- newIORef (0 :: Int)
-  rec <- Recorded <$> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef []
+  nextTarget <- newIORef (0 :: Int)
+  rec <- Recorded <$> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef [] <*> newIORef []
   pendingFont <- newIORef BS.empty
   picked <- newIORef BS.empty
   extended <- BS.readFile extendedFontPath
@@ -130,12 +144,35 @@ scriptedHost canvas steps0 = do
               ink <- anyInk pixels row x y rw rh
               modifyIORef' (recUploads rec) (Upload slot w (x, y, rw, rh) ink :)
           , whBeginFrame = \clear _ _ _ _ scale w h ->
-              modifyIORef' (recFrames rec) (Frame clear scale (w, h) [] 0 :)
+              modifyIORef' (recFrames rec) (Frame clear scale (w, h) [] [] 0 :)
           , whDraw = \_ _ _ icount cmds n -> do
-              draws <- mapM (readCommand cmds) [0 .. n - 1]
+              decoded <- mapM (readCommand cmds) [0 .. n - 1]
+              let draws = map fst decoded
+                  shDraws = filter (\(s, _, _) -> s > 0) (map snd decoded)
               modifyIORef' (recFrames rec) $ \case
-                f : fs -> f {frDraws = draws, frIndexCount = icount} : fs
+                f : fs -> f {frDraws = draws, frShaderDraws = shDraws, frIndexCount = icount} : fs
                 [] -> []
+          , whRegisterShader = \slot p n -> do
+              src <- utf8 p n
+              modifyIORef' (recShaders rec) ((slot, src) :)
+              pure True
+          , whUploadUniforms = \p n -> do
+              bs <- BS.packCStringLen (castPtr p, n)
+              modifyIORef' (recUniforms rec) (bs :)
+          , whAcquireTarget = \minW minH outCaps -> do
+              slot <- atomicModifyIORef' nextTarget (\k -> (k + 1, k))
+              let capW = max 64 (((minW + 63) `div` 64) * 64)
+                  capH = max 64 (((minH + 63) `div` 64) * 64)
+              pokeElemOff outCaps 0 (fromIntegral capW)
+              pokeElemOff outCaps 1 (fromIntegral capH)
+              modifyIORef' (recTargets rec) (("acquire", slot) :)
+              pure slot
+          , whReleaseTarget = \slot ->
+              modifyIORef' (recTargets rec) (("release", slot) :)
+          , whBindTarget = \slot _ _ _ ->
+              modifyIORef' (recTargets rec) (("bind", slot) :)
+          , whCompositeEffect = \srcSlot shSlot blendCopy _ _ _ uLen ->
+              modifyIORef' (recComposites rec) ((srcSlot, shSlot, blendCopy, uLen) :)
           , whSetCursor = \p n -> utf8 p n >>= \t -> modifyIORef' (recCursor rec) (t :)
           , whTextInput = \_ _ _ _ _ -> pure ()
           , whClipboardRead = \_ _ -> pure (-1)
@@ -204,11 +241,11 @@ copyOut p n b = do
   when (n > 0) $ unsafeUseAsCStringLen b $ \(src, len) -> copyBytes p (castPtr src) (min n len)
   pure (BS.length b)
 
-readCommand :: Ptr Word8 -> Int -> IO (Int, Int, Int, Maybe (Int, Int, Int, Int))
+readCommand :: Ptr Word8 -> Int -> IO ((Int, Int, Int, Maybe (Int, Int, Int, Int)), (Int, Int, Int))
 readCommand buf i = do
   let at k = fromIntegral <$> (peekByteOff buf (i * commandRecordSize + k * 4) :: IO Int32)
-  [slot, first, count, on, x, y, w, h] <- mapM at [0 .. 7]
-  pure (slot, first, count, if on /= 0 then Just (x, y, w, h) else Nothing)
+  [slot, first, count, on, x, y, w, h, shSlot, uOff, uLen] <- mapM at [0 .. 10]
+  pure ((slot, first, count, if on /= 0 then Just (x, y, w, h) else Nothing), (shSlot, uOff, uLen))
 
 -- | Whether any pixel in a rect has alpha, skipping the 4x4 white patch
 -- every page starts with.
@@ -258,6 +295,7 @@ main =
     , ("file-dialogs", fileDialogs)
     , ("fallback-fonts", fallbackFonts)
     , ("font-search", fontSearch)
+    , ("shaders", shaderSession)
     ]
 
 pureChecks :: IORef Int -> IO ()
@@ -275,10 +313,10 @@ pureChecks failed = do
   -- Commands that continue each other's indices with one texture and clip
   -- join; a command outside the damage is dropped.
   dd <- fakeDrawData
-    [ DrawCmd 0 0 100 100 (glyphPageTextureId 0) 0 6 LayerContent
-    , DrawCmd 0 0 100 100 (glyphPageTextureId 0) 6 6 LayerContent
-    , DrawCmd 0 0 100 100 (glyphPageTextureId 1) 12 6 LayerContent
-    , DrawCmd 500 500 10 10 (glyphPageTextureId 1) 18 6 LayerContent
+    [ DrawCmd 0 0 100 100 (glyphPageTextureId 0) 0 6 LayerContent 0
+    , DrawCmd 0 0 100 100 (glyphPageTextureId 0) 6 6 LayerContent 0
+    , DrawCmd 0 0 100 100 (glyphPageTextureId 1) 12 6 LayerContent 0
+    , DrawCmd 500 500 10 10 (glyphPageTextureId 1) 18 6 LayerContent 0
     ]
   let full = drawCommands' 1 (800, 600) DamageFull dd
   check failed "drawCommands' joins neighbours" (map dcCount full == [12, 6, 6])
@@ -313,6 +351,9 @@ fakeDrawData cmds = do
       , drawCommands = U.fromList cmds
       , drawLayerOffsets = PA.primArrayFromList [0, 0, length cmds, length cmds, length cmds]
       , drawClear = colorRGB 0 0 0
+      , drawShaderCalls = emptyShaderCalls
+      , drawUniformBytes = emptyUniformBytes
+      , drawEffectSpans = emptyEffectSpans
       }
 
 openingFrame :: IORef Int -> IO ()
@@ -482,3 +523,32 @@ pixelRatioChange failed = do
   check failed "ratio: drawing buffer resized to device pixels" (backing == [(800, 600), (1600, 1200)])
   check failed "ratio: the first frame at scale 2 clears and draws" (case scaled of f : _ -> frClear f && not (null (frDraws f)); [] -> False)
   check failed "ratio: glyph page 0 uploaded again for the new size" (length (filter ((== 0) . upSlot) uploads) >= 2)
+
+shaderSession :: IORef Int -> IO ()
+shaderSession failed = do
+  let es300 = "#version 300 es\nprecision highp float;\nout vec4 outColor;\nvoid main() { outColor = vec4(1.0); }\n"
+      es300Eff = "#version 300 es\nprecision highp float;\nuniform sampler2D uInput;\nin vec2 vUv;\nout vec4 outColor;\nvoid main() { outColor = texture(uInput, vUv); }\n"
+      sh :: Shader 'Surface Float
+      sh = rawShader emptyShaderProgram {spGlslEs300 = Just es300}
+      eff :: Shader 'LayerEffect Float
+      eff = rawLayerShader (const (V2 8 8)) emptyShaderProgram {spGlslEs300 = Just es300Eff, spNeedsTex = True}
+      view = column $ do
+        label "Shader"
+        shaderBox (fixedWH 80 40) sh 0.5
+        withShader eff 1.0 (box (fixedWH 60 30) (colorRGB 200 50 50))
+  rec <- runScript (800, 600, 1) [events [motion 10 10]] (viewFrame view)
+  shaders <- reverse <$> readIORef (recShaders rec)
+  uniforms <- readIORef (recUniforms rec)
+  frames <- reverse <$> readIORef (recFrames rec)
+  targets <- reverse <$> readIORef (recTargets rec)
+  composites <- reverse <$> readIORef (recComposites rec)
+  check failed "shaders: surface + layer GLSL ES 300 programs registered" (length shaders == 2)
+  check failed "shaders: uniform bytes uploaded" (not (null uniforms) && all ((>= 64) . BS.length) uniforms)
+  check failed "shaders: draw command references surface shader slot"
+    (any (any (\(s, _, l) -> s > 0 && l == 64) . frShaderDraws) frames)
+  let acquires = [slot | ("acquire", slot) <- targets]
+      releases = [slot | ("release", slot) <- targets]
+  check failed "shaders: Tier 2 acquires and balances offscreen targets"
+    (not (null acquires) && length acquires == length releases)
+  check failed "shaders: Tier 2 composites offscreen target through effect shader"
+    (any (\(_, shSlot, blendCopy, uLen) -> shSlot > 0 && not blendCopy && uLen == 64) composites)

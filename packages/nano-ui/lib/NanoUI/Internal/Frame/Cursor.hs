@@ -170,6 +170,7 @@ cursorKindAt ctx wid mouse inp
                 NodeBox -> pure UiCursorDefault
                 NodePopup -> pure UiCursorDefault
                 NodeDrawing -> pure UiCursorDefault
+                NodeShader -> pure UiCursorDefault
 
 -- | The cursor of the newest zone the view registered under the pointer
 -- ('ctxCursorZones'), or the resize arrow for a whole column-resize drag.

@@ -23,11 +23,21 @@ import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Conc (getAllocationCounter)
 import Input (inputChecks, queueChecks)
 import NanoUI
-  ( ImageId (..), Rect (..), V2 (..), canvas, colorBlack, colorRGBA, column, defaultLightTheme, defaultTheme
-  , drawStrokePathWith, fixedWH, followSystemTheme, getTheme, lightDark, pageColor, respRect
+  ( Color, ImageId (..), Rect (..), ShaderCapabilities (..), ShaderConfig (..), V2 (..), box, canvas, colorA, colorBlack
+  , colorB, colorG, colorR, colorRGBA, colorWhite, column, columnWith, defaultLightTheme, defaultShaderConfig
+  , defaultTheme, drawStrokePathWith, fixedWH, followSystemTheme, getTheme, lightDark, padAll, pageColor, respRect
+  , shaderBox, shaderConfigured, tight, withShader
+  )
+import NanoUI.Internal.Shader (CpuFragCtx (..), Shader (..))
+import NanoUI.Shader
+  ( MeshGradientParams (..), SdfBoxParams (..), TintParams (..), composeColor, gaussianBlur, grayscale
+  , groupOpacity, meshGradient4, sdfRoundedBox, tint
   )
 import NanoUI.Path qualified as P
-import NanoUI.Backend (Appearance (..), cursorFallback, emptyInput, getSystemAppearance, setSystemAppearance, snapDamage)
+import NanoUI.Backend
+  ( Appearance (..), cursorFallback, emptyEffectSpans, emptyInput, emptyShaderCalls, emptyUniformBytes
+  , getShaderCapabilities, getSystemAppearance, setSystemAppearance, snapDamage
+  )
 import NanoUI.Internal.Context (lookupImageUv)
 import NanoUI.Sdl.Internal.Cursor (SdlCursors (..), destroyCursors, initCursors, sdlSystemCursor, showCursorKind)
 import NanoUI.Sdl.Internal.Error (sdlErrorText)
@@ -48,12 +58,13 @@ import SDL3.Sys.Mouse (cursorVisibleSafe)
 import SDL3.Sys.Render (renderPresentSafe, renderReadPixels)
 import SDL3.Sys.Video (getSystemTheme)
 import System.Environment (getArgs, lookupEnv, setEnv)
+import System.IO (BufferMode (LineBuffering), hSetBuffering, stdout)
 import System.Mem (performGC)
 import Text.Printf (printf)
 import Text.Read (readMaybe)
 import WindowChecks (windowChecks)
 import "nano-ui-sdl" NanoUI.Backend.Sdl (SdlEnv, syncDisplay, withSdlBench)
-import "nano-ui-sdl" NanoUI.Sdl.Internal.Window (sdlRenderer)
+import "nano-ui-sdl" NanoUI.Sdl.Internal.Window (sdlRenderer, sdlRendererName)
 
 foreign import ccall unsafe "SDL_ReadSurfacePixel"
   readPixel :: Ptr () -> CInt -> CInt -> Ptr Word8 -> Ptr Word8 -> Ptr Word8 -> Ptr Word8 -> IO CBool
@@ -254,8 +265,8 @@ geometry points = do
   indices <- mallocForeignPtrBytes (4 * n)
   withForeignPtr vertices $ \p -> pokeArray (castPtr p) [CFloat v | (x, y) <- points, v <- [x, y, 1, 0, 0, 1, 0, 0]]
   withForeignPtr indices $ \p -> pokeArray (castPtr p) [0 .. fromIntegral n - 1 :: CInt]
-  let cmds = U.singleton (DrawCmd 0 0 800 600 0 0 (fromIntegral n) LayerContent)
-  pure (DrawData vertices n indices n cmds (primArrayFromList [0, 0, 1, 1, 1]) colorBlack)
+  let cmds = U.singleton (DrawCmd 0 0 800 600 0 0 (fromIntegral n) LayerContent 0)
+  pure (DrawData vertices n indices n cmds (primArrayFromList [0, 0, 1, 1, 1]) colorBlack emptyShaderCalls emptyUniformBytes emptyEffectSpans)
 
 -- | A triangle covering pixel (20, 20) that samples @texture@, with floats
 -- written at each vertex's byte offsets: colour at 8 to 20, UV at 24 and 28.
@@ -301,16 +312,155 @@ systemThemeChecks env ctx = do
   unless (theme == lightDark defaultLightTheme defaultTheme want) $
     fail "a context following the system kept the stale theme after the sync"
 
+shaderChecks :: SdlEnv -> Context -> (DrawData -> IO ()) -> IO ()
+shaderChecks env ctx draw = do
+  caps <- getShaderCapabilities ctx
+  let mgParams =
+        MeshGradientParams
+          { mgTopLeft = colorRGBA 240 40 40 255
+          , mgTopRight = colorRGBA 40 220 40 255
+          , mgBottomLeft = colorRGBA 40 60 240 255
+          , mgBottomRight = colorRGBA 240 220 40 255
+          }
+      fallbackCol = colorRGBA 12 90 180 255
+      cfg =
+        defaultShaderConfig
+          { scLayout = fixedWH 100 80
+          , scFallback = fallbackCol
+          }
+  if not (capSurfaceShaders caps)
+    then do
+      (_, dd) <- warmupDraw ctx (withInput 800 600) (columnWith tight (shaderConfigured cfg meshGradient4 mgParams))
+      draw dd
+      (r, g, b) <- pixel env 50 40
+      let near c1 c2 = abs (fromIntegral c1 - fromIntegral c2 :: Int) <= 2
+      unless (near r (colorR fallbackCol) && near g (colorG fallbackCol) && near b (colorB fallbackCol)) $
+        fail ("software shader fallback mismatch: got " ++ show (r, g, b))
+    else do
+      -- Verify SDL 3.4 GPU SPIR-V/MSL execution matches CPU reference evaluator.
+      let evalCpu :: Shader k u -> u -> Float -> Float -> Color
+          evalCpu sh u px py = case shaderCpuEval sh of
+            Nothing -> error "missing CPU evaluator"
+            Just f ->
+              f
+                u
+                CpuFragCtx
+                  { cfcUv = V2 (px / 100) (py / 80)
+                  , cfcPos = V2 px py
+                  , cfcSize = V2 100 80
+                  , cfcScale = 1.0
+                  , cfcColor = colorWhite
+                  , cfcCornerRadius = 0.0
+                  }
+                (const colorBlack)
+          near3 (r1, g1, b1) col =
+            let a = fromIntegral (colorA col) :: Int
+                blend ch = (fromIntegral ch * a + 127) `div` 255
+                d x y = abs (fromIntegral x - y)
+             in d r1 (blend (colorR col)) <= 4 && d g1 (blend (colorG col)) <= 4 && d b1 (blend (colorB col)) <= 4
+      (_, dd1) <- warmupDraw ctx (withInput 800 600) (columnWith tight (shaderBox (fixedWH 100 80) meshGradient4 mgParams))
+      draw dd1
+      forM_ [(10, 10), (89, 10), (10, 69), (89, 69), (50, 40)] $ \(x, y) -> do
+        gpuPx <- pixel env x y
+        let cpuPx = evalCpu meshGradient4 mgParams (fromIntegral x + 0.5) (fromIntegral y + 0.5)
+        unless (near3 gpuPx cpuPx) $
+          fail ("meshGradient4 GPU vs CPU mismatch at " ++ show (x, y) ++ ": gpu=" ++ show gpuPx ++ " cpu=" ++ show (colorR cpuPx, colorG cpuPx, colorB cpuPx))
+
+      let sdfParams =
+            SdfBoxParams
+              { sbFill = colorRGBA 30 160 220 255
+              , sbBorder = colorRGBA 250 180 40 255
+              , sbBorderWidth = 4
+              , sbRadius = 16
+              }
+      (_, dd2) <- warmupDraw ctx (withInput 800 600) (columnWith tight (shaderBox (fixedWH 100 80) sdfRoundedBox sdfParams))
+      draw dd2
+      -- Center is fill, top-center at y=2 is border, corner (1, 1) is outside rounded rect (black clear).
+      forM_ [(50, 40), (50, 2), (1, 1)] $ \(x, y) -> do
+        gpuPx <- pixel env x y
+        let cpuPx = evalCpu sdfRoundedBox sdfParams (fromIntegral x + 0.5) (fromIntegral y + 0.5)
+        unless (near3 gpuPx cpuPx) $
+          fail ("sdfRoundedBox GPU vs CPU mismatch at " ++ show (x, y) ++ ": gpu=" ++ show gpuPx ++ " cpu=" ++ show (colorR cpuPx, colorG cpuPx, colorB cpuPx))
+
+      -- Tier 2 subtree effects (offscreen targets, fused ColorEffect, 2-pass gaussianBlur, nested effects).
+      when (capNodeEffects caps) $ do
+        let srcCol = colorRGBA 200 40 20 255
+            evalEffectCpu :: Shader k u -> u -> Color
+            evalEffectCpu sh u = case shaderCpuEval sh of
+              Nothing -> error "missing CPU evaluator"
+              Just f ->
+                f
+                  u
+                  CpuFragCtx
+                    { cfcUv = V2 0.5 0.5
+                    , cfcPos = V2 40 30
+                    , cfcSize = V2 80 60
+                    , cfcScale = 1.0
+                    , cfcColor = colorWhite
+                    , cfcCornerRadius = 0.0
+                    }
+                  (const srcCol)
+
+        -- 1. Single-pass ColorEffect (grayscale)
+        (_, ddGray) <- warmupDraw ctx (withInput 800 600) $
+          columnWith tight (withShader grayscale 1.0 (box (fixedWH 80 60) srcCol))
+        draw ddGray
+        grayPx <- pixel env 40 30
+        let grayCpu = evalEffectCpu grayscale 1.0
+        unless (near3 grayPx grayCpu) $
+          fail ("Tier 2 grayscale GPU vs CPU mismatch: gpu=" ++ show grayPx ++ " cpu=" ++ show (colorR grayCpu, colorG grayCpu, colorB grayCpu))
+
+        -- 2. Fused 1-pass composeColor grayscale tint
+        let fused = composeColor grayscale tint
+            fusedU = (1.0, TintParams (colorRGBA 0 80 240 255) 0.5)
+        (_, ddFused) <- warmupDraw ctx (withInput 800 600) $
+          columnWith tight (withShader fused fusedU (box (fixedWH 80 60) srcCol))
+        draw ddFused
+        fusedPx <- pixel env 40 30
+        let fusedCpu = evalEffectCpu fused fusedU
+        unless (near3 fusedPx fusedCpu) $
+          fail ("Tier 2 fused composeColor GPU vs CPU mismatch: gpu=" ++ show fusedPx ++ " cpu=" ++ show (colorR fusedCpu, colorG fusedCpu, colorB fusedCpu))
+
+        -- 3. Separable 2-pass gaussianBlur with bleed margin halo outside the box
+        (_, ddBlur) <- warmupDraw ctx (withInput 800 600) $
+          columnWith (padAll 30 . tight) $
+            withShader gaussianBlur 4.0 (box (fixedWH 40 40) (colorRGBA 255 0 0 255))
+        draw ddBlur
+        (cr, cg, cb) <- pixel env 50 50
+        (hr, hg, hb) <- pixel env 27 50
+        farPx <- pixel env 5 50
+        unless (cr > 200 && cg < 10 && cb < 10) $
+          fail ("Tier 2 gaussianBlur center unexpected: " ++ show (cr, cg, cb))
+        unless (hr > 15 && hr < 245 && hg < 10 && hb < 10) $
+          fail ("Tier 2 gaussianBlur bleed halo missing at (27,50): " ++ show (hr, hg, hb))
+        unless (farPx == (0, 0, 0)) $
+          fail ("Tier 2 gaussianBlur leaked past margin at (5,50): " ++ show farPx)
+
+        -- 4. Nested subtree effects: groupOpacity 0.5 around grayscale 1.0
+        (_, ddNest) <- warmupDraw ctx (withInput 800 600) $
+          columnWith tight $
+            withShader groupOpacity 0.5 $
+              withShader grayscale 1.0 (box (fixedWH 80 60) srcCol)
+        draw ddNest
+        nestPx <- pixel env 40 30
+        let halfGray = colorRGBA (colorR grayCpu) (colorG grayCpu) (colorB grayCpu) 128
+        unless (near3 nestPx halfGray) $
+          fail ("Tier 2 nested groupOpacity(grayscale) mismatch: gpu=" ++ show nestPx ++ " expected~" ++ show (colorR halfGray `div` 2))
+
+      putStrLn ("  (verified live GPU Tier 1 + Tier 2 shaders on SDL renderer: " ++ show (sdlRendererName env) ++ ")")
+
 main :: IO ()
 main = do
+  hSetBuffering stdout LineBuffering
   args <- getArgs
   iterations <- max 1 . fromMaybe 500 . (>>= readMaybe) <$> lookupEnv "NANO_RENDER_ITERATIONS"
   let bench = args == ["--bench"] || args == ["--atlas-bench"]
-      native = args == ["--native"]
+      gpuShadersOnly = args == ["--gpu-shaders"]
+      native = args == ["--native"] || gpuShadersOnly
   unless (bench || native) $ do
     setEnv "SDL_VIDEODRIVER" "dummy"
     setEnv "SDL_RENDER_DRIVER" "software"
-  unless bench inputChecks
+  unless (bench || gpuShadersOnly) inputChecks
   ctx <- newPixelContext
   -- These checks read pixels over a black clear: a black page makes the
   -- frame's clear black.
@@ -324,6 +474,8 @@ main = do
           damage = DamageClip (Rect 15 15 10 10)
           step name act = act >> putStrLn ("SDL " ++ name ++ ": ok")
       case args of
+        ["--gpu-shaders"] ->
+          step "surface shader GPU/fallback readback" (shaderChecks env ctx (`draw` DamageFull))
         ["--atlas-bench"] -> atlasBench env
         ["--bench"] -> do
           let quad x y = [(x, y), (x + 40, y), (x + 40, y + 40), (x + 40, y + 40), (x, y + 40), (x, y)]
@@ -359,9 +511,10 @@ main = do
           step "failed image atlas upload reported once" imageFailureChecks
           step "fractional-scale clip and geometry readback" (fractionalScaleChecks env (\s -> drawScaled s nullPtr))
           step "canvas line caps and joins readback" (pathChecks env ctx (`draw` DamageFull))
+          step "surface shader GPU/fallback readback" (shaderChecks env ctx (`draw` DamageFull))
           step "cursor mapping and creation" cursorChecks
           step "native events and the system theme" (queueChecks >> systemThemeChecks env ctx)
-  unless bench $ do
+  unless (bench || gpuShadersOnly) $ do
     windowChecks (if native then "native drivers" else "dummy video, software renderer") False
     -- With a display, repeat on the GPU renderers, which give a transparent
     -- window custom blend modes: OpenGL blends alpha with the colour's

@@ -1,0 +1,85 @@
+cabal-version:      3.4
+name:               nano-ui-shader
+version:            0.1.0.0
+synopsis:           Typed fragment shader EDSL and multi-target compiler for nano-ui
+description:
+    A pure-Haskell typed fragment shader EDSL for nano-ui nodes. Author
+    surface fills, color effects, distortion warps, and multi-pass layer
+    effects once using OverloadedRecordDot swizzles and Generic std140
+    uniforms, fuse color/distortion passes algebraically, and compile directly
+    to GLSL 150, GLSL ES 300, SPIR-V, MSL, and a CPU reference evaluator.
+license:            MIT
+license-file:       LICENSE
+author:             goolord
+maintainer:         zacharyachurchill@gmail.com
+homepage:           https://github.com/goolord/nano-ui
+bug-reports:        https://github.com/goolord/nano-ui/issues
+category:           Graphics
+build-type:         Simple
+tested-with:        GHC ==9.10.3 || ==9.14.1
+
+source-repository head
+    type:     git
+    location: https://github.com/goolord/nano-ui.git
+    subdir:   packages/nano-ui-shader
+
+common extensions
+    default-language: GHC2024
+    default-extensions:
+        OverloadedStrings
+
+common warnings
+    ghc-options:
+        -Wall
+        -Wextra
+        -Wcompat
+        -Widentities
+        -Wincomplete-record-updates
+        -Wincomplete-uni-patterns
+        -Wmissing-export-lists
+        -Wmissing-home-modules
+        -Wpartial-fields
+        -Wredundant-constraints
+        -Wunused-packages
+
+library
+    import:           extensions
+    import:           warnings
+    exposed-modules:
+        NanoUI.Shader
+        NanoUI.Shader.IR
+        NanoUI.Shader.Swizzle
+        NanoUI.Shader.Expr
+        NanoUI.Shader.Compose
+        NanoUI.Shader.Effects
+        NanoUI.Shader.Emit.Glsl
+        NanoUI.Shader.Emit.Msl
+        NanoUI.Shader.Emit.Spirv
+        NanoUI.Shader.Eval.Cpu
+    build-depends:
+        base >=4.20 && <4.23,
+        bytestring ^>=0.12,
+        containers >=0.7 && <0.9,
+        hashable ^>=1.5,
+        nano-ui ^>=0.2,
+        primitive ^>=0.9,
+        text ^>=2.1,
+        unordered-containers ^>=0.2,
+        vector ^>=0.13
+    hs-source-dirs:   lib
+
+test-suite nano-ui-shader-test
+    import:           extensions
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          Main.hs
+    if os(windows)
+        ghc-options:  -optl-mconsole
+    build-depends:
+        base >=4.20 && <4.23,
+        bytestring ^>=0.12,
+        nano-ui,
+        nano-ui-shader,
+        text ^>=2.1,
+        vector ^>=0.13
+    hs-source-dirs:   test

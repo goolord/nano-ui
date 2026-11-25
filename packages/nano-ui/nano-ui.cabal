@@ -115,9 +115,11 @@ library
         NanoUI.Internal.Monad
         NanoUI.Internal.Path
         NanoUI.Internal.RichText.Types
+        NanoUI.Internal.Shader
         NanoUI.Internal.SIMD
         NanoUI.Internal.Store
         NanoUI.Internal.Store.Types
+        NanoUI.Internal.Uniforms
         NanoUI.Internal.Var
         NanoUI.Internal.Var.Cell
         NanoUI.Internal.Var.Generic
@@ -216,6 +218,7 @@ library
         NanoUI.Internal.Widgets.Slider
         NanoUI.Internal.Widgets.Image
         NanoUI.Internal.Widgets.Sensor
+        NanoUI.Internal.Widgets.Shader
         NanoUI.Internal.Shortcut
         NanoUI.Internal.Widgets.Shortcut
         NanoUI.Internal.NativeWindow
@@ -304,6 +307,7 @@ test-suite nano-ui-test
         Cases.Runner
         Cases.RichText
         Cases.SIMD
+        Cases.Shader
         Cases.Shaping
         Cases.Styling
         Cases.Svg

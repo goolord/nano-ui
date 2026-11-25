@@ -42,6 +42,7 @@ import NanoUI
   ( Appearance (..)
   , NanoUI
   , Rect (..)
+  , ShaderCapabilities (..)
   , Size (..)
   , Theme
   , WindowSettings (..)
@@ -70,6 +71,7 @@ import NanoUI.Backend
   , noWindowCapabilities
   , reportWindowState
   , setExplainLayout
+  , setShaderCapabilities
   , setSystemAppearance
   , setWakeLoop
   , syncCursorKind
@@ -268,6 +270,7 @@ runWebSession host opts frame = do
               <*> newIORef Nothing
           ctx1 <- withWebFonts env ctx0
           setBackendSession ctx1 webSession env
+          setShaderCapabilities ctx1 (ShaderCapabilities True True)
           setDrawSnapScale ctx1 =<< readIORef scaleRef
           setWakeLoop ctx1 (whWake host)
           installWindowHost ctx1 (webWindowSettings opts) $

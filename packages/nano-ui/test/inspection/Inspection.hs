@@ -195,7 +195,7 @@ commandReadProbe cmds i =
 
 commandWriteProbe ::
   UM.MVector RealWorld DrawCmd -> Int -> Float -> Word32 -> IO ()
-commandWriteProbe cmds i x count = UM.unsafeWrite cmds i (DrawCmd x x x x i count count LayerContent)
+commandWriteProbe cmds i x count = UM.unsafeWrite cmds i (DrawCmd x x x x i count count LayerContent 0)
 
 inspect $ hasNoTypeClasses 'commandReadProbe
 inspect $ hasNoTypeClasses 'commandWriteProbe

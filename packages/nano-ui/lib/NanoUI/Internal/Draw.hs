@@ -5,6 +5,11 @@
 module NanoUI.Internal.Draw
   ( Layer (..)
   , DrawCmd (..)
+  , ShaderCall (..)
+  , EffectSpan (..)
+  , emptyShaderCalls
+  , emptyEffectSpans
+  , emptyUniformBytes
   , DrawData (..)
   , DrawArena (..)
   , RecordedOp (..)
@@ -20,12 +25,15 @@ module NanoUI.Internal.Draw
   , resetDrawArena
   , setDrawSnapScale
   , getDrawSnapScale
+  , setDrawPixelScale
+  , getDrawPixelScale
   , setDrawSquareGeometry
   , setDrawClear
   , getDrawClear
   , setDrawExternalText
   , setDrawRecordOps
   , getDrawRecordOps
+  , withRecordOpacity
   , recordedOps
   , beginLayer
   , currentLayer
@@ -34,6 +42,13 @@ module NanoUI.Internal.Draw
   , setClipPieces
   , getClipPieces
   , withClip
+  , setShader
+  , allocShaderCall
+  , pushShaderQuad
+  , EffectSpanToken (..)
+  , beginEffectSpan
+  , endEffectSpan
+  , currentEffectSpanId
   , finishDraw
   , drawCmdCount
   , drawnVertexCount

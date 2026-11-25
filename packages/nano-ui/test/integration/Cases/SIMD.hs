@@ -58,7 +58,7 @@ runSimdWritesTest _ failed = do
 -- layers rebuilds the whole command stream.
 runDrawLayersTest :: Context -> IORef Int -> IO ()
 runDrawLayersTest _ failed = do
-  let commands = [DrawCmd 1 2 3 4 (-7) 19 maxBound layer | layer <- [minBound .. maxBound]]
+  let commands = [DrawCmd 1 2 3 4 (-7) 19 maxBound layer 0 | layer <- [minBound .. maxBound]]
       grown = U.create $ do
         v <- U.thaw (U.fromList commands)
         w <- UM.grow v (length commands)

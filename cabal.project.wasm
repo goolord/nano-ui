@@ -9,6 +9,7 @@ packages:
   packages/nano-ui-ttf
   packages/nano-ui-sdl-web
   packages/nano-ui-diagrams
+  packages/nano-ui-shader
   packages/nano-ui-demo
 
 -- The Hackage snapshot cabal.project pins.

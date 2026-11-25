@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module Main (main) where
 
 import Control.Exception (IOException, try)
@@ -14,6 +15,7 @@ import NanoUI.Backend (monospaceMetrics)
 import NanoUI.Draw.FrameSvg (FrameSvgConfig (..), defaultFrameSvgConfig, enableSvgExport, frameToSvg)
 import NanoUI.Draw.Svg
 import NanoUI.Internal.Path (Shade (Shaded))
+import NanoUI.Internal.Shader (Shader (..))
 import NanoUI.Path (LineCap (ButtCap), LineJoin (MiterJoin))
 import NanoUI.Path qualified as P
 import NanoUI.Testing (newPixelContext)
@@ -282,6 +284,11 @@ testFrameToSvg = do
     pure i
   imageSvg <- exportOf ctx defaultFrameSvgConfig {fsImageUri = \_ -> Just "data:image/png;base64,AA=="} (image (fixedWH 20 20) iid)
   require "widget image under its id" (T.isInfixOf "<image " imageSvg)
+  -- Subtree opacity effects export as a native SVG <g opacity="..."> group.
+  let opacityEffect :: Shader 'LayerEffect Float
+      opacityEffect = (rawLayerShader (const (V2 0 0)) emptyShaderProgram) {shaderSvgOpacity = Just id}
+  opacitySvg <- exportOf ctx defaultFrameSvgConfig (columnWith tight (withShader opacityEffect 0.5 (box (fixedWH 40 30) red)))
+  contains opacitySvg ["<g opacity=\"0.5\">", "fill=\"#ff0000\"", "</g>"]
 
 -- | Whole frames of representative views, exported headlessly and compared
 -- with the documents committed under @test/golden@. With

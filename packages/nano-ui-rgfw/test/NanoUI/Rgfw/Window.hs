@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 -- | Window tests, skipped without a display or an OpenGL 3.2 window.
 module NanoUI.Rgfw.Window (hasDisplay, testChildWindow, testGlWindow, testSessionWindow) where
 
@@ -14,12 +15,14 @@ import Foreign.C.Types (CUChar (..))
 import Foreign.Ptr (Ptr)
 import NanoUI
   ( AlignX (..), AlignY (..), DrawOp (..), Input (..), Modifiers (..), MouseButton (..), NanoUI, Pressable (..)
-  , Rect (..), Size (..), V2 (..), WindowMode (..), WindowSettings (..), WindowState (..), askInput, askWindow
-  , button', canvas, colorB, colorG, colorR, colorRGBA, column, columnWith, defaultWindowSettings, drawText, drawing
-  , fixedWH, inlineText, pageColor, quitUi, requestFrame, rgbaBytes, rgbaHeight, rgbaWidth, richText
-  , setWindowTitleUi, strong, tight, tomorrowNightMinDarkTheme, windowColor, windowSize
+  , Rect (..), Shader, ShaderKind (..), Size (..), V2 (..), V4 (..), WindowMode (..), WindowSettings (..)
+  , WindowState (..), askInput, askWindow, box, button', canvas, colorB, colorBlack, colorG, colorR, colorRGBA, column
+  , columnWith, defaultWindowSettings, drawText, drawing, emptyShaderProgram, fixedWH, inlineText, padAll, pageColor
+  , quitUi, rawShader, requestFrame, rgbaBytes, rgbaHeight, rgbaWidth, richText, setWindowTitleUi, shaderBox, strong
+  , tight, tomorrowNightMinDarkTheme, windowColor, windowSize, withShader
   )
-import NanoUI.Backend (Damage (..))
+import NanoUI.Shader (TintParams (..), composeColor, gaussianBlur, grayscale, groupOpacity, tint)
+import NanoUI.Backend (Damage (..), ShaderProgram (..))
 import NanoUI.Backend.Rgfw (RgfwOptions (..), defaultRgfwOptions, runRgfwApp, runRgfwAppReduce)
 import NanoUI qualified as UI
 import NanoUI.Emit (NanoUIE, emit)
@@ -131,6 +134,84 @@ testGlWindow assert =
             inked = filter isInk [0, 4 .. BS.length texts - 4]
         assert (name "partial repaints of drawing text match full ones") (and results)
         assert (name "the canvas text is drawn") (not (null inked))
+        -- Tier 1 surface shader: uniform block layout + UV interpolation + partial repaint.
+        let glsl150Src =
+              T.unlines
+                [ "#version 150"
+                , "in vec4 vColor;"
+                , "in vec2 vUV;"
+                , "layout(std140) uniform NanoShaderBlock {"
+                , "  vec4 uRect;"
+                , "  vec4 uUvRect;"
+                , "  vec4 uMeta;"
+                , "  vec4 uTint;"
+                , "};"
+                , "out vec4 fragColor;"
+                , "void main() {"
+                , "  vec2 uv = (vUV - uUvRect.xy) / uUvRect.zw;"
+                , "  fragColor = vec4(uv.x, uTint.g, uTint.b, 1.0) * vColor;"
+                , "}"
+                ]
+            surfShader :: Shader 'Surface V4
+            surfShader = rawShader emptyShaderProgram {spGlsl150 = Just glsl150Src}
+        shCtx <- newRgfwContext (pageColor backdrop (windowColor backdrop tomorrowNightMinDarkTheme))
+        let shUi u = columnWith tight (shaderBox (fixedWH 40 20) surfShader u)
+        _ <- present shCtx True inp (shUi (V4 0 0.5 0.75 1))
+        shImg1 <- maybe (fail "OpenGL window: no shader screenshot 1") pure =<< retainedPixels renderer w h
+        let pxOf im x y = [fromIntegral (BS.index (rgbaBytes im) ((y * w + x) * 4 + c)) | c <- [0 .. 3]] :: [Int]
+            near4 a b = and (zipWith (\u v -> abs (u - v) <= 3) a b)
+        -- Left edge x=0 -> uv.x ~ 0.0125 -> R ~ 3; right edge x=39 -> uv.x ~ 0.9875 -> R ~ 252.
+        assert (name "surface shader left pixel") (near4 [3, 128, 191, 255] (pxOf shImg1 0 10))
+        assert (name "surface shader right pixel") (near4 [252, 128, 191, 255] (pxOf shImg1 39 10))
+        assert (name "surface shader outside stays backdrop") (near4 (rgb backdrop ++ [255]) (pxOf shImg1 60 10))
+        -- Identical uniform produces zero damage (idle costs nothing).
+        drawnIdle <- present shCtx False inp (shUi (V4 0 0.5 0.75 1))
+        assert (name "surface shader idle draws nothing") (not drawnIdle)
+        -- Updating uniform repaints the shader box partially.
+        drawnDirty <- present shCtx False inp (shUi (V4 0 0.25 1.0 1))
+        assert (name "surface shader uniform change redraws") drawnDirty
+        shImg2 <- maybe (fail "OpenGL window: no shader screenshot 2") pure =<< retainedPixels renderer w h
+        assert (name "surface shader updated pixel") (near4 [252, 64, 255, 255] (pxOf shImg2 39 10))
+
+        -- Tier 2 subtree effects on OpenGL 3.2: grayscale, fused ColorEffect,
+        -- separable 2-pass gaussianBlur bleed halo, and nested groupOpacity.
+        efCtx <- newRgfwContext (pageColor colorBlack (windowColor colorBlack tomorrowNightMinDarkTheme))
+        let srcCol = colorRGBA 200 40 20 255
+        _ <- present efCtx True inp (columnWith tight (withShader grayscale 1.0 (box (fixedWH 60 40) srcCol)))
+        efGray <- maybe (fail "OpenGL window: no grayscale screenshot") pure =<< retainedPixels renderer w h
+        -- 0.2126*200 + 0.7152*40 + 0.0722*20 = 72.57 -> ~73
+        assert (name "Tier 2 grayscale OpenGL readback") (near4 [73, 73, 73, 255] (pxOf efGray 30 20))
+
+        let fused = composeColor grayscale tint
+            fusedU = (1.0, TintParams (colorRGBA 0 80 240 255) 0.5)
+        _ <- present efCtx True inp (columnWith tight (withShader fused fusedU (box (fixedWH 60 40) srcCol)))
+        efFused <- maybe (fail "OpenGL window: no fused screenshot") pure =<< retainedPixels renderer w h
+        -- mix (73, 73, 73) (0, 80, 240) 0.5 = (36, 76, 156)
+        assert (name "Tier 2 fused composeColor OpenGL readback") (near4 [36, 76, 156, 255] (pxOf efFused 30 20))
+
+        _ <-
+          present efCtx True inp $
+            columnWith (padAll 30 . tight) $
+              withShader gaussianBlur 4.0 (box (fixedWH 40 40) (colorRGBA 255 0 0 255))
+        efBlur <- maybe (fail "OpenGL window: no blur screenshot") pure =<< retainedPixels renderer w h
+        let centerOk = case pxOf efBlur 50 50 of
+              [cr, cg, cb, _] -> cr > 200 && cg < 10 && cb < 10
+              _ -> False
+            haloOk = case pxOf efBlur 27 50 of
+              [hr, hg, hb, _] -> hr > 15 && hr < 245 && hg < 10 && hb < 10
+              _ -> False
+            farPx = pxOf efBlur 5 50
+        assert (name "Tier 2 gaussianBlur center stays bright red") centerOk
+        assert (name "Tier 2 gaussianBlur bleed halo outside box") haloOk
+        assert (name "Tier 2 gaussianBlur stays within margin") (farPx == [0, 0, 0, 255])
+
+        _ <-
+          present efCtx True inp $
+            columnWith tight $
+              withShader groupOpacity 0.5 $
+                withShader grayscale 1.0 (box (fixedWH 60 40) srcCol)
+        efNest <- maybe (fail "OpenGL window: no nested screenshot") pure =<< retainedPixels renderer w h
+        assert (name "Tier 2 nested groupOpacity(grayscale) OpenGL readback") (near4 [36, 36, 36, 255] (pxOf efNest 30 20))
   where
     w = 240
     h = 120

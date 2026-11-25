@@ -29,6 +29,7 @@ cabal test -j1 all
 | `nano-ui-diagrams-test` | Chart rendering and `diagrams-lib` conversion. |
 | `nano-ui-form-test` | Form validation, submission lifecycles, and resets. |
 | `nano-ui-markdown-test` | CommonMark parsing, layout, and QuickCheck equivalence between incremental appends and full parses. |
+| `nano-ui-shader-test` | Typed fragment shader EDSL compilation, algebraic fusion, std140 uniform packing, SPIR-V, GLSL, MSL, and CPU evaluator parity. |
 | `nano-ui-rgfw-test`, `nano-ui-rgfw-bindings-test` | RGFW input translation, bitmap font metrics, and frame delivery. |
 | `nano-ui-sdl-web-test` | Browser backend input decoding, draw batching, font loading, file dialogs, and debug snapshots (run natively against a scripted host). |
 | `nano-ui-font-search-test`, `nano-ui-font-effects-test` | SDL font discovery, text shaping, line caches, and handle lifetimes. |

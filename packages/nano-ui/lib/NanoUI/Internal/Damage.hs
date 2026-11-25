@@ -40,6 +40,7 @@ import NanoUI.Internal.Store (diffKeys, eqByPtr, ptrEq, slotChangedKeys)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Frame.Chrome (menuPanelBounds)
 import NanoUI.Internal.Layout.ScrollGeometry (decodeScrollConfig, scrollBare)
+import NanoUI.Internal.Shader (ShaderEffectEntry (..))
 import NanoUI.Internal.WidgetText (containerFlagClip, hasFlag)
 import NanoUI.Internal.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.Internal.Types
@@ -737,7 +738,8 @@ clipDamage ctx snap d owners = do
     addFloating (fdFloatingRects d) (fsFloatingRects snap)
   -- Only what lands in the window counts: an empty rect, or one off the
   -- window, would stretch the bounds over pixels nothing changed.
-  let visible = filter rectNonEmpty (map (clipRectToWindow winW winH) added)
+  added' <- if null added then pure added else expandEffectDamage ctx old added
+  let visible = filter rectNonEmpty (map (clipRectToWindow winW winH) added')
       clip = rectBounds visible
       winArea = winW * winH
       -- A frame with more rects than this repaints their bounds.
@@ -752,6 +754,37 @@ clipDamage ctx snap d owners = do
   if winArea > 0 && area > winArea * 0.5
     then (DamageFull, []) <$ traceDamage "DAMAGE full area"
     else (DamageClip clip, pieces) <$ traceDamage "DAMAGE clip"
+
+-- | When the current frame uses Tier 2 shader effects ('NanoUI.withShader'),
+-- expand any damage rect touching an effect container to cover its full
+-- margin-expanded bounds (at both its new and previous positions) so blurs,
+-- shadows, and distortions repaint without clipped halos or stale trails.
+-- Frames without effects return immediately without allocation.
+{-# NOINLINE expandEffectDamage #-}
+expandEffectDamage :: Context -> PrevFrame -> [Rect] -> IO [Rect]
+expandEffectDamage ctx old rects = do
+  effNodes <- activeEffectNodes ctx
+  if null effNodes
+    then pure rects
+    else go effNodes rects
+  where
+    na = ctxNodeArena ctx
+    inflateXY (V2 mx my) (Rect x y w h) = Rect (x - mx) (y - my) (w + 2 * mx) (h + 2 * my)
+    touches rs r = any (isJust . rectIntersect r) rs
+    go [] acc = pure acc
+    go (idx : rest) acc = do
+      mEntry <- lookupShaderEffectAt ctx idx
+      case mEntry of
+        Nothing -> go rest acc
+        Just entry -> do
+          let margin = seeMargin entry
+          curR <- inflateXY margin <$> getNodeRect na idx
+          wid <- getWidgetId na idx
+          let mOldR = inflateXY margin <$> IM.lookup (intKey wid) (pfRects old)
+              hit = touches acc curR || maybe False (touches acc) mOldR
+          if hit
+            then go rest (curR : maybe acc (: acc) mOldR)
+            else go rest acc
 
 -- | Most rects a frame's damage splits into.
 maxDamagePieces :: Int
@@ -963,7 +996,7 @@ storeKeyOwners na wanted = do
               then go (i - 1) found m
               else do
                 nt <- getNodeType na i
-                if nt == NodeText || nt == NodeSpacer || nt == NodeSeparator || nt == NodeImage || nt == NodeBox
+                if nt == NodeText || nt == NodeSpacer || nt == NodeSeparator || nt == NodeImage || nt == NodeBox || nt == NodeShader
                   then go (i - 1) found m
                   else do
                     let !k = intKey wid

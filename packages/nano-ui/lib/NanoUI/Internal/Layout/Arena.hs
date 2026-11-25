@@ -115,6 +115,7 @@ module NanoUI.Internal.Layout.Arena
   , setArenaScope
   , getScopeSignature
   , getNodePaintHash
+  , mixNodePaintHash
   , getPaintSignature
   , ensureScratchCapacity
   , AxisSnapshot (..)
@@ -683,6 +684,12 @@ setNodeValue na idx v = do
   setSolvedValue na idx v
   mixPaintSig na idx 0x5641 (fromIntegral (castFloatToWord32 v))
 
+-- | Mix extra paint-only state (such as a shader hash and packed uniform hash)
+-- into node @idx@'s paint hash and the arena's frame paint signature.
+{-# INLINE mixNodePaintHash #-}
+mixNodePaintHash :: NodeArena -> NodeIdx -> Word64 -> IO ()
+mixNodePaintHash na idx h = mixPaintSig na idx 0x5348 h
+
 -- | Hash over everything the view put in the arena that paint reads: the
 -- input signature ('naInputSig'), the node count, the scopes
 -- ('getScopeSignature'), and the paint state the input signature leaves
@@ -764,7 +771,7 @@ setStyleIdx na idx v = do
   a <- arenaArrays na
   writeTree a idx TreeStyleIdx v
   nt <- readTagEnum a idx TagNodeType
-  if nt == NodeBox || nt == NodeImage || nt == NodeDrawing
+  if nt == NodeBox || nt == NodeImage || nt == NodeDrawing || nt == NodeShader
     then mixPaintSig na idx 0x5354 (fromIntegral v)
     else mixNodeInput na idx 0x5354 (fromIntegral v)
 

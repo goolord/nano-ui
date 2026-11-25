@@ -466,6 +466,43 @@ module NanoUI
   , drawing
   , drawingVersioned
   , drawingCached
+
+    -- ** Fragment shaders
+
+    -- | Pure, phantom-typed fragment shaders for leaf surfaces ('shaderBox',
+    -- 'shaderConfigured') and subtree effects ('withShader'). Uniform records
+    -- derive 'Uniforms' via 'GHC.Generics' for std140 packing and automatic
+    -- paint-hash damage tracking. Use the @nano-ui-shader@ package to author
+    -- multi-backend fragment shaders in typed Haskell, or 'rawShader' for
+    -- hand-written backend sources.
+  , V3 (..)
+  , V4 (..)
+  , GpuType (..)
+  , UniformField (..)
+  , Uniforms (..)
+  , uniformLayout
+  , uniformSize
+  , ShaderKind (..)
+  , IsNodeEffect
+  , ShaderCapabilities (..)
+  , askShaderCapabilities
+  , ShaderProgram (..)
+  , emptyShaderProgram
+  , CpuFragCtx (..)
+  , CpuShaderEval
+  , Shader
+  , contramapShader
+  , fixUniform
+  , rawShader
+  , rawLayerShader
+  , ShaderConfig (..)
+  , defaultShaderConfig
+  , shaderBox
+  , shaderBox'
+  , shaderConfigured
+  , shaderConfigured'
+  , withShader
+  , withShaderWith
     -- | 'DrawOp' values use window coordinates. Construct them through the
     -- canvas API ('canvas', 'runCanvasFor') rather than directly; constructors
     -- after 'DrawTextStyled' are internal encodings of paths, clips, and
@@ -1181,8 +1218,10 @@ import NanoUI.Internal.Input
 import NanoUI.Internal.Monad
 import NanoUI.Internal.NativeWindow
 import NanoUI.Internal.ChildWindow (nativeWindow)
+import NanoUI.Internal.Shader
 import NanoUI.Internal.Style
 import NanoUI.Internal.Tasks
+import NanoUI.Internal.Uniforms (GpuType (..), UniformField (..), Uniforms (..), V3 (..), V4 (..), uniformLayout, uniformSize)
 import NanoUI.Svg
 import NanoUI.Var
 import NanoUI.Internal.Types
@@ -1211,6 +1250,7 @@ import NanoUI.Internal.Widgets.Radio
 import NanoUI.Widgets.RichText
 import NanoUI.Internal.Widgets.Select
 import NanoUI.Internal.Widgets.Sensor
+import NanoUI.Internal.Widgets.Shader
 import NanoUI.Internal.Widgets.Shortcut
 import NanoUI.Internal.Widgets.Slider
 import NanoUI.Internal.Widgets.Table

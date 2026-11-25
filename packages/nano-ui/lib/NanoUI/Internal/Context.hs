@@ -158,6 +158,13 @@ module NanoUI.Internal.Context
   , customMeasureHooks
   , lookupCustomDamageSlop
   , resetDrawingScopeCache
+  , registerNodeShaderAt
+  , lookupNodeShaderAt
+  , registerShaderEffectAt
+  , lookupShaderEffectAt
+  , activeEffectNodes
+  , getShaderCapabilities
+  , setShaderCapabilities
   -- Overlays, modals and key routing ("NanoUI.Internal.Context.Overlay")
   , textInputEditActive
   , modalActive
@@ -251,6 +258,7 @@ module NanoUI.Internal.Context
   , withFramePaint
   , retainedFrameStale
   , setDrawSnapScale
+  , setDrawPixelScale
   , setDrawSquareGeometry
   , setDrawExternalText
   , setDrawRecordOps
@@ -336,7 +344,9 @@ import NanoUI.Internal.Frame.SpanArena (newSpanArena)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId, initialIdContext)
 import NanoUI.Internal.Id.Cursor (newIdCursor)
 import NanoUI.Internal.Input (Composition, Input (..), InputPurpose)
+import NanoUI.Internal.Shader (ShaderCapabilities)
 import NanoUI.Internal.Layout.Arena (getArenaScope, newNodeArena)
+import NanoUI.Internal.Shader (noShaderCapabilities)
 import NanoUI.Internal.Store
 import NanoUI.Internal.Style (Appearance (..), FontStyle, FontVariant (..), FontWeight, Theme, defaultTheme)
 import NanoUI.Internal.Types (ImageId, Rect, newZeroedPrimArray)
@@ -630,6 +640,17 @@ getTheme ctx = readIORef (ctxTheme ctx)
 setDrawReuse :: Context -> Bool -> IO ()
 setDrawReuse ctx on = writeIORef (ctxDrawReuse ctx) (DrawReuse on Nothing)
 
+-- | Set the shader capabilities supported by the active backend. When the
+-- capabilities change, invalidate cached draw reuse and force a full repaint.
+setShaderCapabilities :: Context -> ShaderCapabilities -> IO ()
+setShaderCapabilities ctx caps = do
+  cur <- readIORef (ctxShaderCaps ctx)
+  when (cur /= caps) $ do
+    writeIORef (ctxShaderCaps ctx) caps
+    modifyIORef' (ctxDrawReuse ctx) (\dr -> dr {drLast = Nothing})
+    damageFull ctx
+    markDirty ctx
+
 -- | Toggle the layout overlay ("NanoUI.Internal.Frame.Explain"): a one-pixel
 -- outline inside every layout node, coloured by depth, and a tint on the
 -- hovered node. A change repaints the window and wakes the loop.
@@ -729,6 +750,12 @@ retainedFrameStale force inp presented current = force || inputWindowRedraw inp 
 setDrawSnapScale :: Context -> Float -> IO ()
 setDrawSnapScale ctx s = Draw.setDrawSnapScale (ctxDrawArena ctx) s
 
+-- | Set the device pixel scale forwarded to shaders (@uMeta.x@) without
+-- enabling pixel-grid snapping.
+{-# INLINE setDrawPixelScale #-}
+setDrawPixelScale :: Context -> Float -> IO ()
+setDrawPixelScale ctx s = Draw.setDrawPixelScale (ctxDrawArena ctx) s
+
 -- | Emit rounded shapes and AA strokes as flat, axis-aligned fills. Software
 -- framebuffer hosts enable this so every primitive is a solid quad.
 {-# INLINE setDrawSquareGeometry #-}
@@ -807,6 +834,8 @@ newContext = do
   ctxLoopThread <- newIORef Nothing
   ctxWakeAt <- newIORef 0
   ctxChildWindows <- newIORef []
+  ctxShaderCaps <- newIORef noShaderCapabilities
+  ctxEffectNodes <- newIORef (0, [])
   ctxTheme <- newIORef defaultTheme
   ctxThemeScopes <- newIORef =<< newThemeScopes
   ctxSystemAppearance <- newIORef Nothing

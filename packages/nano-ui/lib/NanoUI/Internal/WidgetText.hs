@@ -42,6 +42,7 @@ module NanoUI.Internal.WidgetText
   , buttonKindOf
   , containerFlagInert
   , containerFlagClip
+  , containerFlagShaderEffect
   , hasFlag
   , tableSortLane
   , tableHeaderPadX
@@ -504,6 +505,11 @@ containerFlagInert = SB.fieldMask SB.containerInert
 {-# INLINE containerFlagClip #-}
 containerFlagClip :: Int
 containerFlagClip = SB.fieldMask SB.containerClip
+
+-- | Marks a @NodeContainer@ that wraps its children in a Tier 2 shader effect.
+{-# INLINE containerFlagShaderEffect #-}
+containerFlagShaderEffect :: Int
+containerFlagShaderEffect = SB.fieldMask SB.containerShaderEffect
 
 -- | Whether the packed style index @si@ carries @flag@.
 {-# INLINE hasFlag #-}

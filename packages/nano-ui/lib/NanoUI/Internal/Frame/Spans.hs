@@ -142,6 +142,7 @@ collectClippedSpans ctx@Context {ctxFontMetrics = fm} idx clip arena = do
           NodeColorPicker -> pure (tagClippedSpans clipHere spans)
           NodePopup -> pure (tagClippedSpans clipHere spans)
           NodeDrawing -> pure (tagClippedSpans clipHere spans)
+          NodeShader -> pure (tagClippedSpans clipHere spans)
       pushSpans arena here
       kids <- getFirstChild (ctxNodeArena ctx) idx
       -- A widget clips its children, as paint does.
@@ -513,6 +514,7 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
     NodeBox -> pure []
     NodePopup -> pure []
     NodeDrawing -> pure []
+    NodeShader -> pure []
 
 -- | Spans inside every floating panel of one kind, clipped to its content box.
 collectFloatingSpansInto :: Context -> NodeType -> SpanArena -> IO ()

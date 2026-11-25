@@ -47,7 +47,7 @@ main = do
     (appView app)
 ```
 
-Workspace packages: `nano-ui` (core), `nano-ui-sdl` (SDL3, TrueType fonts, system font search, native file dialogs, custom title bars), `nano-ui-rgfw` (OpenGL, zero extra dependencies), `nano-ui-sdl-web` (Wasm/WebGL2 browser backend), `nano-ui-emit` (Elm-style messages), `nano-ui-diagrams` (charts in `NanoUI.Plot`), `nano-ui-form` (validated forms), `nano-ui-markdown` (streamable Markdown), `nano-ui-svg` (SVG export).
+Workspace packages: `nano-ui` (core), `nano-ui-sdl` (SDL3, TrueType fonts, system font search, native file dialogs, custom title bars), `nano-ui-rgfw` (OpenGL, zero extra dependencies), `nano-ui-sdl-web` (Wasm/WebGL2 browser backend), `nano-ui-emit` (Elm-style messages), `nano-ui-diagrams` (charts in `NanoUI.Plot`), `nano-ui-form` (validated forms), `nano-ui-markdown` (streamable Markdown), `nano-ui-shader` (typed fragment shader EDSL and built-in effects), `nano-ui-svg` (SVG export).
 
 ## The frame model
 

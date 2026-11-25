@@ -32,24 +32,30 @@ module NanoUI.Rgfw.Internal.Gl
   , glBufferStrides
   ) where
 
-import Control.Exception (bracket)
-import Control.Monad (foldM, forM_, when)
+import Control.Exception (bracket, finally)
+import Control.Monad (foldM, forM_, void, when)
 import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Int (Int32)
+import Data.List (sortOn)
 import Data.Maybe (fromMaybe)
+import Data.Primitive.ByteArray (ByteArray, copyByteArrayToAddr, sizeofByteArray)
+import Data.Primitive.PrimArray (indexPrimArray)
+import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromList)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BSI
 import qualified Data.ByteString.Unsafe as BSU
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import qualified Data.Text.Foreign as TF
-import Data.Word (Word32, Word8)
+import Data.Word (Word32, Word64, Word8)
+import Foreign.C.Types (CChar)
 import Foreign.ForeignPtr (withForeignPtr)
-import Foreign.Marshal.Alloc (callocBytes, free, reallocBytes)
+import Foreign.Marshal.Alloc (alloca, allocaBytes, callocBytes, free, reallocBytes)
 import Foreign.Marshal.Utils (copyBytes)
 import Foreign.Ptr (Ptr, nullPtr, plusPtr)
-import Foreign.Storable (pokeByteOff)
-import NanoUI (Color (..), Rect (..), RgbaPixels, rectInflate, rgbaPixels, roundHalfUp)
+import Foreign.Storable (peek, pokeByteOff)
+import NanoUI (Color (..), Rect (..), RgbaPixels, V2 (..), rectInflate, rgbaPixels, roundHalfUp)
 import NanoUI.Backend (Damage (..))
 import NanoUI.Rgfw.Internal.Context (TextSpan, paintInLayerOrder)
 import NanoUI.Rgfw.Internal.Font.Cozette
@@ -64,9 +70,15 @@ import NanoUI.Backend
   , Context
   , DrawCmd (..)
   , DrawData (..)
+  , EffectSpan (..)
+  , Layer (..)
+  , ShaderCall (..)
+  , ShaderProgram (..)
   , atlasChanges
   , atlasTextureId
+  , drawCmdElems
   , forDrawCmdsInLayer_
+  , sysUniformBytes
   , vertexSize
   )
 
@@ -106,8 +118,37 @@ foreign import ccall unsafe "nano_ui_gl_upload_text"
 foreign import ccall unsafe "nano_ui_gl_draw_geometry"
   c_drawGeometry :: Ptr NanoUiGl -> Int32 -> Int32 -> Int32 -> Int32 -> Word32 -> Word32 -> Int32 -> IO ()
 
+foreign import ccall unsafe "nano_ui_gl_draw_shader"
+  c_drawShader ::
+    Ptr NanoUiGl ->
+    Int32 -> Int32 -> Int32 -> Int32 ->
+    Word32 -> Word32 ->
+    Word64 -> Ptr CChar -> Int32 ->
+    Ptr Word8 -> Int32 ->
+    IO Int32
+
 foreign import ccall unsafe "nano_ui_gl_draw_text"
   c_drawText :: Ptr NanoUiGl -> Int32 -> Int32 -> IO ()
+
+foreign import ccall unsafe "nano_ui_gl_acquire_target"
+  c_acquireTarget :: Ptr NanoUiGl -> Int32 -> Int32 -> Ptr Int32 -> Ptr Int32 -> IO Int32
+
+foreign import ccall unsafe "nano_ui_gl_release_target"
+  c_releaseTarget :: Ptr NanoUiGl -> Int32 -> IO ()
+
+foreign import ccall unsafe "nano_ui_gl_bind_target"
+  c_bindTarget :: Ptr NanoUiGl -> Int32 -> Int32 -> Float -> Float -> IO Int32
+
+foreign import ccall unsafe "nano_ui_gl_composite_effect"
+  c_compositeEffect ::
+    Ptr NanoUiGl -> Int32 ->
+    Float -> Float -> Float -> Float ->
+    Float -> Float -> Float -> Float ->
+    Int32 -> Int32 -> Int32 -> Int32 -> Int32 ->
+    Int32 ->
+    Word64 -> Ptr CChar -> Int32 ->
+    Ptr Word8 -> Int32 ->
+    IO Int32
 
 foreign import ccall unsafe "nano_ui_gl_vertex_bytes"
   c_vertexBytes :: IO Int32
@@ -175,19 +216,304 @@ renderArenaGl r font !scale !fbW !fbH damage pieces drawData baseSpans overlaySp
   began <- c_begin h (fromIntegral fbW) (fromIntegral fbH) scale bgR bgG bgB full
   when (began == 0) $ fail "nano-ui-rgfw: retained framebuffer setup failed"
   atlas <- ensureAtlas r font scale
-  buf <- ensureTextCapacity r ((spanChars baseSpans + spanChars overlaySpans) * 6 * length textBoxes)
-  let spansIn spans n0 = foldM (\n tb -> foldM (writeSpanQuads atlas font tb buf) n spans) n0 textBoxes
-  nBase <- spansIn baseSpans 0
-  nAll <- spansIn overlaySpans nBase
+  let effectSpans = drawEffectSpans drawData
   withForeignPtr (drawVertices drawData) $ \vp ->
     withForeignPtr (drawIndices drawData) $ \ip ->
       c_uploadGeometry h vp (fromIntegral (drawVertexCount drawData)) ip (fromIntegral (drawIndexCount drawData))
-  c_uploadText h buf (fromIntegral nAll)
-  paintInLayerOrder
-    (\layer -> forDrawCmdsInLayer_ layer drawData (drawCmd h scale fbW fbH))
-    (c_drawText h 0 (fromIntegral nBase))
-    (c_drawText h (fromIntegral nBase) (fromIntegral (nAll - nBase)))
+  if sizeofSmallArray effectSpans == 0
+    then do
+      buf <- ensureTextCapacity r ((spanChars baseSpans + spanChars overlaySpans) * 6 * length textBoxes)
+      let spansIn spans n0 = foldM (\n tb -> foldM (writeSpanQuads atlas font tb buf) n spans) n0 textBoxes
+      nBase <- spansIn baseSpans 0
+      nAll <- spansIn overlaySpans nBase
+      c_uploadText h buf (fromIntegral nAll)
+      paintInLayerOrder
+        (\layer -> forDrawCmdsInLayer_ layer drawData (drawCmd h scale fbW fbH 0 0 (drawShaderCalls drawData) (drawUniformBytes drawData)))
+        (c_drawText h 0 (fromIntegral nBase))
+        (c_drawText h (fromIntegral nBase) (fromIntegral (nAll - nBase)))
+    else
+      renderArenaGlWithEffects r h atlas font scale fbW fbH textBoxes drawData effectSpans baseSpans overlaySpans
   c_present h
+
+-- | Render a frame containing Tier 2 subtree effects into pooled offscreen
+-- OpenGL 3.2 framebuffers. Cozette text spans falling inside an effect span
+-- are drawn into that span's offscreen target before its shader passes run.
+{-# NOINLINE renderArenaGlWithEffects #-}
+renderArenaGlWithEffects ::
+  GlRenderer ->
+  Ptr NanoUiGl ->
+  GlyphAtlas ->
+  CozetteFont ->
+  Float ->
+  Int ->
+  Int ->
+  [(Int, Int, Int, Int)] ->
+  DrawData ->
+  SmallArray EffectSpan ->
+  [TextSpan] ->
+  [TextSpan] ->
+  IO ()
+renderArenaGlWithEffects r h atlas font !scale !fbW !fbH textBoxes drawData effectSpans baseSpans overlaySpans = do
+  let nSpans = sizeofSmallArray effectSpans
+      allSpans = [indexSmallArray effectSpans i | i <- [0 .. nSpans - 1]]
+      isBaseLayer l = l == LayerBackground || l == LayerContent
+      ownerOf isBase (Rect tx ty tw th, _, _, _, _) =
+        let !cx = tx + tw * 0.5
+            !cy = ty + th * 0.5
+            inBounds (Rect bx by bw bh) = cx >= bx && cx <= bx + bw && cy >= by && cy <= by + bh
+            matches =
+              [ esId sp
+              | sp <- allSpans
+              , isBaseLayer (esLayer sp) == isBase
+              , inBounds (esBounds sp)
+              ]
+         in case matches of
+              [] -> 0
+              xs -> maximum xs
+      taggedBase = [(ownerOf True s, s) | s <- baseSpans]
+      taggedOver = [(ownerOf False s, s) | s <- overlaySpans]
+      rootBase = [s | (0, s) <- taggedBase]
+      rootOver = [s | (0, s) <- taggedOver]
+      effectIds = [esId sp | sp <- allSpans]
+      spansForId eid = [s | (k, s) <- taggedBase, k == eid] ++ [s | (k, s) <- taggedOver, k == eid]
+      totalVerts =
+        ((spanChars rootBase + spanChars rootOver) * length textBoxes
+          + sum [spanChars (spansForId eid) | eid <- effectIds])
+          * 6
+  buf <- ensureTextCapacity r totalVerts
+  let writeBoxes boxes spans n0 = foldM (\n tb -> foldM (writeSpanQuads atlas font tb buf) n spans) n0 boxes
+  nRootBase <- writeBoxes textBoxes rootBase 0
+  nRootOver <- writeBoxes textBoxes rootOver nRootBase
+  (spanRanges, nFinal) <-
+    foldM
+      (\(acc, n0) eid -> do
+        n1 <- writeBoxes [(0, 0, fbW, fbH)] (spansForId eid) n0
+        pure ((eid, (n0, n1 - n0)) : acc, n1))
+      ([], nRootOver)
+      effectIds
+  c_uploadText h buf (fromIntegral nFinal)
+  let cmds = smallArrayFromList (drawCmdElems drawData)
+      offsets = drawLayerOffsets drawData
+      shaderCalls = drawShaderCalls drawData
+      uBytes = drawUniformBytes drawData
+      drawSpanText eid =
+        case lookup eid spanRanges of
+          Just (startV, cntV) | cntV > 0 -> c_drawText h (fromIntegral startV) (fromIntegral cntV)
+          _ -> pure ()
+      renderLayer layer =
+        let !lo = indexPrimArray offsets (fromEnum layer)
+            !hi = indexPrimArray offsets (fromEnum layer + 1)
+         in execGlRange h scale fbW fbH effectSpans cmds shaderCalls uBytes drawSpanText 0 (-1) fbW fbH 0 0 lo hi
+  paintInLayerOrder
+    renderLayer
+    (c_drawText h 0 (fromIntegral nRootBase))
+    (c_drawText h (fromIntegral nRootBase) (fromIntegral (nRootOver - nRootBase)))
+
+execGlRange ::
+  Ptr NanoUiGl ->
+  Float ->
+  Int ->
+  Int ->
+  SmallArray EffectSpan ->
+  SmallArray DrawCmd ->
+  SmallArray ShaderCall ->
+  ByteArray ->
+  (Int -> IO ()) ->
+  Int ->
+  Int ->
+  Int ->
+  Int ->
+  Float ->
+  Float ->
+  Int ->
+  Int ->
+  IO ()
+execGlRange h !scale !fbW !fbH spans cmds shaderCalls uBytes drawSpanText parentId parentSlot parentW parentH parentOx parentOy rangeStart rangeEnd =
+  go rangeStart directChildren
+  where
+    directChildren =
+      sortOn (\sp -> (esCmdStart sp, esId sp))
+        [ sp
+        | i <- [0 .. sizeofSmallArray spans - 1]
+        , let sp = indexSmallArray spans i
+        , esParent sp == parentId
+        , esCmdStart sp >= rangeStart
+        , esCmdEnd sp <= rangeEnd
+        ]
+
+    emitPlain from to = loop from
+      where
+        loop !i
+          | i >= to = pure ()
+          | otherwise = do
+              drawCmd h scale parentW parentH parentOx parentOy shaderCalls uBytes (indexSmallArray cmds i)
+              loop (i + 1)
+
+    go !cur [] = emitPlain cur rangeEnd
+    go !cur (sp : rest) = do
+      let !s = max cur (esCmdStart sp)
+          !e = min rangeEnd (esCmdEnd sp)
+      when (s > cur) (emitPlain cur s)
+      when (e > s) (runSpan sp s e)
+      go (max cur e) rest
+
+    runSpan sp s e = do
+      let Rect bx by bw bh = esBounds sp
+          V2 mx my = esMargin sp
+          !ex = bx - mx
+          !ey = by - my
+          !ew = bw + 2 * mx
+          !eh = bh + 2 * my
+          passes = esPasses sp
+          !nPasses = sizeofSmallArray passes
+      if nPasses <= 0 || ew <= 0 || eh <= 0
+        then do
+          execGlRange h scale fbW fbH spans cmds shaderCalls uBytes drawSpanText (esId sp) parentSlot parentW parentH parentOx parentOy s e
+          drawSpanText (esId sp)
+        else do
+          let !px0 = floor (ex * scale) :: Int
+              !py0 = floor (ey * scale) :: Int
+              !px1 = ceiling ((ex + ew) * scale) :: Int
+              !py1 = ceiling ((ey + eh) * scale) :: Int
+              !pw = max 1 (px1 - px0)
+              !ph = max 1 (py1 - py0)
+              !ox = fromIntegral px0 / scale
+              !oy = fromIntegral py0 / scale
+          (slot0, cap0W, cap0H) <- acquireGlTarget h pw ph
+          if slot0 < 0
+            then do
+              execGlRange h scale fbW fbH spans cmds shaderCalls uBytes drawSpanText (esId sp) parentSlot parentW parentH parentOx parentOy s e
+              drawSpanText (esId sp)
+            else do
+              let restoreParent = void $ c_bindTarget h (fromIntegral parentSlot) 0 parentOx parentOy
+                  runOffscreen = do
+                    okBind <- c_bindTarget h (fromIntegral slot0) 1 ox oy
+                    when (okBind /= 0) $ do
+                      execGlRange h scale fbW fbH spans cmds shaderCalls uBytes drawSpanText (esId sp) slot0 cap0W cap0H ox oy s e
+                      drawSpanText (esId sp)
+                      let !nodePx = bx * scale - fromIntegral px0
+                          !nodePy = by * scale - fromIntegral py0
+                          !nodePw = max 1.0e-4 (bw * scale)
+                          !nodePh = max 1.0e-4 (bh * scale)
+                          !destPx = fromIntegral px0 - parentOx * scale
+                          !destPy = fromIntegral py0 - parentOy * scale
+                          runPasses !srcSlot !srcCapW !srcCapH !dstSlot !dstCapW !dstCapH !passIdx
+                            | passIdx >= nPasses = pure ()
+                            | otherwise = do
+                                -- OpenGL FBO textures have V=1 at top-left (y=0) and V=0 at bottom.
+                                let !u1 = fromIntegral pw / fromIntegral srcCapW
+                                    !v0 = 1.0 :: Float
+                                    !v1 = 1.0 - fromIntegral ph / fromIntegral srcCapH
+                                    !nodeU0 = nodePx / fromIntegral srcCapW
+                                    !nodeV0 = 1.0 - nodePy / fromIntegral srcCapH
+                                    !nodeUSpan = nodePw / fromIntegral srcCapW
+                                    !nodeVSpan = negate (nodePh / fromIntegral srcCapH)
+                                    sc = indexSmallArray passes passIdx
+                                if passIdx < nPasses - 1 && dstSlot >= 0
+                                  then do
+                                    okDst <- c_bindTarget h (fromIntegral dstSlot) 1 0 0
+                                    when (okDst /= 0) $ do
+                                      compositeGlPass
+                                        h srcSlot
+                                        0 0 (fromIntegral pw) (fromIntegral ph)
+                                        0 v0 u1 v1
+                                        0 0 0 0 0 1
+                                        sc uBytes
+                                        nodeU0 nodeV0 nodeUSpan nodeVSpan
+                                        (fromIntegral srcCapW) (fromIntegral srcCapH)
+                                      runPasses dstSlot dstCapW dstCapH srcSlot srcCapW srcCapH (passIdx + 1)
+                                  else do
+                                    okPar <- c_bindTarget h (fromIntegral parentSlot) 0 parentOx parentOy
+                                    when (okPar /= 0) $ do
+                                      let Rect cx cy cw ch = esClip sp
+                                          !clipOpen = cw >= 1e8 || ch >= 1e8
+                                      if clipOpen
+                                        then
+                                          compositeGlPass
+                                            h srcSlot
+                                            destPx destPy (fromIntegral pw) (fromIntegral ph)
+                                            0 v0 u1 v1
+                                            0 0 0 0 0 0
+                                            sc uBytes
+                                            nodeU0 nodeV0 nodeUSpan nodeVSpan
+                                            (fromIntegral srcCapW) (fromIntegral srcCapH)
+                                        else
+                                          case physClip scale parentW parentH (Rect (cx - parentOx) (cy - parentOy) cw ch) of
+                                            Nothing -> pure ()
+                                            Just (sx0, sy0, sx1, sy1) ->
+                                              compositeGlPass
+                                                h srcSlot
+                                                destPx destPy (fromIntegral pw) (fromIntegral ph)
+                                                0 v0 u1 v1
+                                                1 sx0 sy0 sx1 sy1 0
+                                                sc uBytes
+                                                nodeU0 nodeV0 nodeUSpan nodeVSpan
+                                                (fromIntegral srcCapW) (fromIntegral srcCapH)
+                      if nPasses > 1
+                        then do
+                          (slot1, cap1W, cap1H) <- acquireGlTarget h pw ph
+                          runPasses slot0 cap0W cap0H slot1 cap1W cap1H 0
+                            `finally` when (slot1 >= 0) (c_releaseTarget h (fromIntegral slot1))
+                        else
+                          runPasses slot0 cap0W cap0H (-1) 0 0 0
+              runOffscreen
+                `finally` (restoreParent >> c_releaseTarget h (fromIntegral slot0))
+
+acquireGlTarget :: Ptr NanoUiGl -> Int -> Int -> IO (Int, Int, Int)
+acquireGlTarget h minW minH =
+  alloca $ \pW ->
+    alloca $ \pH -> do
+      slot <- c_acquireTarget h (fromIntegral minW) (fromIntegral minH) pW pH
+      if slot < 0
+        then pure (-1, 0, 0)
+        else do
+          cw <- peek pW
+          ch <- peek pH
+          pure (fromIntegral slot, fromIntegral cw, fromIntegral ch)
+
+{-# NOINLINE compositeGlPass #-}
+compositeGlPass ::
+  Ptr NanoUiGl -> Int ->
+  Float -> Float -> Float -> Float ->
+  Float -> Float -> Float -> Float ->
+  Int32 -> Int -> Int -> Int -> Int ->
+  Int32 ->
+  ShaderCall -> ByteArray ->
+  Float -> Float -> Float -> Float ->
+  Float -> Float ->
+  IO ()
+compositeGlPass
+  h srcSlot
+  dx dy dw dh
+  u0 v0 u1 v1
+  hasSc sx0 sy0 sx1 sy1
+  blendCopy sc uniformBytes
+  nodeU0 nodeV0 nodeUSpan nodeVSpan
+  targetW targetH =
+  case spGlsl150 (scProgram sc) of
+    Nothing -> pure ()
+    Just src -> do
+      let srcUtf8 = TE.encodeUtf8 src
+          !uOff = scUniformOffset sc
+          !uLen = max sysUniformBytes (min (scUniformLength sc) (max 0 (sizeofByteArray uniformBytes - uOff)))
+          !copyLen = min uLen (max 0 (sizeofByteArray uniformBytes - uOff))
+      BSU.unsafeUseAsCStringLen srcUtf8 $ \(srcPtr, srcLen) ->
+        allocaBytes uLen $ \uPtr -> do
+          when (copyLen > 0) $ copyByteArrayToAddr uPtr uniformBytes uOff copyLen
+          pokeByteOff uPtr 16 nodeU0
+          pokeByteOff uPtr 20 nodeV0
+          pokeByteOff uPtr 24 nodeUSpan
+          pokeByteOff uPtr 28 nodeVSpan
+          pokeByteOff uPtr 40 targetW
+          pokeByteOff uPtr 44 targetH
+          void $
+            c_compositeEffect
+              h (fromIntegral srcSlot)
+              dx dy dw dh
+              u0 v0 u1 v1
+              hasSc (fromIntegral sx0) (fromIntegral sy0) (fromIntegral sx1) (fromIntegral sy1)
+              blendCopy (scHash sc) srcPtr (fromIntegral srcLen)
+              uPtr (fromIntegral uLen)
 
 -- | Upload image atlas changes since the last sync: dirty rects, or the
 -- whole atlas after a resize or on first use. Call before 'renderArenaGl'
@@ -241,15 +567,42 @@ retainedPixels r w0 h0 = do
 damageBox :: Float -> Int -> Int -> Rect -> (Int, Int, Int, Int)
 damageBox !scale !w !h = fromMaybe (0, 0, 0, 0) . physClip scale w h . rectInflate 1
 
-drawCmd :: Ptr NanoUiGl -> Float -> Int -> Int -> DrawCmd -> IO ()
-drawCmd h !scale !fbW !fbH cmd
+drawCmd :: Ptr NanoUiGl -> Float -> Int -> Int -> Float -> Float -> SmallArray ShaderCall -> ByteArray -> DrawCmd -> IO ()
+drawCmd h !scale !curW !curH !ox !oy shaderCalls uniformBytes cmd
   | cmdIndexCount cmd < 3 = pure ()
   | otherwise =
-      case physClip scale fbW fbH (Rect (cmdClipX cmd) (cmdClipY cmd) (cmdClipW cmd) (cmdClipH cmd)) of
+      case physClip scale curW curH (Rect (cmdClipX cmd - ox) (cmdClipY cmd - oy) (cmdClipW cmd) (cmdClipH cmd)) of
         Nothing -> pure ()
         Just (x0, y0, x1, y1) ->
-          c_drawGeometry h (fromIntegral x0) (fromIntegral y0) (fromIntegral x1) (fromIntegral y1)
-            (cmdIndexOffset cmd) (cmdIndexCount cmd) (if cmdTextureId cmd == atlasTextureId then 1 else 0)
+          let !shIdx = fromIntegral (cmdShader cmd) :: Int
+           in if shIdx > 0 && shIdx <= sizeofSmallArray shaderCalls
+                then drawShaderCmd h x0 y0 x1 y1 cmd (indexSmallArray shaderCalls (shIdx - 1)) uniformBytes
+                else
+                  c_drawGeometry h (fromIntegral x0) (fromIntegral y0) (fromIntegral x1) (fromIntegral y1)
+                    (cmdIndexOffset cmd) (cmdIndexCount cmd) (if cmdTextureId cmd == atlasTextureId then 1 else 0)
+
+{-# NOINLINE drawShaderCmd #-}
+drawShaderCmd :: Ptr NanoUiGl -> Int -> Int -> Int -> Int -> DrawCmd -> ShaderCall -> ByteArray -> IO ()
+drawShaderCmd h x0 y0 x1 y1 cmd sc uniformBytes =
+  case spGlsl150 (scProgram sc) of
+    Nothing -> pure ()
+    Just src -> do
+      let srcUtf8 = TE.encodeUtf8 src
+          !uOff = scUniformOffset sc
+          !uLen = min (scUniformLength sc) (max 0 (sizeofByteArray uniformBytes - uOff))
+      BSU.unsafeUseAsCStringLen srcUtf8 $ \(srcPtr, srcLen) ->
+        if uLen > 0
+          then allocaBytes uLen $ \uPtr -> do
+            copyByteArrayToAddr uPtr uniformBytes uOff uLen
+            void $
+              c_drawShader h (fromIntegral x0) (fromIntegral y0) (fromIntegral x1) (fromIntegral y1)
+                (cmdIndexOffset cmd) (cmdIndexCount cmd) (scHash sc) srcPtr (fromIntegral srcLen)
+                uPtr (fromIntegral uLen)
+          else
+            void $
+              c_drawShader h (fromIntegral x0) (fromIntegral y0) (fromIntegral x1) (fromIntegral y1)
+                (cmdIndexOffset cmd) (cmdIndexCount cmd) (scHash sc) srcPtr (fromIntegral srcLen)
+                nullPtr 0
 
 -- | Scale logical x/y/width/height to physical pixels, snapping both edges
 -- with half-up rounding. Returns x/y/width/height with non-negative extents.

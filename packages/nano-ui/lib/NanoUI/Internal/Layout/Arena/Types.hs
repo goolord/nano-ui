@@ -216,6 +216,9 @@ data NodeType
   | NodeDrawing
   -- ^ A custom widget or drawing that the application paints. Its registration
   -- holds drawing behavior and keyboard claims.
+  | NodeShader
+  -- ^ A leaf surface shader node ('NanoUI.shaderBox'). Its registration holds
+  -- its packed fragment pass, corner radius, tint, and fallback colour.
   deriving (Eq, Show, Enum, Bounded)
 
 -- | Whether the node is a control the pointer can hover: a button, slider,
@@ -243,6 +246,7 @@ isWidgetNode nt =
     NodeWindow -> False
     NodeBox -> False
     NodePopup -> False
+    NodeShader -> False
 
 -- | Whether the node packs a font into its style index that the solver and
 -- @resolveFontFor@ read: a label or a text field. A text area packs one too,
@@ -308,6 +312,7 @@ isContainerNode nt =
     NodeBox -> False
     NodeColorPicker -> False
     NodeDrawing -> False
+    NodeShader -> False
 
 -- | Whether the node is a 'NodeScrollContainer'. A text area scrolls its own
 -- content and does not count.

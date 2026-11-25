@@ -29,9 +29,10 @@ module NanoUI.SdlWeb.Internal.Host
   , queryCanvas
   ) where
 
+import Data.Int (Int32)
+import Data.Word (Word8)
 import Foreign.Marshal.Array (allocaArray, peekArray)
 import Foreign.Ptr (Ptr)
-import Data.Word (Word8)
 #if defined(wasm32_HOST_ARCH)
 import Control.Exception (evaluate)
 import Control.Monad (void)
@@ -68,6 +69,27 @@ data WebHost = WebHost
   -- ^ Vertices and their count (32 bytes each: position, colour, UV, as
   -- 32-bit floats), indices and their count (32-bit), then draw commands
   -- and their count ('commandRecordSize' bytes each).
+  , whRegisterShader :: Int -> Ptr Word8 -> Int -> IO Bool
+  -- ^ Compile and link a GLSL ES 300 fragment shader under shader slot
+  -- @slot@ (@>= 1@), returning whether compilation and linking succeeded.
+  , whUploadUniforms :: Ptr Word8 -> Int -> IO ()
+  -- ^ Copy the frame's std140 shader uniform bytes to the host before 'whDraw'.
+  , whAcquireTarget :: Int -> Int -> Ptr Int32 -> IO Int
+  -- ^ Acquire a 64px-bucketed pooled RGBA8 offscreen WebGL2 framebuffer,
+  -- writing its physical @(capW, capH)@ into the 2-int buffer and returning
+  -- its non-negative slot index (or -1 on failure).
+  , whReleaseTarget :: Int -> IO ()
+  -- ^ Return a pooled offscreen target slot to the free pool.
+  , whBindTarget :: Int -> Bool -> Double -> Double -> IO ()
+  -- ^ Bind pooled target @slot >= 0@, or the default canvas backbuffer when
+  -- @slot < 0@, optionally clearing to transparent black and setting logical
+  -- vertex origin @(ox, oy)@.
+  , whCompositeEffect :: Int -> Int -> Bool -> Ptr Float -> Ptr Int32 -> Ptr Word8 -> Int -> IO ()
+  -- ^ Composite pooled texture @srcSlot@ through shader @shaderSlot@ onto the
+  -- bound target. @blendCopy@ disables blending for intermediate passes;
+  -- @rectUvPtr@ holds 8 floats @(dx, dy, dw, dh, u0, v0, u1, v1)@;
+  -- @scissorPtr@ holds 5 ints @(hasScissor, sx, sy, sw, sh)@; @uPtr/uLen@
+  -- holds the pass's patched std140 uniform block.
   , whSetCursor :: Ptr Word8 -> Int -> IO ()
   -- ^ The canvas's CSS cursor, @none@ to hide it.
   , whTextInput :: Int -> Double -> Double -> Double -> Double -> IO ()
@@ -129,11 +151,13 @@ data WebHost = WebHost
 eventRecordSize :: Int
 eventRecordSize = 32
 
--- | Bytes in one draw command record, eight 32-bit integers: texture slot
--- (-1 for none), first index, index count, whether to scissor, and the
--- scissor rect in device pixels from the top left (x, y, width, height).
+-- | Bytes in one draw command record, twelve 32-bit integers: texture slot
+-- (-1 for none), first index, index count, whether to scissor, the scissor
+-- rect in device pixels from the top left (x, y, width, height), shader slot
+-- (0 for standard geometry), uniform byte offset, uniform byte length, and a
+-- reserved word.
 commandRecordSize :: Int
-commandRecordSize = 32
+commandRecordSize = 48
 
 -- | The texture slot of the image atlas. Slots 0 to 3 are the glyph pages.
 imageAtlasSlot :: Int
@@ -178,6 +202,13 @@ browserHost = do
       , whUploadTexture = jsUploadTexture
       , whBeginFrame = \clear r g b a scale w h -> jsBeginFrame (fromEnum clear) r g b a scale w h
       , whDraw = jsDraw
+      , whRegisterShader = \slot p n -> (/= 0) <$> jsRegisterShader slot p n
+      , whUploadUniforms = jsUploadUniforms
+      , whAcquireTarget = jsAcquireTarget
+      , whReleaseTarget = jsReleaseTarget
+      , whBindTarget = \slot clear ox oy -> jsBindTarget slot (fromEnum clear) ox oy
+      , whCompositeEffect = \srcSlot shSlot blendCopy rPtr sPtr uPtr uLen ->
+          jsCompositeEffect srcSlot shSlot (fromEnum blendCopy) rPtr sPtr uPtr uLen
       , whSetCursor = jsSetCursor
       , whTextInput = jsTextInput
       , whClipboardRead = jsClipboardRead
@@ -225,6 +256,24 @@ foreign import javascript unsafe "globalThis.nanoUiSdlWeb.beginFrame($1, $2, $3,
 
 foreign import javascript unsafe "globalThis.nanoUiSdlWeb.draw($1, $2, $3, $4, $5, $6)"
   jsDraw :: Ptr Word8 -> Int -> Ptr Word8 -> Int -> Ptr Word8 -> Int -> IO ()
+
+foreign import javascript unsafe "globalThis.nanoUiSdlWeb.registerShader($1, $2, $3)"
+  jsRegisterShader :: Int -> Ptr Word8 -> Int -> IO Int
+
+foreign import javascript unsafe "globalThis.nanoUiSdlWeb.uploadUniforms($1, $2)"
+  jsUploadUniforms :: Ptr Word8 -> Int -> IO ()
+
+foreign import javascript unsafe "globalThis.nanoUiSdlWeb.acquireTarget($1, $2, $3)"
+  jsAcquireTarget :: Int -> Int -> Ptr Int32 -> IO Int
+
+foreign import javascript unsafe "globalThis.nanoUiSdlWeb.releaseTarget($1)"
+  jsReleaseTarget :: Int -> IO ()
+
+foreign import javascript unsafe "globalThis.nanoUiSdlWeb.bindTarget($1, $2, $3, $4)"
+  jsBindTarget :: Int -> Int -> Double -> Double -> IO ()
+
+foreign import javascript unsafe "globalThis.nanoUiSdlWeb.compositeEffect($1, $2, $3, $4, $5, $6, $7)"
+  jsCompositeEffect :: Int -> Int -> Int -> Ptr Float -> Ptr Int32 -> Ptr Word8 -> Int -> IO ()
 
 foreign import javascript unsafe "globalThis.nanoUiSdlWeb.setCursor($1, $2)"
   jsSetCursor :: Ptr Word8 -> Int -> IO ()

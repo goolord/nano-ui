@@ -41,6 +41,7 @@ import Cases.Runner qualified
 import Cases.SIMD qualified
 import Cases.Scroll qualified
 import Cases.Select qualified
+import Cases.Shader qualified
 import Cases.Shaping qualified
 import Cases.Shortcut qualified
 import Cases.SimFuzz qualified
@@ -103,6 +104,7 @@ main = do
     , Cases.SIMD.tests
     , Cases.Scroll.tests
     , Cases.Select.tests
+    , Cases.Shader.tests
     , Cases.Shaping.tests
     , Cases.Shortcut.tests
     , Cases.SimFuzz.tests

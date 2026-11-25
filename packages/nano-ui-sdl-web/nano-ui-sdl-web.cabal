@@ -82,6 +82,7 @@ library
         nano-ui ^>=0.2,
         nano-ui-emit ^>=0.1,
         nano-ui-ttf ^>=0.1,
+        primitive ^>=0.9,
         text >=2.1.2 && <2.2,
         vector ^>=0.13
     hs-source-dirs:   lib

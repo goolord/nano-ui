@@ -68,6 +68,7 @@ import NanoUI.Backend
   , installWindowHost
   , reportWindowState
   , setExplainLayout
+  , setDrawPixelScale
   , setWakeLoop
   , sizeLimitAt
   , syncCursorKind
@@ -460,6 +461,7 @@ syncRgfwDisplay sh rw c inp = do
       !k = oldScale / newScale
       mouse = if k == 1 then inputMousePos inp else V2 (mx * k) (my * k)
   writeIORef (rwScale rw) newScale
+  setDrawPixelScale c newScale
   reportWindowState c =<< rgfwWindowState (rwWin rw) newScale
   pure (c, inp {inputWindowSize = logicalSize (pw, ph) newScale, inputMousePos = mouse})
 
@@ -481,6 +483,7 @@ presentRgfw sh rw renderer force c curInp runUi = do
   useGl sh win
   tUiStart <- getMonotonicTime
   curScale <- readIORef (rwScale rw)
+  setDrawPixelScale c curScale
   (pw, ph) <- readIORef (rwSize rw)
   presented <- readIORef (rwPresented rw)
   let !paintFull = retainedFrameStale force curInp presented (pw, ph, curScale)

@@ -140,8 +140,10 @@ test-suite nano-ui-render-test
         nano-ui,
         nano-ui-emit,
         nano-ui-sdl,
+        nano-ui-shader,
         primitive ^>=0.9,
         sdl3-bindgen-sys ^>=0.0.0.2,
+        text ^>=2.1,
         vector ^>=0.13
     if !flag(sdl)
         buildable: False

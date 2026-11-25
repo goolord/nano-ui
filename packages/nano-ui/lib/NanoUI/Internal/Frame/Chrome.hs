@@ -64,6 +64,7 @@ displayText ctx nt idx = do
     NodeColorPicker -> pure txt
     NodePopup -> pure txt
     NodeDrawing -> pure txt
+    NodeShader -> pure txt
 
 selectCurrentOption :: Context -> NodeIdx -> IO Text
 selectCurrentOption ctx idx = do
@@ -348,6 +349,7 @@ widgetVisualStyleWith ctx hot active focus nt idx = do
           NodeWindow -> themeButton theme
           NodeBox -> themeButton theme
           NodePopup -> themeButton theme
+          NodeShader -> themeButton theme
       widgetBase =
         case mFloat of
           -- Rows keep their selection and stripes, on the modal's surface.

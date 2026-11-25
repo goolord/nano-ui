@@ -45,3 +45,13 @@ Custom widgets that accept keyboard input declare their claimed keys via `widget
 
 - **External links:** `openUrl` opens a URL or path via the OS default handler (in `IO`). Always validate the URL scheme when opening untrusted content.
 - **Low-level session access:** `askSdlEnv` returns the `SdlEnv` needed for direct `IO` operations (always call on the display thread). Most apps never need it because `setSdlUiScale`, `setSdlUiFont`, and `windowCaption` work directly as safe view actions.
+
+## Fragment shaders
+
+Use `shaderBox` / `shaderConfigured` (from `NanoUI`) for Tier 1 leaf surface fills (zero offscreen targets) and `withShader` for Tier 2 subtree effects (pooled offscreen targets, interactive children preserved). Define custom shaders at top level using `nano-ui-shader` (`import NanoUI.Shader`) so compilation happens once:
+
+- **Uniforms:** Derive `Generic` and `Uniforms` on a product record (`Float`, `Int32`, `Word32`, `Bool`, `V2`, `V3`, `V4`, `Color`, `Rect`, `Size`, tuples). Packing uses std140 alignment and drives damage diffing automatically (unchanged uniforms produce zero damage).
+- **EDSL authoring:** Enable `DataKinds` and `OverloadedRecordDot` to write `surfaceShader`, `colorEffect`, `distortionEffect`, or `layerEffect` (and `*M` variants with `bind` and bounded `forRange` loops). Project uniform fields (`u.color.rgb`) and vector swizzles (`ctx.uv.yx`) directly with dot syntax; vector-scalar operators are `(*^)`, `(^*)`, `(/^)`, `(+^)`, `(-^)`.
+- **Composition:** Fuse compatible effects into one GPU pass with `composeColor`, `composeDistort`, and `distortThenColor`, or chain multi-pass effects with `chainLayer`.
+- **Built-in library:** `meshGradient4`, `radialGlow`, `sdfRoundedBox`, `colorWheelHsv`, `noiseGrain`, `checkerboard`, `groupOpacity` (also exports SVG `<g opacity="...">`), `grayscale`, `tint`, `brightnessContrast`, `colorMatrix`, `vignette`, `scanlines`, `waveDistort`, `rippleDistort`, `pixelate`, `boxBlur`, `gaussianBlur`, `dropShadow`, `outerGlow`, `chromaticAberration`.
+- **Fallback:** Query live support via `askShaderCapabilities`. Without GPU shader support (such as SDL's software renderer), `shaderConfigured` draws `scFallback` and `withShader` renders its children directly. On SDL 3.4+, `RenderDriverAuto` selects `"gpu"` automatically when available.

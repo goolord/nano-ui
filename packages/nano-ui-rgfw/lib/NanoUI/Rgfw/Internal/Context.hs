@@ -8,8 +8,8 @@ module NanoUI.Rgfw.Internal.Context
   ) where
 
 import Data.Text (Text)
-import NanoUI (Color, Rect, Theme, borderWidth, cornerRadius, everyStyle)
-import NanoUI.Backend (measureTextIO)
+import NanoUI (Color, Rect, ShaderCapabilities (..), Theme, borderWidth, cornerRadius, everyStyle)
+import NanoUI.Backend (Layer (..), measureTextIO, newPixelContext, setShaderCapabilities)
 import NanoUI.Internal.Context
   ( Context
   , setDrawExternalText
@@ -20,7 +20,6 @@ import NanoUI.Internal.Context
   , withMonoFontMetrics
   )
 import NanoUI.Rgfw.Internal.Font.Cozette (cozetteMetrics)
-import NanoUI.Backend (Layer (..), newPixelContext)
 
 -- | Pixel context configured for RGFW: Cozette metrics, square geometry
 -- (every primitive reaches the renderer as a flat quad or triangle), text
@@ -45,6 +44,7 @@ newRgfwContext theme = do
           (\_ _ _ _ -> measureTextIO cozetteMetrics)
   setDrawSquareGeometry ctx True
   setDrawExternalText ctx True
+  setShaderCapabilities ctx (ShaderCapabilities True True)
   applyRgfwTheme ctx theme
   pure ctx
 

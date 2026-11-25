@@ -54,12 +54,15 @@ import Data.Primitive.SmallArray (SmallArray)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import Data.Text.Foreign qualified as TextForeign
+import Data.Word (Word64)
+import Foreign.C.String (CString)
+import Foreign.C.Types (CInt (..))
 import Foreign.Marshal.Utils (fromBool, maybePeek)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
-import NanoUI (Appearance, ImageId, Input (..), NanoUI, Size (..), Theme, V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings, unlessM)
+import NanoUI (Appearance, ImageId, Input (..), NanoUI, ShaderCapabilities (..), Size (..), Theme, V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings, unlessM)
 import NanoUI.Backend
   ( Backend (..), BackendSession, SBackend (..), askBackendSession, setBackendSession, withBackendSession, cancelTasks, clearMeasureCache
-  , closeWindowHost, damageFull, installWindowHost, markDirty, newPixelContext, registerImage, reportWindowState, setSystemAppearance
+  , closeWindowHost, damageFull, installWindowHost, markDirty, newPixelContext, registerImage, reportWindowState, setShaderCapabilities, setSystemAppearance
   , inBoundThread, setWakeLoopChecked, withClipboard, withTheme
   )
 import NanoUI.Internal.Context (Context (..), followSystemTheme, setDrawSnapScale)
@@ -361,13 +364,24 @@ withSdlBench =
 -- | Which SDL render driver a session asks for.
 data RenderDriver
   = RenderDriverAuto
-  -- ^ nano-ui picks: GL on Windows, for the presentation stall a live resize
-  -- hits under D3D11, and SDL's own order elsewhere, where it picks well.
+  -- ^ nano-ui picks: SDL 3.4's @"gpu"@ driver (Vulkan or Metal, enabling
+  -- SPIR-V and MSL shaders with zero setup) when available, falling back to
+  -- GL on Windows and SDL's own order elsewhere if GPU creation fails or on
+  -- SDL 3.2.
+  | RenderDriverGpu
+  -- ^ Require SDL 3.4's @"gpu"@ renderer with SPIR-V and MSL shaders enabled.
   | RenderDriverSdlDefault
   -- ^ Leave SDL's own preference order alone.
   | RenderDriverNamed !BS.ByteString
   -- ^ An explicit driver name, e.g. @"d3d11"@ or @"opengl"@.
   deriving (Eq, Show)
+
+foreign import ccall safe "nano_ui_create_window_and_gpu_renderer"
+  c_createWindowAndGpuRenderer ::
+    CString -> CInt -> CInt -> Word64 -> Ptr (Ptr SDL_Window) -> Ptr (Ptr SDL_Renderer) -> IO CInt
+
+foreign import ccall unsafe "nano_ui_renderer_has_gpu"
+  c_rendererHasGpu :: Ptr SDL_Renderer -> IO CInt
 
 setSdlHint :: BS.ByteString -> BS.ByteString -> IO ()
 setSdlHint name value =
@@ -446,12 +460,27 @@ acquireWindowAndRenderer ::
   SdlOptions -> SDL_WindowFlags -> Acquire (Ptr SDL_Window, Ptr SDL_Renderer)
 acquireWindowAndRenderer opts flags =
   mkAcquire
-    ( withRenderDriver (sdlRenderDriver opts) $
-        TextForeign.withCString (wsTitle settings) $ \titlePtr -> do
-          (ok, win, ren) <-
-            outPair (createWindowAndRendererSafe (PtrConst.unsafeFromPtr titlePtr) (round w) (round h) flags)
-          unless ok $ sdlFail "SDL_CreateWindowAndRenderer failed"
-          pure (win, ren)
+    ( do
+        fromEnv <- isJust <$> lookupEnv "SDL_RENDER_DRIVER"
+        let createStandard =
+              withRenderDriver (sdlRenderDriver opts) $
+                TextForeign.withCString (wsTitle settings) $ \titlePtr -> do
+                  (ok, win, ren) <-
+                    outPair (createWindowAndRendererSafe (PtrConst.unsafeFromPtr titlePtr) (round w) (round h) flags)
+                  unless ok $ sdlFail "SDL_CreateWindowAndRenderer failed"
+                  pure (win, ren)
+            tryGpu =
+              TextForeign.withCString (wsTitle settings) $ \titlePtr -> do
+                (ok, win, ren) <-
+                  outPair (c_createWindowAndGpuRenderer titlePtr (round w) (round h) (fromIntegral flags))
+                pure (if ok /= 0 then Just (win, ren) else Nothing)
+        case sdlRenderDriver opts of
+          _ | fromEnv -> createStandard
+          RenderDriverGpu ->
+            tryGpu >>= maybe (sdlFail "SDL 3.4 GPU renderer creation failed") pure
+          RenderDriverAuto ->
+            tryGpu >>= maybe createStandard pure
+          _ -> createStandard
     )
     ( \(win, ren) -> do
         void $ setRenderScale ren 1 1
@@ -496,6 +525,9 @@ startSdlWindow opts flags ctx fontSource monoSource first = do
   let
     scale = density * zoom
   liftIO $ setDrawSnapScale ctx scale
+  liftIO $ do
+    hasGpu <- (/= 0) <$> c_rendererHasGpu sdlRenderer
+    setShaderCapabilities ctx (ShaderCapabilities hasGpu hasGpu)
   sdlRefreshPeriod <- liftIO $ refreshPeriodOf sdlWindow
   sdlRefreshPeriodRef <- liftIO $ newIORef sdlRefreshPeriod
   sdlPresentProbe <- liftIO $ newIORef (PresentProbe 0 0)

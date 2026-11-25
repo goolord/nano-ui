@@ -18,6 +18,12 @@ module NanoUI.Internal.Draw.Types
   , shiftDrawOp
   , quadPolygon
   , DrawCmd (..)
+  , ShaderCall (..)
+  , EffectSpan (..)
+  , PendingEffectSpan (..)
+  , emptyShaderCalls
+  , emptyEffectSpans
+  , emptyUniformBytes
   , DrawData (..)
   , drawCmdCount
   , drawCmdNull
@@ -35,18 +41,21 @@ module NanoUI.Internal.Draw.Types
   )
 where
 
+import Data.Int (Int32)
 import Data.IORef (IORef)
+import Data.Primitive.ByteArray (ByteArray, MutableByteArray, emptyByteArray)
 import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, imapPrimArray, indexPrimArray, primArrayFromListN)
 import qualified Data.Text as T
-import Data.Primitive.SmallArray (SmallArray)
-import Data.Word (Word32, Word8)
+import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
+import Data.Word (Word32, Word64, Word8)
 import Data.Vector.Generic qualified as G
 import Data.Vector.Generic.Mutable qualified as GM
 import Data.Vector.Unboxed qualified as U
 import Foreign.ForeignPtr (ForeignPtr)
 import GHC.Exts (RealWorld)
+import NanoUI.Internal.Shader (ShaderProgram)
 import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), TextDecoration (..))
-import NanoUI.Internal.Types (Color (..), Rect (..))
+import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..))
 
 -- | Painting order from background through content and overlays to chrome.
 data Layer = LayerBackground | LayerContent | LayerOverlay | LayerChrome
@@ -267,8 +276,9 @@ shiftPoints dx dy = imapPrimArray (\i v -> v + (if even i then dx else dy))
 -- | Pure painter from solved logical window bounds to draw operations.
 type DrawingBuild = Rect -> SmallArray DrawOp
 
--- | Indexed draw batch with logical clip, texture id, and layer. Index offset
--- and count are elements, not byte offsets; multiply by 'indexSize' for FFI use.
+-- | Indexed draw batch with logical clip, texture id, layer, and optional
+-- shader call index. Index offset and count are elements, not byte offsets;
+-- multiply by 'indexSize' for FFI use.
 data DrawCmd = DrawCmd
   { cmdClipX :: {-# UNPACK #-} !Float
   , cmdClipY :: {-# UNPACK #-} !Float
@@ -278,18 +288,22 @@ data DrawCmd = DrawCmd
   , cmdIndexOffset :: {-# UNPACK #-} !Word32
   , cmdIndexCount :: {-# UNPACK #-} !Word32
   , cmdLayer :: !Layer
+  , cmdShader :: {-# UNPACK #-} !Int32
+  -- ^ @0@ for the standard UI pipeline; 1-based index into 'drawShaderCalls'.
   }
   deriving (Eq, Show)
 
 -- Vector's tuple representation stores each field in a primitive array. The
 -- isomorphism is inlined at command reads and writes.
-type DrawCmdRep = ((Float, Float, Float, Float), Int, Word32, Word32, Word8)
+type DrawCmdRep = ((Float, Float, Float, Float), Int, Word32, Word32, Word8, Int32)
 
 instance U.IsoUnbox DrawCmd DrawCmdRep where
   {-# INLINE toURepr #-}
-  toURepr (DrawCmd x y w h tex off count layer) = ((x, y, w, h), tex, off, count, fromIntegral (fromEnum layer))
+  toURepr (DrawCmd x y w h tex off count layer sh) =
+    ((x, y, w, h), tex, off, count, fromIntegral (fromEnum layer), sh)
   {-# INLINE fromURepr #-}
-  fromURepr ((x, y, w, h), tex, off, count, layer) = DrawCmd x y w h tex off count (toEnum (fromIntegral layer))
+  fromURepr ((x, y, w, h), tex, off, count, layer, sh) =
+    DrawCmd x y w h tex off count (toEnum (fromIntegral layer)) sh
 
 newtype instance U.MVector s DrawCmd = MVDrawCmd (U.MVector s (U.As DrawCmd DrawCmdRep))
 
@@ -300,6 +314,71 @@ deriving via (U.As DrawCmd DrawCmdRep) instance GM.MVector U.MVector DrawCmd
 deriving via (U.As DrawCmd DrawCmdRep) instance G.Vector U.Vector DrawCmd
 
 instance U.Unbox DrawCmd
+
+-- | One fragment shader invocation referenced by 'cmdShader' (1-based) or an
+-- 'EffectSpan'.
+data ShaderCall = ShaderCall
+  { scHash :: {-# UNPACK #-} !Word64
+  -- ^ Content hash of 'scProgram', used by backends to cache compiled programs.
+  , scProgram :: !ShaderProgram
+  -- ^ Lazy target shader payloads (GLSL 150, GLSL ES 300, SPIR-V, MSL).
+  , scUniformOffset :: {-# UNPACK #-} !Int
+  -- ^ Byte offset into 'drawUniformBytes' (16-byte aligned).
+  , scUniformLength :: {-# UNPACK #-} !Int
+  -- ^ Byte length in 'drawUniformBytes': @48 + userUniformBytes@.
+  }
+
+-- | Brackets a contiguous slice of 'drawCommands' rendered into a pooled
+-- offscreen target and composited back through one or more shader passes.
+data EffectSpan = EffectSpan
+  { esId :: {-# UNPACK #-} !Int
+  -- ^ 1-based identifier of this effect span within the frame.
+  , esParent :: {-# UNPACK #-} !Int
+  -- ^ Enclosing 'esId', or @0@ for the root target.
+  , esLayer :: !Layer
+  -- ^ Layer whose commands this span brackets.
+  , esCmdStart :: {-# UNPACK #-} !Int
+  -- ^ Inclusive start index into 'drawCommands'.
+  , esCmdEnd :: {-# UNPACK #-} !Int
+  -- ^ Exclusive end index into 'drawCommands'.
+  , esBounds :: !Rect
+  -- ^ Logical node rectangle before margin expansion.
+  , esClip :: !Rect
+  -- ^ Enclosing logical clip rectangle active when the span opened.
+  , esMargin :: !V2
+  -- ^ Maximum sample offset in logical pixels (X and Y).
+  , esPasses :: !(SmallArray ShaderCall)
+  -- ^ Shader passes applied in order to the offscreen texture.
+  , esSvgOpacity :: !(Maybe Float)
+  -- ^ Optional native opacity hint for SVG export.
+  }
+
+-- | Unfinalized 'EffectSpan' recorded during painting before 'finishDraw'
+-- maps raw command indices through piece cutting and layer grouping.
+data PendingEffectSpan = PendingEffectSpan
+  { pesId :: {-# UNPACK #-} !Int
+  , pesParent :: {-# UNPACK #-} !Int
+  , pesLayer :: !Layer
+  , pesRawStart :: {-# UNPACK #-} !Int
+  , pesRawEnd :: {-# UNPACK #-} !Int
+  , pesBounds :: !Rect
+  , pesClip :: !Rect
+  , pesMargin :: !V2
+  , pesPasses :: !(SmallArray ShaderCall)
+  , pesSvgOpacity :: !(Maybe Float)
+  }
+
+-- | Shared empty 'SmallArray' for frames without shader calls.
+emptyShaderCalls :: SmallArray ShaderCall
+emptyShaderCalls = smallArrayFromList []
+
+-- | Shared empty 'SmallArray' for frames without offscreen effect spans.
+emptyEffectSpans :: SmallArray EffectSpan
+emptyEffectSpans = smallArrayFromList []
+
+-- | Shared empty 'ByteArray' for frames without shader uniforms.
+emptyUniformBytes :: ByteArray
+emptyUniformBytes = emptyByteArray
 
 -- | One frame's geometry and batches. Vertex/index pointers refer to reusable
 -- arena storage: render or copy them before running another frame on the
@@ -318,6 +397,15 @@ data DrawData = DrawData
   -- the page surface ('NanoUI.pageBackground') laid over the window colour
   -- ('NanoUI.themeWindow'). A clip frame's commands paint it as their own
   -- backdrop.
+  , drawShaderCalls :: !(SmallArray ShaderCall)
+  -- ^ Shader invocations referenced by 1-based 'cmdShader' indices; empty
+  -- when the frame draws no shaders.
+  , drawUniformBytes :: !ByteArray
+  -- ^ Flat std140 uniform byte arena sliced by 'ShaderCall'; empty when the
+  -- frame draws no shaders.
+  , drawEffectSpans :: !(SmallArray EffectSpan)
+  -- ^ Subtree effect spans in open order; empty when the frame uses no
+  -- offscreen effects.
   }
 
 -- | Number of batches across all layers.
@@ -384,12 +472,37 @@ data DrawArena = DrawArena
   -- ^ While 'daRecordOps' is on, the shapes and images this paint drew, newest
   -- first. Emptied only by 'NanoUI.Internal.Draw.Arena.resetDrawArena', so
   -- a reused frame keeps the shapes of the paint that drew it.
+  , daRecordOpacity :: !(IORef Float)
+  -- ^ Active SVG group opacity multiplier when 'daRecordOps' is on (@1.0@
+  -- outside opacity effects).
+  , daCurrentShader :: !(IORef Int32)
+  -- ^ Active 1-based shader call index, or @0@ for the standard UI pipeline.
+  , daNoMergeBefore :: !(IORef Int)
+  -- ^ Minimum command count before which 'flushCmd' may not coalesce into the
+  -- preceding command (updated at effect span boundaries).
+  , daShaderCalls :: !(IORef [ShaderCall])
+  -- ^ Shader calls emitted this paint, newest first.
+  , daShaderCallCount :: !(IORef Int)
+  -- ^ Number of entries in 'daShaderCalls'.
+  , daUniformBuf :: !(IORef (MutableByteArray RealWorld))
+  -- ^ Reusable flat std140 uniform staging buffer, grown lazily on shader use.
+  , daUniformLen :: !(IORef Int)
+  -- ^ Number of bytes written into 'daUniformBuf' this paint.
+  , daEffectSpans :: !(IORef [PendingEffectSpan])
+  -- ^ Closed effect spans recorded this paint, newest first.
+  , daEffectStack :: !(IORef [Int])
+  -- ^ Currently open effect span IDs, innermost first.
+  , daEffectNextId :: !(IORef Int)
+  -- ^ Next 1-based effect span ID.
+  , daPixelScale :: !(IORef Float)
+  -- ^ Logical-to-physical scale forwarded in shader system uniforms (@uMeta.x@).
   }
 
 -- | A solid shape as an emitter drew it: its layer, the clip it drew under,
--- and the shape as the op that draws it. Exporters read these in place of
--- the tessellated vertices ('NanoUI.Internal.Draw.Arena.setDrawRecordOps').
-data RecordedOp = RecordedOp !Layer !Rect !DrawOp
+-- its active group opacity (@1.0@ outside opacity effects), and the shape as
+-- the op that draws it. Exporters read these in place of the tessellated
+-- vertices ('NanoUI.Internal.Draw.Arena.setDrawRecordOps').
+data RecordedOp = RecordedOp !Layer !Rect !Float !DrawOp
 
 -- | Packed vertex stride in bytes: 32. A vertex is eight 32-bit floats: x
 -- and y in logical pixels, red, green, blue and alpha from 0 to 1 with

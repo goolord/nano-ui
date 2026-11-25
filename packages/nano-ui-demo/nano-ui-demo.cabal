@@ -115,6 +115,7 @@ library book-examples
         Book.Layout
         Book.Overlays
         Book.Packages
+        Book.Shaders
         Book.Signatures
         Book.State
         Book.Styling
@@ -130,6 +131,7 @@ library book-examples
         nano-ui-markdown ^>=0.1,
         nano-ui-rgfw ^>=0.1,
         nano-ui-sdl ^>=0.2,
+        nano-ui-shader ^>=0.1,
         nano-ui-svg ^>=0.1,
         primitive ^>=0.9,
         text ^>=2.1
@@ -229,6 +231,7 @@ executable nano-ui-web-landing
         base >=4.20 && <4.23,
         nano-ui ^>=0.2,
         nano-ui-sdl-web ^>=0.1,
+        nano-ui-shader ^>=0.1,
         text ^>=2.1
     if arch(wasm32)
         ghc-options: -no-hs-main -optl-mexec-model=reactor "-optl-Wl,--export=hs_init,--export=nanoMain"
@@ -352,7 +355,9 @@ executable nano-ui-example-bloom
     hs-source-dirs:   examples/sdl
     main-is:          BloomMain.hs
     other-modules:    Bloom
-    build-depends:    text ^>=2.1
+    build-depends:
+        nano-ui-shader ^>=0.1,
+        text ^>=2.1
 
 -- The landing page's program in an SDL window; nano-ui-web-landing is the
 -- browser build of the same view.
@@ -361,7 +366,9 @@ executable nano-ui-sdl-landing
     hs-source-dirs:   examples/sdl
     main-is:          LandingMain.hs
     other-modules:    Bloom, Landing
-    build-depends:    text ^>=2.1
+    build-depends:
+        nano-ui-shader ^>=0.1,
+        text ^>=2.1
 
 executable nano-ui-example-images
     import:           example
@@ -373,6 +380,13 @@ executable nano-ui-example-images
 executable nano-ui-example-canvas
     import:           example
     main-is:          Canvas.hs
+
+executable nano-ui-example-shaders
+    import:           example
+    main-is:          Shaders.hs
+    build-depends:
+        nano-ui-shader ^>=0.1,
+        text ^>=2.1
 
 executable nano-ui-example-tasks
     import:           example

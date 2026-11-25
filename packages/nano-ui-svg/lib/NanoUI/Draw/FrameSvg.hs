@@ -153,10 +153,18 @@ frameToSvg cfg0 ctx inp dd = do
     sizeRatio = ctxFontSize ctx / fmLineHeight fm
     vp = Rect 0 0 vw vh
     -- Each render numbers its ids from 1, so each has its own prefix.
-    render scope ops
-      | null ops = mempty
-      | otherwise =
-          TB.fromText . renderDrawOpsSvg (fragCfg scope) vp $ smallArrayFromList ops
+    render scope runs =
+      mconcat
+        [ let subScope = if i == 0 then scope else scope <> T.pack (show i)
+              inner = TB.fromText . renderDrawOpsSvg (fragCfg subScope) vp $ smallArrayFromList ops
+           in if null ops
+                then mempty
+                else
+                  if alpha < 0.9999
+                    then "<g" <> attr "opacity" (fmtNum p alpha) <> ">" <> inner <> "</g>"
+                    else inner
+        | (i, (alpha, ops)) <- zip [0 :: Int ..] runs
+        ]
     fragCfg scope =
       defaultSvgConfig
         { svgStandalone = False
@@ -213,14 +221,18 @@ documentIdPrefix t =
 
 -- | The recorded shapes in paint order (layer by layer, as the commands
 -- run), split into page shapes ('LayerBackground', 'LayerContent') and
--- overlay shapes ('LayerOverlay', 'LayerChrome'). Each is cut to its clip,
--- or put in a clip group when it overhangs it.
-frameShapes :: [RecordedOp] -> ([DrawOp], [DrawOp])
-frameShapes recorded = (clipRuns page, clipRuns overlay)
+-- overlay shapes ('LayerOverlay', 'LayerChrome'), grouped into consecutive
+-- opacity runs for SVG @\<g opacity\>@ export.
+frameShapes :: [RecordedOp] -> ([(Float, [DrawOp])], [(Float, [DrawOp])])
+frameShapes recorded = (opacityRuns page, opacityRuns overlay)
  where
   (page, overlay) =
-    partition (\(RecordedOp layer _ _) -> layer < LayerOverlay) $
-      sortOn (\(RecordedOp layer _ _) -> layer) recorded
+    partition (\(RecordedOp layer _ _ _) -> layer < LayerOverlay) $
+      sortOn (\(RecordedOp layer _ _ _) -> layer) recorded
+  opacityRuns [] = []
+  opacityRuns (r@(RecordedOp _ _ a _) : rs) =
+    let (same, rest) = span (\(RecordedOp _ _ a' _) -> abs (a' - a) < 1.0e-4) rs
+     in (a, clipRuns (r : same)) : opacityRuns rest
 
 -- | Ops cut to their clips: a rect (an upright or level stroke among them)
 -- is cut to it, a shape inside it stands alone, one outside it is dropped,
@@ -228,7 +240,7 @@ frameShapes recorded = (clipRuns page, clipRuns overlay)
 clipRuns :: [RecordedOp] -> [DrawOp]
 clipRuns = go . concatMap cut
  where
-  cut (RecordedOp _ clip op) = case asRect op of
+  cut (RecordedOp _ clip _ op) = case asRect op of
     FillRect r col -> [(Nothing, FillRect r' col) | Just r' <- [rectIntersect clip r]]
     _ -> case opBounds op of
       Just b

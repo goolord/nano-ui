@@ -27,6 +27,12 @@ module NanoUI.Internal.Context.Drawing
   , customMeasureHooks
   , lookupCustomDamageSlop
   , resetDrawingScopeCache
+  , registerNodeShaderAt
+  , lookupNodeShaderAt
+  , registerShaderEffectAt
+  , lookupShaderEffectAt
+  , activeEffectNodes
+  , getShaderCapabilities
   ) where
 
 import Control.Monad (mfilter, unless, when)
@@ -46,6 +52,7 @@ import NanoUI.Internal.Draw (DrawOp, DrawingBuild, shiftDrawOp)
 import NanoUI.Internal.Id (WidgetId, mix64)
 import NanoUI.Internal.Layout.Arena (NodeArena (..), NodeIdx, NodeType (..), getNodeType, lookupNodeByKey, lookupNodeByWidgetId)
 import NanoUI.Internal.Layout.Arena.Types (growBoxedStoreCopy)
+import NanoUI.Internal.Shader (ShaderCapabilities, ShaderEffectEntry, ShaderNodeEntry)
 import NanoUI.Internal.Store (ptrEq)
 import NanoUI.Internal.Style (Layout)
 import NanoUI.Internal.Types (PopupAnchor, PopupPlacement, Rect (..), V2, rectContains, rectH, rectW)
@@ -125,24 +132,69 @@ nodeCustomAt ctx idx = do
 nodeCustomOf :: Context -> WidgetId -> IO NodeCustom
 nodeCustomOf ctx wid = maybe (pure noNodeCustom) (nodeCustomAt ctx) =<< lookupNodeByWidgetId (ctxNodeArena ctx) wid
 
+-- | Change the registrations of node @idx@ directly.
+{-# INLINE registerAtIdx #-}
+registerAtIdx :: Context -> NodeIdx -> (NodeCustom -> IO NodeCustom) -> IO ()
+registerAtIdx ctx idx f = do
+  arr0 <- readIORef (ctxNodeCustom ctx)
+  let size = sizeofMutableArray arr0
+  arr <-
+    if idx < size
+      then pure arr0
+      else do
+        grown <- growBoxedStoreCopy noNodeCustom arr0 size (max (idx + 1) (2 * size))
+        grown <$ writeIORef (ctxNodeCustom ctx) grown
+  ep <- readIORef (naEpoch (ctxNodeArena ctx))
+  old <- readArray arr idx
+  new <- f (if ncEpoch old == ep then old else noNodeCustom {ncEpoch = ep})
+  writeArray arr idx $! new
+
 -- | Change the registrations of the node widget @wid@ was declared as; a
 -- widget with no node this pass registers nothing.
 {-# INLINE registerAt #-}
 registerAt :: Context -> WidgetId -> (NodeIdx -> NodeCustom -> IO NodeCustom) -> IO ()
 registerAt ctx wid f =
-  lookupNodeByWidgetId (ctxNodeArena ctx) wid >>= mapM_ (\idx -> do
-    arr0 <- readIORef (ctxNodeCustom ctx)
-    let size = sizeofMutableArray arr0
-    arr <-
-      if idx < size
-        then pure arr0
-        else do
-          grown <- growBoxedStoreCopy noNodeCustom arr0 size (max (idx + 1) (2 * size))
-          grown <$ writeIORef (ctxNodeCustom ctx) grown
-    ep <- readIORef (naEpoch (ctxNodeArena ctx))
-    old <- readArray arr idx
-    new <- f idx (if ncEpoch old == ep then old else noNodeCustom {ncEpoch = ep})
-    writeArray arr idx $! new)
+  lookupNodeByWidgetId (ctxNodeArena ctx) wid >>= mapM_ (\idx -> registerAtIdx ctx idx (f idx))
+
+-- | Attach a leaf 'ShaderNodeEntry' to node @idx@ for the current view pass.
+{-# INLINE registerNodeShaderAt #-}
+registerNodeShaderAt :: Context -> NodeIdx -> ShaderNodeEntry -> IO ()
+registerNodeShaderAt ctx idx entry =
+  registerAtIdx ctx idx (\nc -> pure nc {ncShader = Just entry})
+
+-- | Look up the leaf 'ShaderNodeEntry' on node @idx@, if any.
+{-# INLINE lookupNodeShaderAt #-}
+lookupNodeShaderAt :: Context -> NodeIdx -> IO (Maybe ShaderNodeEntry)
+lookupNodeShaderAt ctx idx = ncShader <$> nodeCustomAt ctx idx
+
+-- | Attach a Tier 2 'ShaderEffectEntry' to container node @idx@ for the
+-- current view pass.
+{-# INLINE registerShaderEffectAt #-}
+registerShaderEffectAt :: Context -> NodeIdx -> ShaderEffectEntry -> IO ()
+registerShaderEffectAt ctx idx entry = do
+  registerAtIdx ctx idx (\nc -> pure nc {ncEffect = Just entry})
+  ep <- readIORef (naEpoch (ctxNodeArena ctx))
+  (curEp, ns) <- readIORef (ctxEffectNodes ctx)
+  writeIORef (ctxEffectNodes ctx) $! if curEp == ep then (ep, idx : ns) else (ep, [idx])
+
+-- | Look up the Tier 2 'ShaderEffectEntry' on container node @idx@, if any.
+{-# INLINE lookupShaderEffectAt #-}
+lookupShaderEffectAt :: Context -> NodeIdx -> IO (Maybe ShaderEffectEntry)
+lookupShaderEffectAt ctx idx = ncEffect <$> nodeCustomAt ctx idx
+
+-- | Container node indices carrying Tier 2 shader effects in the current build
+-- epoch, or empty when the frame declared none.
+{-# INLINE activeEffectNodes #-}
+activeEffectNodes :: Context -> IO [NodeIdx]
+activeEffectNodes ctx = do
+  ep <- readIORef (naEpoch (ctxNodeArena ctx))
+  (curEp, ns) <- readIORef (ctxEffectNodes ctx)
+  pure (if curEp == ep then ns else [])
+
+-- | Read the shader capabilities reported by the active backend.
+{-# INLINE getShaderCapabilities #-}
+getShaderCapabilities :: Context -> IO ShaderCapabilities
+getShaderCapabilities ctx = readIORef (ctxShaderCaps ctx)
 
 -- | Add @n@ to word @w@ of 'ctxCustomPass'.
 {-# INLINE bumpPass #-}

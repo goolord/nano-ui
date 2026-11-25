@@ -363,6 +363,7 @@ measureContent env@SolveEnv {seArena = na} idx = do
     NodeScrollContainer -> measureScrollContainer env idx
     NodeImage -> getImageNode na idx >>= measureImage na idx . fmap (\n -> (inWidth n, inHeight n))
     NodeBox -> measureImage na idx Nothing
+    NodeShader -> measureImage na idx Nothing
     NodeDrawing -> do
       wid <- getWidgetId na idx
       msLookupMeasure (seMs env) wid >>= maybe (measureImage na idx Nothing) (\fn -> measureCustomNode env fn idx)
@@ -1126,6 +1127,7 @@ recomputeUnsteady env@SolveEnv {seArena = na, seArrays = a} idx availW =
       NodeBox -> pure oldH
       NodeColorPicker -> pure oldH
       NodePopup -> pure oldH
+      NodeShader -> pure oldH
 
 -- | The content height of row @idx@ laid out @innerW@ wide inside its
 -- padding ('lineHeightAt'), or 'Nothing' when every child keeps its
@@ -1279,6 +1281,7 @@ markSteadyHeight env@SolveEnv {seArena = na, seArrays = a} idx = do
           NodeBox -> pure True
           NodeColorPicker -> pure True
           NodePopup -> pure True
+          NodeShader -> pure True
   writeTagEnum a idx TagSteadyHeight steady
   unless (steady || isFloatingNode nt) $ do
     p <- readTree a idx TreeParent
@@ -1413,6 +1416,7 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a} ci h = do
     NodeBox -> pure h
     NodeColorPicker -> pure h
     NodeDrawing -> pure h
+    NodeShader -> pure h
   where
     textBaseline fm boxH = centeredTextY fm 0 boxH (fmLineHeight fm) + fmAscent fm
 

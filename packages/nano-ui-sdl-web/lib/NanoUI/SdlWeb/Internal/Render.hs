@@ -13,40 +13,55 @@ module NanoUI.SdlWeb.Internal.Render
   , snapDamage
   ) where
 
+import Control.Exception (finally)
 import Control.Monad (forM_, unless, when)
+import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Int (Int32)
+import Data.List (sortOn)
+import qualified Data.Map.Strict as Map
+import Data.Primitive.ByteArray (ByteArray, copyByteArrayToAddr, sizeofByteArray)
+import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray)
+import qualified Data.Text.Encoding as TE
 import qualified Data.Vector.Unboxed as U
-import Data.Word (Word8)
+import Data.Word (Word64, Word8)
 import Foreign.ForeignPtr (withForeignPtr)
-import Foreign.Marshal.Alloc (free, mallocBytes, reallocBytes)
+import Foreign.Marshal.Alloc (allocaBytes, free, mallocBytes, reallocBytes)
+import Foreign.Marshal.Array (allocaArray, pokeArray)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
-import Foreign.Storable (pokeElemOff)
-import NanoUI (colorA, colorB, colorG, colorR)
+import Foreign.Storable (peekElemOff, pokeByteOff, pokeElemOff)
+import NanoUI (Rect (..), V2 (..), colorA, colorB, colorG, colorR, rectIntersect)
 import NanoUI.Backend
   ( AtlasUpload (..)
   , Damage (..)
   , DrawCmd (..)
   , DrawData (..)
+  , EffectSpan (..)
+  , ShaderCall (..)
+  , ShaderProgram (..)
   , atlasTextureId
   , cmdEffectiveClip
   , snapDamage
+  , sysUniformBytes
   , textureGlyphPage
   )
 import NanoUI.Backend (Context, atlasChanges, clipPixelEdges)
 import NanoUI.SdlWeb.Internal.Font (GlyphAtlas, glyphAtlasSize, glyphPageUploads)
 import NanoUI.SdlWeb.Internal.Host (WebHost (..), commandRecordSize, imageAtlasSlot)
 
--- | The session's draw state: the command buffer, reused across frames, and
--- the image atlas generation on the GPU.
+-- | The session's draw state: the command buffer, reused across frames, the
+-- image atlas generation on the GPU, and the registered shader cache.
 data Renderer = Renderer
   { rCommands :: !(IORef (Ptr Word8, Int))
   -- ^ The buffer and its capacity in commands.
   , rImageGeneration :: !(IORef Int)
+  , rShaders :: !(IORef (Map.Map Word64 Int, Int))
+  -- ^ Registered shader slots by program hash (0 marks a failed compile),
+  -- paired with the next 1-based slot ID.
   }
 
 newRenderer :: IO Renderer
-newRenderer = Renderer <$> newIORef (nullPtr, 0) <*> newIORef 0
+newRenderer = Renderer <$> newIORef (nullPtr, 0) <*> newIORef 0 <*> newIORef (Map.empty, 1)
 
 freeRenderer :: Renderer -> IO ()
 freeRenderer r = do
@@ -54,11 +69,13 @@ freeRenderer r = do
   free buf
   writeIORef (rCommands r) (nullPtr, 0)
 
--- | Upload the image atlas in full with the next 'syncTextures', after the
--- GPU lost its textures. The glyph pages are marked on the atlas
--- ('NanoUI.SdlWeb.Internal.Font.markGlyphPagesDirty').
+-- | Upload the image atlas in full with the next 'syncTextures' and drop
+-- cached shader slots after the GPU lost its WebGL context. The glyph pages
+-- are marked on the atlas ('NanoUI.SdlWeb.Internal.Font.markGlyphPagesDirty').
 forgetTextures :: Renderer -> IO ()
-forgetTextures r = writeIORef (rImageGeneration r) 0
+forgetTextures r = do
+  writeIORef (rImageGeneration r) 0
+  writeIORef (rShaders r) (Map.empty, 1)
 
 -- | Upload what changed in the glyph pages and the image atlas since the
 -- last call, before a frame that may draw from them.
@@ -81,13 +98,15 @@ syncTextures host r glyphs ctx = do
           whUploadTexture host imageAtlasSlot w h p w x y rw rh
       writeIORef (rImageGeneration r) gen'
 
--- | One WebGL draw: texture slot (-1 for none), index range, and the
--- scissor in device pixels from the top left, if any.
+-- | One WebGL draw: texture slot (-1 for none), index range, optional scissor
+-- in device pixels from the top left, and shader call index (0 for standard
+-- geometry; 1-based index into 'drawShaderCalls' otherwise).
 data DrawCommand = DrawCommand
   { dcSlot :: !Int
   , dcFirst :: !Int
   , dcCount :: !Int
   , dcScissor :: !(Maybe (Int, Int, Int, Int))
+  , dcShaderCall :: !Int
   }
   deriving (Eq, Show)
 
@@ -95,27 +114,52 @@ data DrawCommand = DrawCommand
 -- drawing buffer of a pixel size. Each command is clipped to its own rect
 -- and to the damage, in the device pixels 'clipPixelEdges' gives, as
 -- nano-ui-sdl clips; one with nothing left is dropped. A command that
--- continues the last one's indices with the same texture and scissor joins
--- it, which turns most of a frame into a few draws.
+-- continues the last one's indices with the same texture, shader and scissor
+-- joins it, which turns most of a frame into a few draws.
 drawCommands' :: Float -> (Int, Int) -> Damage -> DrawData -> [DrawCommand]
-drawCommands' scale (pw, ph) damage dd = reverse (U.foldl' step [] (drawCommands dd))
+drawCommands' scale (pw, ph) damage dd =
+  drawCommandsSlice scale (pw, ph) 0 0 mDamage (drawCommands dd) 0 (U.length (drawCommands dd))
   where
     mDamage = case damage of
       DamageFull -> Nothing
       DamageClip r -> Just r
+
+drawCommandsSlice ::
+  Float ->
+  (Int, Int) ->
+  Float ->
+  Float ->
+  Maybe Rect ->
+  U.Vector DrawCmd ->
+  Int ->
+  Int ->
+  [DrawCommand]
+drawCommandsSlice scale (pw, ph) ox oy mDamage rawCmds lo hi = reverse (go lo [])
+  where
+    go !i acc
+      | i >= hi = acc
+      | otherwise = go (i + 1) (step acc (U.unsafeIndex rawCmds i))
     step acc cmd
       | count < 3 = acc
       | otherwise = case cmdEffectiveClip mDamage cmd of
           Nothing -> acc
           Just mClip ->
-            let scissor = fmap toPixels mClip
+            let shifted = if ox == 0 && oy == 0 then mClip else fmap (\(Rect x y w h) -> Rect (x - ox) (y - oy) w h) mClip
+                scissor = fmap toPixels shifted
              in case scissor of
                   Just (_, _, sw, sh) | sw <= 0 || sh <= 0 -> acc
-                  _ -> push (DrawCommand (slotOf (cmdTextureId cmd)) (fromIntegral (cmdIndexOffset cmd)) count scissor) acc
+                  _ ->
+                    push
+                      (DrawCommand (slotOf (cmdTextureId cmd)) (fromIntegral (cmdIndexOffset cmd)) count scissor (fromIntegral (cmdShader cmd)))
+                      acc
       where
         count = fromIntegral (cmdIndexCount cmd)
     push c (prev : rest)
-      | dcSlot prev == dcSlot c && dcScissor prev == dcScissor c && dcFirst prev + dcCount prev == dcFirst c =
+      | dcShaderCall prev == 0
+          && dcShaderCall c == 0
+          && dcSlot prev == dcSlot c
+          && dcScissor prev == dcScissor c
+          && dcFirst prev + dcCount prev == dcFirst c =
           prev {dcCount = dcCount prev + dcCount c} : rest
     push c acc = c : acc
     toPixels r =
@@ -130,21 +174,77 @@ drawCommands' scale (pw, ph) damage dd = reverse (U.foldl' step [] (drawCommands
       where
         page = textureGlyphPage tex
 
+-- | Look up or lazily register a GLSL ES 300 shader program on the host,
+-- returning its 1-based slot (or 0 if unavailable or compilation failed).
+ensureShaderSlot :: WebHost -> Renderer -> ShaderCall -> IO Int
+ensureShaderSlot host r sc = do
+  (cache, nextSlot) <- readIORef (rShaders r)
+  case Map.lookup (scHash sc) cache of
+    Just slot -> pure slot
+    Nothing -> case spGlslEs300 (scProgram sc) of
+      Nothing -> do
+        writeIORef (rShaders r) (Map.insert (scHash sc) 0 cache, nextSlot)
+        pure 0
+      Just src -> do
+        let bytes = TE.encodeUtf8 src
+        ok <- unsafeUseAsCStringLen bytes $ \(p, len) ->
+          whRegisterShader host nextSlot (castPtr p) len
+        let slot = if ok then nextSlot else 0
+            next' = if ok then nextSlot + 1 else nextSlot
+        writeIORef (rShaders r) (Map.insert (scHash sc) slot cache, next')
+        pure slot
+
 -- | Draw a frame over its damage. A full frame clears to the draw data's
 -- colour first; a partial one paints over the frame the drawing buffer
 -- kept, as the draw list starts a clip frame with its own backdrop.
 renderDrawData :: WebHost -> Renderer -> Float -> (Int, Int) -> Damage -> DrawData -> IO ()
 renderDrawData host r scale (pw, ph) damage dd = do
-  let cmds = drawCommands' scale (pw, ph) damage dd
-      n = length cmds
-      full = case damage of DamageFull -> True; DamageClip _ -> False
+  let full = case damage of DamageFull -> True; DamageClip _ -> False
+      mDamage = case damage of DamageFull -> Nothing; DamageClip rect -> Just rect
       clear = drawClear dd
       unit v = realToFrac v :: Double
+      calls = drawShaderCalls dd
+      uBytes = drawUniformBytes dd
+      uSize = sizeofByteArray uBytes
+      spans = drawEffectSpans dd
   whBeginFrame host full (unit (colorR clear) / 255) (unit (colorG clear) / 255) (unit (colorB clear) / 255) (unit (colorA clear) / 255) (realToFrac scale) pw ph
-  unless (n == 0) $ do
+  if sizeofSmallArray spans == 0
+    then do
+      let cmds = drawCommands' scale (pw, ph) damage dd
+      unless (null cmds) $ do
+        when (sizeofSmallArray calls > 0 && uSize > 0) $
+          allocaBytes uSize $ \uPtr -> do
+            copyByteArrayToAddr uPtr uBytes 0 uSize
+            whUploadUniforms host uPtr uSize
+        withForeignPtr (drawVertices dd) $ \vp ->
+          withForeignPtr (drawIndices dd) $ \ip ->
+            submitCommands host r dd vp ip cmds
+    else do
+      when (sizeofSmallArray calls > 0 && uSize > 0) $
+        allocaBytes uSize $ \uPtr -> do
+          copyByteArrayToAddr uPtr uBytes 0 uSize
+          whUploadUniforms host uPtr uSize
+      withForeignPtr (drawVertices dd) $ \vp ->
+        withForeignPtr (drawIndices dd) $ \ip ->
+          execWebRange
+            host r dd scale vp ip spans (drawCommands dd) uBytes
+            0 (-1) (pw, ph) 0 0 mDamage 0 (U.length (drawCommands dd))
+
+submitCommands :: WebHost -> Renderer -> DrawData -> Ptr Word8 -> Ptr Word8 -> [DrawCommand] -> IO ()
+submitCommands host r dd vp ip cmds =
+  unless (null cmds) $ do
+    let n = length cmds
+        calls = drawShaderCalls dd
     buf <- commandBuffer r n
     let ints = castPtr buf :: Ptr Int32
-    forM_ (zip [0 ..] cmds) $ \(i, DrawCommand slot first count scissor) -> do
+        resolveShader callIdx
+          | callIdx <= 0 || callIdx > sizeofSmallArray calls = pure (0, 0, 0)
+          | otherwise = do
+              let sc = indexSmallArray calls (callIdx - 1)
+              shSlot <- ensureShaderSlot host r sc
+              pure (shSlot, scUniformOffset sc, scUniformLength sc)
+    forM_ (zip [0 ..] cmds) $ \(i, DrawCommand slot first count scissor callIdx) -> do
+      (shSlot, uOff, uLen) <- resolveShader callIdx
       let put k v = pokeElemOff ints (i * (commandRecordSize `div` 4) + k) (fromIntegral v)
           (on, sx, sy, sw, sh) = maybe (0, 0, 0, 0, 0) (\(x, y, w, h) -> (1 :: Int, x, y, w, h)) scissor
       put 0 slot
@@ -155,9 +255,214 @@ renderDrawData host r scale (pw, ph) damage dd = do
       put 5 sy
       put 6 sw
       put 7 sh
-    withForeignPtr (drawVertices dd) $ \vp ->
-      withForeignPtr (drawIndices dd) $ \ip ->
-        whDraw host vp (drawVertexCount dd) ip (drawIndexCount dd) buf n
+      put 8 shSlot
+      put 9 uOff
+      put 10 uLen
+      put 11 (0 :: Int)
+    whDraw host vp (drawVertexCount dd) ip (drawIndexCount dd) buf n
+
+spanEffectiveClip :: Maybe Rect -> Rect -> Maybe (Maybe Rect)
+spanEffectiveClip mDamage clip@(Rect _ _ cw ch) =
+  let !open = cw >= 1e8 || ch >= 1e8
+   in case (mDamage, open) of
+        (Nothing, True) -> Just Nothing
+        (Nothing, False) -> Just (Just clip)
+        (Just dmg, True) -> Just (Just dmg)
+        (Just dmg, False) -> Just <$> rectIntersect dmg clip
+
+{-# NOINLINE execWebRange #-}
+execWebRange ::
+  WebHost ->
+  Renderer ->
+  DrawData ->
+  Float ->
+  Ptr Word8 ->
+  Ptr Word8 ->
+  SmallArray EffectSpan ->
+  U.Vector DrawCmd ->
+  ByteArray ->
+  Int ->
+  Int ->
+  (Int, Int) ->
+  Float ->
+  Float ->
+  Maybe Rect ->
+  Int ->
+  Int ->
+  IO ()
+execWebRange host r dd scale vp ip spans rawCmds uBytes parentId parentSlot parentSize@(parentW, parentH) parentOx parentOy parentDmg rangeStart rangeEnd =
+  go rangeStart directChildren
+  where
+    directChildren =
+      sortOn (\sp -> (esCmdStart sp, esId sp))
+        [ sp
+        | i <- [0 .. sizeofSmallArray spans - 1]
+        , let sp = indexSmallArray spans i
+        , esParent sp == parentId
+        , esCmdStart sp >= rangeStart
+        , esCmdEnd sp <= rangeEnd
+        ]
+
+    emitPlain from to =
+      when (to > from) $ do
+        let slice = drawCommandsSlice scale parentSize parentOx parentOy parentDmg rawCmds from to
+        submitCommands host r dd vp ip slice
+
+    go !cur [] = emitPlain cur rangeEnd
+    go !cur (sp : rest) = do
+      let !s = max cur (esCmdStart sp)
+          !e = min rangeEnd (esCmdEnd sp)
+      when (s > cur) (emitPlain cur s)
+      when (e > s) (runSpan sp s e)
+      go (max cur e) rest
+
+    runSpan sp s e = do
+      let Rect bx by bw bh = esBounds sp
+          V2 mx my = esMargin sp
+          expanded@(Rect ex ey ew eh) = Rect (bx - mx) (by - my) (bw + 2 * mx) (bh + 2 * my)
+          passes = esPasses sp
+          !nPasses = sizeofSmallArray passes
+          inDamage = case parentDmg of
+            Nothing -> True
+            Just dmg -> case rectIntersect dmg expanded of
+              Just _ -> True
+              Nothing -> False
+      when inDamage $
+        if nPasses <= 0 || ew <= 0 || eh <= 0
+          then
+            execWebRange host r dd scale vp ip spans rawCmds uBytes (esId sp) parentSlot parentSize parentOx parentOy parentDmg s e
+          else do
+            let !px0 = floor (ex * scale) :: Int
+                !py0 = floor (ey * scale) :: Int
+                !px1 = ceiling ((ex + ew) * scale) :: Int
+                !py1 = ceiling ((ey + eh) * scale) :: Int
+                !pw = max 1 (px1 - px0)
+                !ph = max 1 (py1 - py0)
+                !ox = fromIntegral px0 / scale
+                !oy = fromIntegral py0 / scale
+            (slot0, cap0W, cap0H) <- acquireWebTarget host pw ph
+            if slot0 < 0
+              then
+                execWebRange host r dd scale vp ip spans rawCmds uBytes (esId sp) parentSlot parentSize parentOx parentOy parentDmg s e
+              else do
+                let restoreParent = whBindTarget host parentSlot False (realToFrac parentOx) (realToFrac parentOy)
+                    runOffscreen = do
+                      whBindTarget host slot0 True (realToFrac ox) (realToFrac oy)
+                      execWebRange host r dd scale vp ip spans rawCmds uBytes (esId sp) slot0 (cap0W, cap0H) ox oy Nothing s e
+                      let !nodePx = bx * scale - fromIntegral px0
+                          !nodePy = by * scale - fromIntegral py0
+                          !nodePw = max 1.0e-4 (bw * scale)
+                          !nodePh = max 1.0e-4 (bh * scale)
+                          !destPx = fromIntegral px0 - parentOx * scale
+                          !destPy = fromIntegral py0 - parentOy * scale
+                          runPasses !srcSlot !srcCapW !srcCapH !dstSlot !dstCapW !dstCapH !passIdx
+                            | passIdx >= nPasses = pure ()
+                            | otherwise = do
+                                -- WebGL2 FBO textures are bottom-up: V=1 at top (y=0).
+                                let !u1 = fromIntegral pw / fromIntegral srcCapW
+                                    !v0 = 1.0 :: Float
+                                    !v1 = 1.0 - fromIntegral ph / fromIntegral srcCapH
+                                    !nodeU0 = nodePx / fromIntegral srcCapW
+                                    !nodeV0 = 1.0 - nodePy / fromIntegral srcCapH
+                                    !nodeUSpan = nodePw / fromIntegral srcCapW
+                                    !nodeVSpan = negate (nodePh / fromIntegral srcCapH)
+                                    sc = indexSmallArray passes passIdx
+                                shSlot <- ensureShaderSlot host r sc
+                                when (shSlot > 0) $
+                                  if passIdx < nPasses - 1 && dstSlot >= 0
+                                    then do
+                                      whBindTarget host dstSlot True 0 0
+                                      compositeWebPass
+                                        host srcSlot shSlot True
+                                        0 0 (fromIntegral pw) (fromIntegral ph)
+                                        0 v0 u1 v1 Nothing
+                                        sc uBytes nodeU0 nodeV0 nodeUSpan nodeVSpan
+                                        (fromIntegral srcCapW) (fromIntegral srcCapH)
+                                      runPasses dstSlot dstCapW dstCapH srcSlot srcCapW srcCapH (passIdx + 1)
+                                    else do
+                                      whBindTarget host parentSlot False (realToFrac parentOx) (realToFrac parentOy)
+                                      forM_ (spanEffectiveClip parentDmg (esClip sp)) $ \mClip -> do
+                                        let shifted =
+                                              if parentOx == 0 && parentOy == 0
+                                                then mClip
+                                                else fmap (\(Rect x y w h) -> Rect (x - parentOx) (y - parentOy) w h) mClip
+                                            toPix clipR =
+                                              let (x0, y0, x1, y1) = clipPixelEdges scale clipR
+                                                  cx0 = max 0 x0
+                                                  cy0 = max 0 y0
+                                               in (cx0, cy0, min parentW x1 - cx0, min parentH y1 - cy0)
+                                            mScissor = fmap toPix shifted
+                                            nonEmpty = case mScissor of
+                                              Just (_, _, sw, sh) -> sw > 0 && sh > 0
+                                              Nothing -> True
+                                        when nonEmpty $
+                                          compositeWebPass
+                                            host srcSlot shSlot False
+                                            destPx destPy (fromIntegral pw) (fromIntegral ph)
+                                            0 v0 u1 v1 mScissor
+                                            sc uBytes nodeU0 nodeV0 nodeUSpan nodeVSpan
+                                            (fromIntegral srcCapW) (fromIntegral srcCapH)
+                      if nPasses > 1
+                        then do
+                          (slot1, cap1W, cap1H) <- acquireWebTarget host pw ph
+                          runPasses slot0 cap0W cap0H slot1 cap1W cap1H 0
+                            `finally` when (slot1 >= 0) (whReleaseTarget host slot1)
+                        else
+                          runPasses slot0 cap0W cap0H (-1) 0 0 0
+                runOffscreen
+                  `finally` (restoreParent >> whReleaseTarget host slot0)
+
+acquireWebTarget :: WebHost -> Int -> Int -> IO (Int, Int, Int)
+acquireWebTarget host minW minH =
+  allocaArray 2 $ \capsPtr -> do
+    slot <- whAcquireTarget host minW minH capsPtr
+    if slot < 0
+      then pure (-1, 0, 0)
+      else do
+        cw <- fromIntegral <$> peekElemOff capsPtr 0
+        ch <- fromIntegral <$> peekElemOff capsPtr 1
+        pure (slot, cw, ch)
+
+{-# NOINLINE compositeWebPass #-}
+compositeWebPass ::
+  WebHost ->
+  Int ->
+  Int ->
+  Bool ->
+  Float -> Float -> Float -> Float ->
+  Float -> Float -> Float -> Float ->
+  Maybe (Int, Int, Int, Int) ->
+  ShaderCall ->
+  ByteArray ->
+  Float -> Float -> Float -> Float ->
+  Float -> Float ->
+  IO ()
+compositeWebPass
+  host srcSlot shSlot blendCopy
+  dx dy dw dh
+  u0 v0 u1 v1 mScissor
+  sc uniformBytes
+  nodeU0 nodeV0 nodeUSpan nodeVSpan
+  targetW targetH = do
+    let !uOff = scUniformOffset sc
+        !uLen = max sysUniformBytes (min (scUniformLength sc) (max 0 (sizeofByteArray uniformBytes - uOff)))
+        !copyLen = min uLen (max 0 (sizeofByteArray uniformBytes - uOff))
+        (hasSc, sx, sy, sw, sh) = case mScissor of
+          Nothing -> (0 :: Int32, 0, 0, 0, 0)
+          Just (x, y, w, h) -> (1, fromIntegral x, fromIntegral y, fromIntegral w, fromIntegral h)
+    allocaArray 8 $ \rvPtr ->
+      allocaArray 5 $ \scPtr ->
+        allocaBytes uLen $ \uPtr -> do
+          pokeArray rvPtr [dx, dy, dw, dh, u0, v0, u1, v1]
+          pokeArray scPtr [hasSc, sx, sy, sw, sh]
+          when (copyLen > 0) $ copyByteArrayToAddr uPtr uniformBytes uOff copyLen
+          pokeByteOff uPtr 16 nodeU0
+          pokeByteOff uPtr 20 nodeV0
+          pokeByteOff uPtr 24 nodeUSpan
+          pokeByteOff uPtr 28 nodeVSpan
+          pokeByteOff uPtr 40 targetW
+          pokeByteOff uPtr 44 targetH
+          whCompositeEffect host srcSlot shSlot blendCopy rvPtr scPtr uPtr uLen
 
 -- | The command buffer, grown to hold at least @n@ commands.
 commandBuffer :: Renderer -> Int -> IO (Ptr Word8)

@@ -17,6 +17,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef void (*rgfw_proc)(void);
 extern rgfw_proc RGFW_getProcAddress_OpenGL(const char* procname);
@@ -76,6 +77,8 @@ typedef intptr_t GLsizeiptr;
 #define GL_ARRAY_BUFFER 0x8892
 #define GL_ELEMENT_ARRAY_BUFFER 0x8893
 #define GL_STREAM_DRAW 0x88E0
+#define GL_UNIFORM_BUFFER 0x8A11
+#define GL_INVALID_INDEX 0xFFFFFFFFu
 #define GL_FRAGMENT_SHADER 0x8B30
 #define GL_VERTEX_SHADER 0x8B31
 #define GL_COMPILE_STATUS 0x8B81
@@ -107,6 +110,9 @@ typedef intptr_t GLsizeiptr;
   X(void, DeleteProgram, (GLuint))                                                                  \
   X(void, UseProgram, (GLuint))                                                                     \
   X(GLint, GetUniformLocation, (GLuint, const GLchar*))                                             \
+  X(GLuint, GetUniformBlockIndex, (GLuint, const GLchar*))                                          \
+  X(void, UniformBlockBinding, (GLuint, GLuint, GLuint))                                            \
+  X(void, BindBufferBase, (GLenum, GLuint, GLuint))                                                 \
   X(void, Uniform1i, (GLint, GLint))                                                                \
   X(void, Uniform1f, (GLint, GLfloat))                                                              \
   X(void, Uniform2f, (GLint, GLfloat, GLfloat))                                                     \
@@ -165,18 +171,44 @@ int32_t nano_ui_gl_index_bytes(void) { return NGL_INDEX_BYTES; }
 
 enum { NGL_MODE_NONE, NGL_MODE_GEOMETRY, NGL_MODE_IMAGE, NGL_MODE_TEXT };
 
+typedef struct ngl_shader_entry {
+  uint64_t hash;
+  GLuint program;
+  GLint uViewport;
+  GLint uOrigin;
+  GLint uScale;
+  GLint uInput;
+  int failed;
+} ngl_shader_entry;
+
+typedef struct ngl_target_slot {
+  GLuint fbo;
+  GLuint tex;
+  int32_t capW;
+  int32_t capH;
+  int inUse;
+} ngl_target_slot;
+
 typedef struct nano_ui_gl {
   ngl_api gl;
   GLuint program;
-  GLint uViewport, uScale, uTextured, uAtlas, uImages;
+  GLint uViewport, uOrigin, uScale, uTextured, uAtlas, uImages;
   GLuint geomVao, geomVbo, geomEbo;
   GLuint textVao, textVbo;
+  GLuint effectVao, effectVbo;
+  GLuint shaderUbo;
+  ngl_shader_entry* shaders;
+  int shaderCount, shaderCap;
+  ngl_target_slot* targets;
+  int targetCount, targetCap;
   GLuint atlas;
   GLuint images; /* the core's RGBA image atlas, texture unit 1 */
   int32_t imagesW, imagesH;
   GLuint retainFbo, retainTex;
   int32_t retainCapW, retainCapH; /* texture size, the window rounded up */
   int32_t fbW, fbH;
+  int32_t curW, curH; /* currently bound framebuffer dimensions */
+  float originX, originY; /* logical origin subtracted for offscreen effect targets */
   float scale; /* logical -> physical, for geometry vertices */
   int mode;
 } nano_ui_gl;
@@ -187,11 +219,12 @@ static const char* ngl_vertex_src =
     "in vec4 aColor;\n"
     "in vec2 aUV;\n"
     "uniform vec2 uViewport;\n"
+    "uniform vec2 uOrigin;\n"
     "uniform float uScale;\n"
     "out vec4 vColor;\n"
     "out vec2 vUV;\n"
     "void main() {\n"
-    "  vec2 p = aPos * uScale;\n"
+    "  vec2 p = (aPos - uOrigin) * uScale;\n"
     "  gl_Position = vec4(p.x / uViewport.x * 2.0 - 1.0, 1.0 - p.y / uViewport.y * 2.0, 0.0, 1.0);\n"
     "  vColor = aColor;\n"
     "  vUV = aUV;\n"
@@ -268,6 +301,7 @@ static int ngl_link(nano_ui_gl* r) {
     return 0;
   }
   r->uViewport = gl->GetUniformLocation(r->program, "uViewport");
+  r->uOrigin = gl->GetUniformLocation(r->program, "uOrigin");
   r->uScale = gl->GetUniformLocation(r->program, "uScale");
   r->uTextured = gl->GetUniformLocation(r->program, "uTextured");
   r->uAtlas = gl->GetUniformLocation(r->program, "uAtlas");
@@ -328,7 +362,14 @@ nano_ui_gl* nano_ui_gl_create(void) {
   gl->BindVertexArray(r->textVao);
   gl->BindBuffer(GL_ARRAY_BUFFER, r->textVbo);
   ngl_vertex_layout(gl);
+
+  gl->GenVertexArrays(1, &r->effectVao);
+  gl->GenBuffers(1, &r->effectVbo);
+  gl->BindVertexArray(r->effectVao);
+  gl->BindBuffer(GL_ARRAY_BUFFER, r->effectVbo);
+  ngl_vertex_layout(gl);
   gl->BindVertexArray(0);
+  gl->GenBuffers(1, &r->shaderUbo);
 
   gl->GenTextures(1, &r->atlas);
   gl->BindTexture(GL_TEXTURE_2D, r->atlas);
@@ -346,6 +387,22 @@ nano_ui_gl* nano_ui_gl_create(void) {
 void nano_ui_gl_destroy(nano_ui_gl* r) {
   if (r == NULL) return;
   ngl_api* gl = &r->gl;
+  if (r->shaders) {
+    for (int i = 0; i < r->shaderCount; i++) {
+      if (r->shaders[i].program) gl->DeleteProgram(r->shaders[i].program);
+    }
+    free(r->shaders);
+  }
+  if (r->targets) {
+    for (int i = 0; i < r->targetCount; i++) {
+      if (r->targets[i].fbo) gl->DeleteFramebuffers(1, &r->targets[i].fbo);
+      if (r->targets[i].tex) gl->DeleteTextures(1, &r->targets[i].tex);
+    }
+    free(r->targets);
+  }
+  if (r->shaderUbo) gl->DeleteBuffers(1, &r->shaderUbo);
+  if (r->effectVbo) gl->DeleteBuffers(1, &r->effectVbo);
+  if (r->effectVao) gl->DeleteVertexArrays(1, &r->effectVao);
   if (r->retainFbo) gl->DeleteFramebuffers(1, &r->retainFbo);
   if (r->retainTex) gl->DeleteTextures(1, &r->retainTex);
   if (r->atlas) gl->DeleteTextures(1, &r->atlas);
@@ -463,6 +520,10 @@ int32_t nano_ui_gl_begin(nano_ui_gl* r, int32_t fbW, int32_t fbH, float scale, f
   ngl_api* gl = &r->gl;
   r->fbW = fbW > 0 ? fbW : 1;
   r->fbH = fbH > 0 ? fbH : 1;
+  r->curW = r->fbW;
+  r->curH = r->fbH;
+  r->originX = 0.0f;
+  r->originY = 0.0f;
   r->scale = scale;
   r->mode = NGL_MODE_NONE;
   int replaced = ngl_ensure_retain(r, r->fbW, r->fbH);
@@ -481,6 +542,7 @@ int32_t nano_ui_gl_begin(nano_ui_gl* r, int32_t fbW, int32_t fbH, float scale, f
   gl->BlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
   gl->UseProgram(r->program);
   gl->Uniform2f(r->uViewport, (GLfloat)r->fbW, (GLfloat)r->fbH);
+  gl->Uniform2f(r->uOrigin, 0.0f, 0.0f);
   gl->ActiveTexture(GL_TEXTURE1);
   gl->BindTexture(GL_TEXTURE_2D, r->images);
   gl->ActiveTexture(GL_TEXTURE0);
@@ -554,14 +616,119 @@ void nano_ui_gl_draw_geometry(nano_ui_gl* r, int32_t x0, int32_t y0, int32_t x1,
     if (r->mode != NGL_MODE_GEOMETRY && r->mode != NGL_MODE_IMAGE) {
       gl->BindVertexArray(r->geomVao);
       gl->Uniform1f(r->uScale, r->scale);
+      gl->Uniform2f(r->uOrigin, r->originX, r->originY);
       gl->Enable(GL_SCISSOR_TEST);
     }
     gl->Uniform1f(r->uTextured, mode == NGL_MODE_IMAGE ? 2.0f : 0.0f);
     r->mode = mode;
   }
-  gl->Scissor(x0, r->fbH - y1, x1 - x0, y1 - y0);
+  gl->Scissor(x0, r->curH - y1, x1 - x0, y1 - y0);
   gl->DrawElements(GL_TRIANGLES, (GLsizei)indexCount, GL_UNSIGNED_INT,
                    (const void*)((uintptr_t)firstIndex * NGL_INDEX_BYTES));
+}
+
+/* Look up or compile and link a cached fragment shader keyed by its 64-bit
+ * program hash. Failed compilations are cached so broken shaders never spam
+ * error logs on every frame. */
+static ngl_shader_entry* ngl_get_shader(nano_ui_gl* r, uint64_t hash, const char* fragSrc, int32_t fragLen) {
+  for (int i = 0; i < r->shaderCount; i++) {
+    if (r->shaders[i].hash == hash) return &r->shaders[i];
+  }
+  if (r->shaderCount == r->shaderCap) {
+    int newCap = r->shaderCap > 0 ? r->shaderCap * 2 : 16;
+    ngl_shader_entry* grown = (ngl_shader_entry*)realloc(r->shaders, (size_t)newCap * sizeof *grown);
+    if (grown == NULL) return NULL;
+    r->shaders = grown;
+    r->shaderCap = newCap;
+  }
+  ngl_shader_entry* entry = &r->shaders[r->shaderCount++];
+  memset(entry, 0, sizeof *entry);
+  entry->hash = hash;
+  entry->uViewport = -1;
+  entry->uOrigin = -1;
+  entry->uScale = -1;
+  entry->uInput = -1;
+  if (fragSrc == NULL || fragLen <= 0) {
+    entry->failed = 1;
+    return entry;
+  }
+  char* srcCopy = (char*)malloc((size_t)fragLen + 1);
+  if (srcCopy == NULL) {
+    entry->failed = 1;
+    return entry;
+  }
+  memcpy(srcCopy, fragSrc, (size_t)fragLen);
+  srcCopy[fragLen] = '\0';
+
+  ngl_api* gl = &r->gl;
+  GLuint vs = ngl_compile(gl, GL_VERTEX_SHADER, ngl_vertex_src);
+  GLuint fs = vs ? ngl_compile(gl, GL_FRAGMENT_SHADER, srcCopy) : 0;
+  free(srcCopy);
+  if (!fs) {
+    if (vs) gl->DeleteShader(vs);
+    entry->failed = 1;
+    return entry;
+  }
+  GLuint prog = gl->CreateProgram();
+  gl->AttachShader(prog, vs);
+  gl->AttachShader(prog, fs);
+  gl->BindAttribLocation(prog, 0, "aPos");
+  gl->BindAttribLocation(prog, 1, "aColor");
+  gl->BindAttribLocation(prog, 2, "aUV");
+  gl->LinkProgram(prog);
+  gl->DeleteShader(vs);
+  gl->DeleteShader(fs);
+  GLint ok = 0;
+  gl->GetProgramiv(prog, GL_LINK_STATUS, &ok);
+  if (!ok) {
+    char log[1024];
+    gl->GetProgramInfoLog(prog, sizeof log, NULL, log);
+    fprintf(stderr, "nano-ui-rgfw: custom shader link failed: %s\n", log);
+    gl->DeleteProgram(prog);
+    entry->failed = 1;
+    return entry;
+  }
+  GLuint blk = gl->GetUniformBlockIndex(prog, "NanoShaderBlock");
+  if (blk != GL_INVALID_INDEX) {
+    gl->UniformBlockBinding(prog, blk, 0);
+  }
+  entry->program = prog;
+  entry->uViewport = gl->GetUniformLocation(prog, "uViewport");
+  entry->uOrigin = gl->GetUniformLocation(prog, "uOrigin");
+  entry->uScale = gl->GetUniformLocation(prog, "uScale");
+  entry->uInput = gl->GetUniformLocation(prog, "uInput");
+  return entry;
+}
+
+/* Draw one shader-backed geometry command with its std140 uniform block bound
+ * at UBO binding 0, then restore the default renderer program. */
+int32_t nano_ui_gl_draw_shader(nano_ui_gl* r, int32_t x0, int32_t y0, int32_t x1, int32_t y1,
+                               uint32_t firstIndex, uint32_t indexCount, uint64_t hash,
+                               const char* fragSrc, int32_t fragLen, const void* uniformBytes,
+                               int32_t uniformLen) {
+  ngl_shader_entry* entry = ngl_get_shader(r, hash, fragSrc, fragLen);
+  if (entry == NULL || entry->failed || entry->program == 0) return 0;
+  ngl_api* gl = &r->gl;
+  gl->UseProgram(entry->program);
+  if (entry->uViewport >= 0) gl->Uniform2f(entry->uViewport, (GLfloat)r->curW, (GLfloat)r->curH);
+  if (entry->uOrigin >= 0) gl->Uniform2f(entry->uOrigin, r->originX, r->originY);
+  if (entry->uScale >= 0) gl->Uniform1f(entry->uScale, r->scale);
+  if (entry->uInput >= 0) gl->Uniform1i(entry->uInput, 0);
+  if (uniformLen > 0 && uniformBytes != NULL) {
+    gl->BindBuffer(GL_UNIFORM_BUFFER, r->shaderUbo);
+    gl->BufferData(GL_UNIFORM_BUFFER, (GLsizeiptr)uniformLen, uniformBytes, GL_STREAM_DRAW);
+    gl->BindBufferBase(GL_UNIFORM_BUFFER, 0, r->shaderUbo);
+  }
+  gl->BindVertexArray(r->geomVao);
+  gl->Enable(GL_SCISSOR_TEST);
+  gl->Scissor(x0, r->curH - y1, x1 - x0, y1 - y0);
+  gl->DrawElements(GL_TRIANGLES, (GLsizei)indexCount, GL_UNSIGNED_INT,
+                   (const void*)((uintptr_t)firstIndex * NGL_INDEX_BYTES));
+  gl->UseProgram(r->program);
+  gl->Uniform2f(r->uViewport, (GLfloat)r->curW, (GLfloat)r->curH);
+  gl->Uniform2f(r->uOrigin, r->originX, r->originY);
+  r->mode = NGL_MODE_NONE;
+  return 1;
 }
 
 /* Draw a range of the uploaded glyph vertices (physical pixels, pre-clipped). */
@@ -572,8 +739,169 @@ void nano_ui_gl_draw_text(nano_ui_gl* r, int32_t firstVertex, int32_t vertexCoun
     gl->BindVertexArray(r->textVao);
     gl->Uniform1f(r->uTextured, 1.0f);
     gl->Uniform1f(r->uScale, 1.0f);
+    gl->Uniform2f(r->uOrigin, r->originX * r->scale, r->originY * r->scale);
     gl->Disable(GL_SCISSOR_TEST);
     r->mode = NGL_MODE_TEXT;
   }
   gl->DrawArrays(GL_TRIANGLES, firstVertex, vertexCount);
+}
+
+/* Acquire a 64px-bucketed pooled RGBA8 offscreen framebuffer for Tier 2
+ * subtree effects. Returns a non-negative slot index or -1 on failure. */
+int32_t nano_ui_gl_acquire_target(nano_ui_gl* r, int32_t minW, int32_t minH,
+                                  int32_t* outCapW, int32_t* outCapH) {
+  if (r == NULL) return -1;
+  int32_t needW = minW > 0 ? ((minW + 63) & ~63) : 64;
+  int32_t needH = minH > 0 ? ((minH + 63) & ~63) : 64;
+  int best = -1;
+  for (int i = 0; i < r->targetCount; i++) {
+    ngl_target_slot* s = &r->targets[i];
+    if (!s->inUse && s->fbo && s->tex &&
+        s->capW >= needW && s->capH >= needH &&
+        s->capW <= needW * 2 && s->capH <= needH * 2) {
+      best = i;
+      break;
+    }
+  }
+  if (best < 0) {
+    if (r->targetCount == r->targetCap) {
+      int newCap = r->targetCap > 0 ? r->targetCap * 2 : 8;
+      ngl_target_slot* grown = (ngl_target_slot*)realloc(r->targets, (size_t)newCap * sizeof *grown);
+      if (grown == NULL) return -1;
+      r->targets = grown;
+      r->targetCap = newCap;
+    }
+    ngl_api* gl = &r->gl;
+    GLuint fbo = 0, tex = 0;
+    gl->GenFramebuffers(1, &fbo);
+    gl->GenTextures(1, &tex);
+    gl->ActiveTexture(GL_TEXTURE0);
+    gl->BindTexture(GL_TEXTURE_2D, tex);
+    gl->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    gl->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    gl->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    gl->TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, needW, needH, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    gl->BindFramebuffer(GL_FRAMEBUFFER, fbo);
+    gl->FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+    GLenum status = gl->CheckFramebufferStatus(GL_FRAMEBUFFER);
+    gl->BindTexture(GL_TEXTURE_2D, r->atlas);
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+      gl->DeleteFramebuffers(1, &fbo);
+      gl->DeleteTextures(1, &tex);
+      return -1;
+    }
+    best = r->targetCount++;
+    r->targets[best].fbo = fbo;
+    r->targets[best].tex = tex;
+    r->targets[best].capW = needW;
+    r->targets[best].capH = needH;
+  }
+  r->targets[best].inUse = 1;
+  if (outCapW) *outCapW = r->targets[best].capW;
+  if (outCapH) *outCapH = r->targets[best].capH;
+  return (int32_t)best;
+}
+
+void nano_ui_gl_release_target(nano_ui_gl* r, int32_t slot) {
+  if (r != NULL && slot >= 0 && slot < r->targetCount) {
+    r->targets[slot].inUse = 0;
+  }
+}
+
+/* Bind pooled offscreen target slot (>= 0), or the retained framebuffer when
+ * slot < 0. Updates viewport, active target dimensions, and logical origin. */
+int32_t nano_ui_gl_bind_target(nano_ui_gl* r, int32_t slot, int32_t clearTransparent,
+                               float ox, float oy) {
+  if (r == NULL) return 0;
+  ngl_api* gl = &r->gl;
+  if (slot >= 0 && slot < r->targetCount) {
+    ngl_target_slot* s = &r->targets[slot];
+    gl->BindFramebuffer(GL_FRAMEBUFFER, s->fbo);
+    r->curW = s->capW;
+    r->curH = s->capH;
+  } else {
+    gl->BindFramebuffer(GL_FRAMEBUFFER, r->retainFbo);
+    r->curW = r->fbW;
+    r->curH = r->fbH;
+  }
+  r->originX = ox;
+  r->originY = oy;
+  gl->Viewport(0, 0, r->curW, r->curH);
+  gl->Disable(GL_SCISSOR_TEST);
+  if (clearTransparent) {
+    gl->ClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    gl->Clear(GL_COLOR_BUFFER_BIT);
+  }
+  gl->UseProgram(r->program);
+  gl->Uniform2f(r->uViewport, (GLfloat)r->curW, (GLfloat)r->curH);
+  gl->Uniform2f(r->uOrigin, r->originX, r->originY);
+  gl->ActiveTexture(GL_TEXTURE0);
+  gl->BindTexture(GL_TEXTURE_2D, r->atlas);
+  r->mode = NGL_MODE_NONE;
+  return 1;
+}
+
+/* Composite pooled source target srcSlot onto the currently bound target at
+ * physical pixel rect (dx, dy, dw, dh) with UVs (u0, v0)..(u1, v1) through a
+ * cached GLSL 150 fragment shader. */
+int32_t nano_ui_gl_composite_effect(
+    nano_ui_gl* r, int32_t srcSlot,
+    float dx, float dy, float dw, float dh,
+    float u0, float v0, float u1, float v1,
+    int32_t hasScissor, int32_t sx0, int32_t sy0, int32_t sx1, int32_t sy1,
+    int32_t blendCopy,
+    uint64_t hash, const char* fragSrc, int32_t fragLen,
+    const void* uniformBytes, int32_t uniformLen) {
+  if (r == NULL || srcSlot < 0 || srcSlot >= r->targetCount || !r->targets[srcSlot].tex) {
+    return 0;
+  }
+  ngl_shader_entry* entry = ngl_get_shader(r, hash, fragSrc, fragLen);
+  if (entry == NULL || entry->failed || entry->program == 0) return 0;
+  ngl_api* gl = &r->gl;
+  const ngl_vertex quad[6] = {
+    { dx,      dy,      1.f, 1.f, 1.f, 1.f, u0, v0 },
+    { dx + dw, dy,      1.f, 1.f, 1.f, 1.f, u1, v0 },
+    { dx + dw, dy + dh, 1.f, 1.f, 1.f, 1.f, u1, v1 },
+    { dx,      dy,      1.f, 1.f, 1.f, 1.f, u0, v0 },
+    { dx + dw, dy + dh, 1.f, 1.f, 1.f, 1.f, u1, v1 },
+    { dx,      dy + dh, 1.f, 1.f, 1.f, 1.f, u0, v1 },
+  };
+  gl->UseProgram(entry->program);
+  if (entry->uViewport >= 0) gl->Uniform2f(entry->uViewport, (GLfloat)r->curW, (GLfloat)r->curH);
+  if (entry->uOrigin >= 0) gl->Uniform2f(entry->uOrigin, 0.0f, 0.0f);
+  if (entry->uScale >= 0) gl->Uniform1f(entry->uScale, 1.0f);
+  if (entry->uInput >= 0) gl->Uniform1i(entry->uInput, 0);
+  if (uniformLen > 0 && uniformBytes != NULL) {
+    gl->BindBuffer(GL_UNIFORM_BUFFER, r->shaderUbo);
+    gl->BufferData(GL_UNIFORM_BUFFER, (GLsizeiptr)uniformLen, uniformBytes, GL_STREAM_DRAW);
+    gl->BindBufferBase(GL_UNIFORM_BUFFER, 0, r->shaderUbo);
+  }
+  gl->ActiveTexture(GL_TEXTURE0);
+  gl->BindTexture(GL_TEXTURE_2D, r->targets[srcSlot].tex);
+  if (blendCopy) {
+    gl->Disable(GL_BLEND);
+  } else {
+    gl->Enable(GL_BLEND);
+    gl->BlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+  }
+  if (hasScissor) {
+    gl->Enable(GL_SCISSOR_TEST);
+    gl->Scissor(sx0, r->curH - sy1, sx1 - sx0, sy1 - sy0);
+  } else {
+    gl->Disable(GL_SCISSOR_TEST);
+  }
+  gl->BindVertexArray(r->effectVao);
+  gl->BindBuffer(GL_ARRAY_BUFFER, r->effectVbo);
+  gl->BufferData(GL_ARRAY_BUFFER, (GLsizeiptr)sizeof(quad), quad, GL_STREAM_DRAW);
+  gl->DrawArrays(GL_TRIANGLES, 0, 6);
+
+  gl->Enable(GL_BLEND);
+  gl->Disable(GL_SCISSOR_TEST);
+  gl->BindTexture(GL_TEXTURE_2D, r->atlas);
+  gl->UseProgram(r->program);
+  gl->Uniform2f(r->uViewport, (GLfloat)r->curW, (GLfloat)r->curH);
+  gl->Uniform2f(r->uOrigin, r->originX, r->originY);
+  r->mode = NGL_MODE_NONE;
+  return 1;
 }

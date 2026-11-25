@@ -32,6 +32,7 @@
 
 # Going Further
 - [Async Work & Animation](advanced/async.md)
+- [Shaders](advanced/shaders.md)
 - [Desktop Windows](advanced/window-management.md)
 - [Ecosystem Packages](packages/index.md)
 

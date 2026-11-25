@@ -1,9 +1,20 @@
--- | Bloom: layered rose curves driven by sliders, spring physics, and a 2D canvas.
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE OverloadedRecordDot #-}
+
+-- | Bloom: layered rose curves driven by sliders, spring physics, and a
+-- single-pass GPU fragment shader ('bloomShader').
 --
 -- The flower is built from a stack of closed rings. Each ring's radius at
 -- angle @a@ modulates with @cos (petals * a)@. Successive rings scale outward,
--- rotate by @twist@, and blend from the selected swatch color at the center
--- to the next palette color at the outer edge.
+-- rotate by @twist@, and blend from the selected swatch color through the next
+-- two palette colors toward the outer tips.
+--
+-- On GPU backends, 'bloomShader' evaluates the analytic signed distance to
+-- each ring per pixel, shading layered translucent petals with soft inner rims
+-- and subtle contact shadows between rings. Backends without GPU surface
+-- shaders fall back to the 2D vector canvas ('drawBloom').
 --
 -- The sliders and Shuffle button write directly to plain 'Var's. Before
 -- drawing, each parameter passes through 'animateTo' with a bouncy 'Spring'
@@ -12,8 +23,8 @@
 --
 -- When Spin is checked, each frame advances the rotation angle and calls
 -- 'keepAnimating' to schedule the next frame. With Spin unchecked, the event
--- loop sleeps once the springs settle. Dragging across the canvas rotates
--- the flower around its center.
+-- loop sleeps once the springs settle. Dragging across the flower rotates it
+-- around its center.
 --
 -- Run standalone with @cabal run nano-ui-example-bloom@. This view also
 -- powers the first tab of the landing-page demo ("Landing").
@@ -21,10 +32,13 @@ module Bloom (bloomView, bloomViewWith) where
 
 import Control.Monad (forM_, when)
 import Data.Text qualified as T
+import GHC.Generics (Generic)
 import NanoUI
 import NanoUI.Path qualified as P
+import NanoUI.Shader
 
--- | Animated parameters passed to the canvas for a single frame.
+-- | Animated parameters passed to the flower (and uploaded as shader uniforms)
+-- for a single frame.
 data Bloom = Bloom
   { bloomPetals :: !Float
   , bloomRings :: !Float
@@ -32,8 +46,55 @@ data Bloom = Bloom
   , bloomDepth :: !Float
   , bloomAngle :: !Float
   , bloomInner :: !Color
+  , bloomMid :: !Color
   , bloomOuter :: !Color
   }
+  deriving (Eq, Generic, Uniforms)
+
+-- | Analytic rose-curve GPU shader: draws up to 8 frosted-glass rings outside
+-- in with inner rim shading and soft contact shadows onto rings behind them.
+bloomShader :: Shader 'Surface Bloom
+bloomShader = surfaceShaderM $ \u ctx -> do
+  half <- bind (ctx.size *^ floatE 0.5)
+  radius <- bind (maxE (minE half.x half.y - floatE 10.0) (floatE 1.0))
+  q <- bind ((ctx.pos - half) /^ radius)
+  r <- bind (vLength q)
+  ang <- bind (atan2E q.y q.x)
+  px <- bind (floatE 1.0 / radius)
+  rings <- bind (maxE u.bloomRings (floatE 1.0))
+  depth <- bind (clamp01E u.bloomDepth)
+  pLo <- bind (floorE u.bloomPetals)
+  pf <- bind (u.bloomPetals - pLo)
+
+  forRange 0 8 (vec4 (floatE 0.0) (floatE 0.0) (floatE 0.0) (floatE 0.0)) $ \ik dst -> do
+    fi <- bind (intToFloat (intE 7 - ik))
+    presence <- bind (clamp01E (rings - fi))
+    ringR <- bind ((fi + presence) / rings)
+    theta <- bind (ang - (u.bloomAngle + u.bloomTwist * fi))
+    c <- bind (mix (cos (pLo * theta)) (cos ((pLo + floatE 1.0) * theta)) pf)
+    ps <- bind (mix (pLo * sin (pLo * theta)) ((pLo + floatE 1.0) * sin ((pLo + floatE 1.0) * theta)) pf)
+    rad <- bind (ringR * (floatE 1.0 - depth * (floatE 0.5 - floatE 0.5 * c)))
+    slope <- bind ((ringR * depth * floatE 0.5 * ps) / maxE r (floatE 0.08))
+    dist <- bind ((r - rad) / sqrt (floatE 1.0 + slope * slope))
+    absD <- bind (absE dist)
+
+    let frac = clamp01E (fi / maxE (rings - floatE 1.0) (floatE 1.0))
+        t = clamp01E (frac * floatE 0.65 + clamp01E r * floatE 0.35)
+        col =
+          mix
+            (mix u.bloomInner.rgb u.bloomMid.rgb (clamp01E (t * floatE 2.0)))
+            u.bloomOuter.rgb
+            (clamp01E (t * floatE 2.0 - floatE 1.0))
+        inside = smoothstep (px * floatE 1.2) (negate (px * floatE 1.2)) dist
+        rim = exp (minE dist (floatE 0.0) * floatE 10.0)
+        edge = smoothstep (px * floatE 1.8) (px * floatE 0.4) absD
+        -- Soft contact shadow cast onto the outer rings behind this ring.
+        shadow = floatE 1.0 - floatE 0.28 * presence * exp (negate (maxE dist (floatE 0.0) * floatE 26.0)) * dst.a
+        srcA = clamp01E (presence * (inside * (floatE 0.06 + floatE 0.24 * rim) + edge * floatE 0.85))
+        srcRgb = mix col (splat3 (floatE 1.0)) (edge * floatE 0.22)
+        outA = srcA + dst.a * (floatE 1.0 - srcA)
+        outRgb = (srcRgb *^ srcA + (dst.rgb *^ shadow) *^ (dst.a * (floatE 1.0 - srcA))) /^ maxE outA (floatE 1.0e-5)
+    pure (vec4_31 outRgb outA)
 
 bloomView :: NanoUI ()
 bloomView = bloomViewWith True
@@ -50,6 +111,7 @@ bloomViewWith spinning = do
   seed <- useVar (0 :: Int)
   angle <- useVar 0
   theme <- uiTheme
+  caps <- askShaderCapabilities
   wide <- (>= 640) <$> windowWidth
   let swatches = [themeAccent theme, themePurple theme, themeRed theme, themeOrange theme, themeGreen theme]
       colorAt i = swatches !! (i `mod` length swatches)
@@ -95,17 +157,21 @@ bloomViewWith spinning = do
       a <- readVar angle
       i <- readVar swatch
       inner <- animateToA fade (colorAt i)
-      outer <- animateToA fade (colorAt (i + 1))
-      pure (Bloom p l t d a inner outer)
+      mid <- animateToA fade (colorAt (i + 1))
+      outer <- animateToA fade (colorAt (i + 2))
+      pure (Bloom p l t d a inner mid outer)
 
     resp <-
-      canvasConfigured
-        defaultCanvasConfig
-          { canvasLayout = (grow . minH 200) defaultLayout
-          , canvasContent = bloomKey bloom
-          , canvasCursor = Just (\cdc _ _ -> if cdcActive cdc then UiCursorGrabbing else UiCursorGrab)
-          }
-        (drawBloom bloom)
+      if capSurfaceShaders caps
+        then withCursorShape UiCursorGrab (shaderBox' (grow . minH 200) bloomShader bloom)
+        else
+          canvasConfigured
+            defaultCanvasConfig
+              { canvasLayout = (grow . minH 200) defaultLayout
+              , canvasContent = bloomKey bloom
+              , canvasCursor = Just (\cdc _ _ -> if cdcActive cdc then UiCursorGrabbing else UiCursorGrab)
+              }
+            (drawBloom bloom)
     whenM (readVar spin) (keepAnimating resp)
     drag <- useDrag2DOn resp
     when (dragActive drag) (modifyVar angle (+ turned (respRect resp) drag))
@@ -146,19 +212,18 @@ turned (Rect x y w h) drag = atan2 (sin delta) (cos delta)
 -- | Content key covering every input read by 'drawBloom' so unchanged frames
 -- reuse cached vector geometry.
 bloomKey :: Bloom -> Int
-bloomKey (Bloom p l t d a inner outer) =
-  contentKeyOf [keyPart [p, l, t, d, a], keyPart (colorToWord32 inner, colorToWord32 outer)]
+bloomKey (Bloom p l t d a inner mid outer) =
+  contentKeyOf [keyPart [p, l, t, d, a], keyPart (colorToWord32 inner, colorToWord32 mid, colorToWord32 outer)]
 
--- | Draw rings from outside in so inner petals layer cleanly on top. When
--- @bloomRings@ is fractional during a transition, the outermost ring fades
--- in as it grows past the ring beneath it.
+-- | 2D vector canvas fallback when GPU surface shaders are unavailable.
 drawBloom :: Bloom -> Rect -> CanvasM ()
 drawBloom b (Rect x y w h) =
   forM_ (reverse [0 .. ceiling rings - 1 :: Int]) $ \i -> do
     let n = fromIntegral i
         presence = min 1 (rings - n)
         size = radius * (n + presence) / rings
-        col = lerpColor (bloomInner b) (bloomOuter b) (min 1 (n / max 1 (rings - 1)))
+        t = min 1 (n / max 1 (rings - 1))
+        col = if t < 0.5 then lerpColor (bloomInner b) (bloomMid b) (t * 2) else lerpColor (bloomMid b) (bloomOuter b) (t * 2 - 1)
         outline = P.polygon (map (point size (bloomAngle b + bloomTwist b * n)) [0 .. samples - 1])
     drawPathWith P.NonZero outline (P.Solid (withAlpha col (0.12 * presence)))
     drawStrokePathWith (P.stroke 1.5) {P.strokeJoin = P.RoundJoin} outline (P.Solid (withAlpha col presence))

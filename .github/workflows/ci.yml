@@ -23,6 +23,7 @@ env:
     nano-ui-emit:test:nano-ui-emit-test
     nano-ui-form:test:nano-ui-form-test
     nano-ui-markdown:test:nano-ui-markdown-test
+    nano-ui-shader:test:nano-ui-shader-test
     nano-ui-svg:test:nano-ui-svg-test
     nano-ui-diagrams:test:nano-ui-diagrams-test
     nano-ui-sdl-web:test:nano-ui-sdl-web-test

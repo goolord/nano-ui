@@ -16,7 +16,7 @@ import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe)
 import Data.Primitive.PrimArray (PrimArray)
 import qualified Data.Text as T
-import NanoUI.Internal.Context (Context (..), getAnimationValue, getStore)
+import NanoUI.Internal.Context (Context (..), activeEffectNodes, getAnimationValue, getStore)
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Font
 import NanoUI.Internal.Frame.Chrome
@@ -54,6 +54,8 @@ data PaintEnv = PaintEnv
   , pePieces :: PrimArray Float
     -- ^ The frame's damage pieces as @x0, y0, x1, y1@ runs, of which a node
     -- must meet one to paint; empty when the clip is the one piece.
+  , peHasEffects :: Bool
+    -- ^ Whether the current frame declared any Tier 2 shader effect containers.
   }
 
 -- | Locality helper for callers inside the paint frame loop; a fresh env
@@ -67,6 +69,7 @@ buildPaintEnv ctx occluders = do
   focus <- readIORef (ctxFocusId ctx)
   focusVisible <- readIORef (ctxFocusVisible ctx)
   pieces <- getClipPieces (ctxDrawArena ctx)
+  hasEffects <- not . null <$> activeEffectNodes ctx
   pure PaintEnv
     { peContext = ctx
     , peNodeArena = ctxNodeArena ctx
@@ -80,6 +83,7 @@ buildPaintEnv ctx occluders = do
     , peActiveId = active
     , peFocusId = focus
     , pePieces = pieces
+    , peHasEffects = hasEffects
     }
 
 -- | Single-line text input: selectable, bare, search, combo or captioned field
@@ -230,6 +234,7 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
     NodeBox -> pure ()
     NodePopup -> pure ()
     NodeDrawing -> pure ()
+    NodeShader -> pure ()
 
 -- | A tab header's close button: its cross in the header's label colour
 -- ('NanoUI.Internal.Style.fontColor'), dimmed until the pointer is over it,

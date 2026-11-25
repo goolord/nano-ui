@@ -40,6 +40,7 @@ import NanoUI.Internal.Frame.Spans (textNodeSpanEntry)
 import NanoUI.Internal.Id (hashWidgetId)
 import NanoUI.Internal.Image (fadeBy, imageDrawOp, lookDraw, lookQuad, lookTurned)
 import NanoUI.Internal.Layout.Arena
+import NanoUI.Internal.Shader (ShaderCapabilities (..), ShaderEffectEntry (..), ShaderNodeEntry (..))
 import NanoUI.Internal.Style hiding (fontSize)
 import NanoUI.Internal.Types (Color (..), ImageId (..), Rect (..), V2 (..), colorA, colorRGBA, rectInflate)
 import NanoUI.Internal.Widgets.ColorPicker (colorPickerPartRect)
@@ -107,7 +108,17 @@ paintNodeWithEnv env idx = do
         sizeofPrimArray (pePieces env) > 0
           && not (anyRun (pePieces env) $ \x0 y0 x1 y1 -> l < x1 && t < y1 && r > x0 && b > y0)
   if w <= 0 || h <= 0 || r <= l || b <= t || occluded || missesPieces
-    then paintPinnedBelow env idx
+    then
+      if peHasEffects env && w > 0 && h > 0
+        then paintSkippedWithEffects env idx x y w h cx cy cw ch
+        else do
+          pinnedBelow <- hasPinnedBelow (peNodeArena env) idx
+          when pinnedBelow $ do
+            nt <- getNodeType (peNodeArena env) idx
+            when (nt == NodeContainer) $ do
+              si <- getStyleIdx (peNodeArena env) idx
+              unless (hasFlag containerFlagClip si) $
+                walkChildrenWithOccluders env idx
     else do
       nt <- getNodeType (peNodeArena env) idx
       scope <- (.&. complement 2) <$> getNodeScope (peNodeArena env) idx
@@ -117,18 +128,50 @@ paintNodeWithEnv env idx = do
           theme <- scopeTheme (peContext env) scope
           lowerNodeVisible env {peTheme = theme, peScope = scope} idx nt (Rect x y w h)
 
--- | Paint a skipped plain container's children when a pinned node is below
--- it. Plain containers draw nothing and do not clip, so a pinned node can
--- show outside one, even one with no size. Other containers clip their
--- children.
-{-# NOINLINE paintPinnedBelow #-}
-paintPinnedBelow :: PaintEnv -> NodeIdx -> IO ()
-paintPinnedBelow env idx = do
-  pinnedBelow <- hasPinnedBelow (peNodeArena env) idx
+-- | Handle a culled node on frames that contain Tier 2 shader effect
+-- containers: re-check effect containers using their bleed margin
+-- ('seeMargin'), and otherwise keep walking pinned descendants.
+{-# NOINLINE paintSkippedWithEffects #-}
+paintSkippedWithEffects ::
+  PaintEnv -> NodeIdx -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> IO ()
+paintSkippedWithEffects env idx !x !y !w !h !cx !cy !cw !ch = do
   nt <- getNodeType (peNodeArena env) idx
-  when (pinnedBelow && nt == NodeContainer) $ do
+  when (nt == NodeContainer) $ do
     si <- getStyleIdx (peNodeArena env) idx
-    unless (hasFlag containerFlagClip si) $ walkChildrenWithOccluders env idx
+    paintedEffect <-
+      if hasFlag containerFlagShaderEffect si
+        then do
+          mEntry <- lookupShaderEffectAt (peContext env) idx
+          case mEntry of
+            Just entry -> do
+              let V2 mx my = seeMargin entry
+                  !ox = max paintOverhang mx
+                  !oy = max paintOverhang my
+                  !l = max (x - ox) cx
+                  !t = max (y - oy) cy
+                  !r = min (x + w + ox) (cx + cw)
+                  !b = min (y + h + oy) (cy + ch)
+                  occluded = anyRun (peOccluders env) $ \x0 y0 x1 y1 -> l >= x0 && t >= y0 && r <= x1 && b <= y1
+                  missesPieces =
+                    sizeofPrimArray (pePieces env) > 0
+                      && not (anyRun (pePieces env) $ \x0 y0 x1 y1 -> l < x1 && t < y1 && r > x0 && b > y0)
+              if r > l && b > t && not occluded && not missesPieces
+                then do
+                  scope <- (.&. complement 2) <$> getNodeScope (peNodeArena env) idx
+                  let !rect = Rect x y w h
+                  if scope == peScope env
+                    then lowerNodeVisible env idx nt rect
+                    else do
+                      theme <- scopeTheme (peContext env) scope
+                      lowerNodeVisible env {peTheme = theme, peScope = scope} idx nt rect
+                  pure True
+                else pure False
+            Nothing -> pure False
+        else pure False
+    unless paintedEffect $ do
+      pinnedBelow <- hasPinnedBelow (peNodeArena env) idx
+      when (pinnedBelow && not (hasFlag containerFlagClip si)) $
+        walkChildrenWithOccluders env idx
 
 -- | Whether @p@ holds for any of the @x0, y0, x1, y1@ runs of @rects@.
 {-# INLINE anyRun #-}
@@ -164,6 +207,7 @@ lowerNodeVisible env idx nt rect = do
     NodeBox -> paintBoxNode env idx rect
     NodeImage -> paintImageNode env idx rect
     NodeDrawing -> paintDrawingNode env idx rect
+    NodeShader -> paintShaderNode env idx rect
     NodeButton -> paintWidget env idx nt rect >> paintWidgetChildren env idx rect
     NodeSlider -> paintWidget env idx nt rect >> paintWidgetChildren env idx rect
     NodeSelect -> paintWidget env idx nt rect >> paintWidgetChildren env idx rect
@@ -203,20 +247,44 @@ paintFocusRing env idx nt rect = do
     pushRoundedStroke (peDrawArena env) ring radius 1.5 (themeFocusRing (peTheme env))
 
 paintContainerNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
-paintContainerNode env@PaintEnv {peContext = ctx} idx rect = do
+paintContainerNode env@PaintEnv {peContext = ctx, peDrawArena = da} idx rect = do
   si <- getStyleIdx (peNodeArena env) idx
   -- A tab strip's rule, track or contained body, under its children.
   case tabChromeDecode si of
     (TabChromeNone, _, _) -> pure ()
-    _ -> paintTabChrome (peDrawArena env) (peTheme env) si rect
-  if hasFlag containerFlagClip si
-    then paintClippedChildren env idx rect
-    else walkChildrenWithOccluders env idx
+    _ -> paintTabChrome da (peTheme env) si rect
+  if hasFlag containerFlagShaderEffect si
+    then paintEffectContainer env idx rect si
+    else
+      if hasFlag containerFlagClip si
+        then paintClippedChildren env idx rect
+        else walkChildrenWithOccluders env idx
   wid <- getWidgetId (peNodeArena env) idx
   mBuild <- lookupCustomDrawingAt ctx idx
   forM_ mBuild $ \CustomDrawingEntry {cdrBuild = build} -> do
     cdc <- mkCustomDrawContext ctx (peFontMetrics env) wid
     emitDrawingOps env rect (build cdc rect)
+
+{-# NOINLINE paintEffectContainer #-}
+paintEffectContainer :: PaintEnv -> NodeIdx -> Rect -> Int -> IO ()
+paintEffectContainer env@PaintEnv {peContext = ctx, peDrawArena = da} idx rect si = do
+  caps <- getShaderCapabilities ctx
+  mEntry <- lookupShaderEffectAt ctx idx
+  recOps <- readIORef (daRecordOps da)
+  let drawKids =
+        if hasFlag containerFlagClip si
+          then paintClippedChildren env idx rect
+          else walkChildrenWithOccluders env idx
+      drawKidsWithSvg entry = case (recOps, seeSvgOpacity entry) of
+        (True, Just op) -> withRecordOpacity da op drawKids
+        _ -> drawKids
+  case (capNodeEffects caps, mEntry) of
+    (True, Just entry) -> do
+      tok <- beginEffectSpan da rect (seeMargin entry)
+      drawKidsWithSvg entry
+      endEffectSpan da tok (seePasses entry) (seeSvgOpacity entry)
+    (_, Just entry) -> drawKidsWithSvg entry
+    _ -> drawKids
 
 -- | A drawing's ops clipped to its rect, in the env's default font. Image
 -- ops naming a registered 'ImageId' draw from the atlas.
@@ -399,6 +467,22 @@ paintDrawingNode env@PaintEnv {peContext = ctx} idx rect = do
       forM_ mBuild $ \(DrawingEntry content build) -> do
         ops <- cachedDrawingOps ctx wid content rect build
         emitDrawingOps env rect ops
+
+{-# NOINLINE paintShaderNode #-}
+paintShaderNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
+paintShaderNode PaintEnv {peContext = ctx, peDrawArena = da} idx rect = do
+  mEntry <- lookupNodeShaderAt ctx idx
+  forM_ mEntry $ \entry -> do
+    caps <- getShaderCapabilities ctx
+    recOps <- readIORef (daRecordOps da)
+    if capSurfaceShaders caps && not recOps
+      then pushShaderQuad da (snePass entry) rect (sneCornerRadius entry) (sneTint entry)
+      else
+        let r = sneCornerRadius entry
+            col = sneFallback entry
+         in if r > 0
+              then pushRoundedRect da rect r col
+              else pushRect da rect col
 
 -- | Lower the children of @idx@ with the current paint env, topmost last
 -- ('forChildrenInPaintOrder_'). NOINLINE keeps this recursive call out

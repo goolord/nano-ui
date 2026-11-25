@@ -106,6 +106,7 @@ import NanoUI.Internal.Id (WidgetId, hashWidgetId)
 import NanoUI.Internal.Id.Cursor (IdCursor)
 import NanoUI.Internal.Var.Types (SlotVar, Var)
 import NanoUI.Internal.Input (Composition, Input, InputPurpose, MouseButton, UiCursorKind)
+import NanoUI.Internal.Shader (ShaderCapabilities, ShaderEffectEntry, ShaderNodeEntry)
 import NanoUI.Internal.Shortcut (Shortcut)
 import NanoUI.Internal.Layout.Arena (DirTag, LayoutCache, NodeArena)
 import NanoUI.Internal.Store (WidgetStore)
@@ -714,11 +715,13 @@ data NodeCustom = NodeCustom
   , ncDrawing :: !(Maybe DrawingEntry)
   , ncCustom :: !(Maybe CustomDrawingEntry)
   , ncMeasure :: !(Maybe CustomMeasureFn)
+  , ncShader :: !(Maybe ShaderNodeEntry)
+  , ncEffect :: !(Maybe ShaderEffectEntry)
   }
 
 -- | No registrations, in no epoch.
 noNodeCustom :: NodeCustom
-noNodeCustom = NodeCustom 0 Nothing Nothing Nothing
+noNodeCustom = NodeCustom 0 Nothing Nothing Nothing Nothing Nothing
 
 -- | Words of 'ctxCustomPass': whether a custom drawing was registered on a
 -- node that is no drawing (0 or 1), a signature of the nodes that registered
@@ -1122,6 +1125,11 @@ data Context = Context
   -- ^ The open native windows the last view run declared
   -- ('NanoUI.Internal.ChildWindow.nativeWindow'), newest first. Reset by
   -- 'NanoUI.Internal.Frame.resetUiBuild'.
+  , ctxShaderCaps :: !(IORef ShaderCapabilities)
+  -- ^ Shader capabilities reported by the active backend.
+  , ctxEffectNodes :: !(IORef (Word32, [Int]))
+  -- ^ Epoch-stamped container node indices with Tier 2 shader effects this
+  -- build, so damage expansion skips scanning frames with no effects.
   }
 
 -- | A native window a view declared open this frame, for the backend to open

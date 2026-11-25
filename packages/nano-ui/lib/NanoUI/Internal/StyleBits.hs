@@ -38,6 +38,7 @@
 -- 32-63   labelFont         NodeButton, NodeSelect: a text font packing
 -- 0       containerInert    NodeContainer
 -- 1       containerClip
+-- 2       containerShaderEffect
 -- 8-9     chromePart        tab strip chrome
 -- 10-11   chromeStyle
 -- 12-13   chromeOrient
@@ -99,6 +100,7 @@ module NanoUI.Internal.StyleBits
   -- * Container
   , containerInert
   , containerClip
+  , containerShaderEffect
   , chromePart
   , chromeStyle
   , chromeOrient
@@ -349,6 +351,11 @@ containerInert = BitField 0 1
 containerClip :: BitField
 containerClip = BitField 1 1
 
+-- | Container wraps its children in a Tier 2 shader effect ('NanoUI.withShader').
+{-# INLINE containerShaderEffect #-}
+containerShaderEffect :: BitField
+containerShaderEffect = BitField 2 1
+
 -- | The 'NanoUI.Internal.WidgetText.TabChrome' a tab strip's container
 -- paints.
 {-# INLINE chromePart #-}
@@ -421,6 +428,7 @@ styleLayouts =
   , ( "NodeContainer"
     , [ ("containerInert", containerInert)
       , ("containerClip", containerClip)
+      , ("containerShaderEffect", containerShaderEffect)
       , ("chromePart", chromePart)
       , ("chromeStyle", chromeStyle)
       , ("chromeOrient", chromeOrient)

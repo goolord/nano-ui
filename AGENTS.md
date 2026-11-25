@@ -26,6 +26,7 @@ text editing and windows.
 | `packages/nano-ui-diagrams` | Line/bar/scatter/area charts (`NanoUI.Plot`) and diagrams-lib drawing |
 | `packages/nano-ui-form` | Validated applicative forms on ditto |
 | `packages/nano-ui-markdown` | Markdown rendering, incrementally appendable for streamed chat replies |
+| `packages/nano-ui-shader` | Pure-Haskell typed fragment shader EDSL, multi-target GPU compiler (GLSL, SPIR-V, MSL, CPU), pass fusion, and built-in effects |
 | `packages/nano-ui-svg` | `DrawOp`-to-SVG export (headless screenshots of any view) |
 | `packages/nano-ui-demo` | Example apps, single-topic tutorials, and the book's compiled snippets |
 | `book/` | mdBook documentation, deployed by `.github/workflows/deploy-book.yml` |

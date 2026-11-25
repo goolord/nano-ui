@@ -9,6 +9,7 @@ The `nano-ui` workspace splits optional backends and domain widgets into focused
 | `nano-ui-diagrams` | Line, bar, scatter, area, and step charts plus `diagrams-lib` widgets |
 | `nano-ui-form` | Validated applicative forms built on `ditto` |
 | `nano-ui-markdown` | CommonMark rendering with incremental appends for streaming |
+| `nano-ui-shader` | Pure-Haskell typed fragment shader EDSL, multi-target GPU compiler, and 21 built-in effects |
 | `nano-ui-svg` | `DrawOp`-to-SVG and full-frame SVG export |
 
 ## Backends

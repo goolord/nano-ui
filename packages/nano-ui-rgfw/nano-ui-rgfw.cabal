@@ -120,6 +120,7 @@ test-suite nano-ui-rgfw-test
         nano-ui-emit,
         nano-ui-rgfw,
         nano-ui-rgfw-bindings,
+        nano-ui-shader,
         primitive ^>=0.9,
         text ^>=2.1
     hs-source-dirs:   test

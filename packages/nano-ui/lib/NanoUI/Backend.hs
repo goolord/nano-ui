@@ -48,6 +48,18 @@ module NanoUI.Backend
     -- * Rendering a frame
   , DrawData (..)
   , DrawCmd (..)
+  , ShaderCall (..)
+  , EffectSpan (..)
+  , emptyShaderCalls
+  , emptyEffectSpans
+  , emptyUniformBytes
+  , ShaderProgram (..)
+  , ShaderCapabilities (..)
+  , noShaderCapabilities
+  , setShaderCapabilities
+  , getShaderCapabilities
+  , setDrawPixelScale
+  , sysUniformBytes
   , Layer (..)
   , drawCmdNull
   , drawCmdElems
@@ -391,7 +403,10 @@ import NanoUI.Internal.Context
   , getExplainLayout, getExplainedNode, getFocusId, getSystemAppearance
   , setExplainLayout, setSystemAppearance, setWakeLoop, setWakeLoopChecked
   , withBackendSession, setBackendSession, backendSession
+  , setShaderCapabilities, getShaderCapabilities, setDrawPixelScale
   )
+import NanoUI.Internal.Shader (ShaderCapabilities (..), ShaderProgram (..), noShaderCapabilities)
+import NanoUI.Internal.Uniforms (sysUniformBytes)
 import NanoUI.Internal.Frame (runFrame)
 import NanoUI.Internal.ChildWindow (ChildWindow (..), childView, childWindows)
 import NanoUI.Internal.Var.Cell (varChangeCount)
@@ -399,7 +414,7 @@ import NanoUI.Internal.Frame.Spans (collectRasterSpans)
 import NanoUI.Internal.Frame.Cursor (uiCursorKind)
 import NanoUI.Internal.Damage (clipPixelEdges, damagePieces, pixelEdges, snapDamage)
 import NanoUI.Internal.Frame.TextArea (TextInputArea (..), textInputArea)
-import NanoUI.Internal.Draw
+import NanoUI.Internal.Draw hiding (setDrawPixelScale)
 import NanoUI.Internal.Font
 import NanoUI.Internal.Id
 import NanoUI.Internal.Input

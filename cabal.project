@@ -1,5 +1,6 @@
 packages:
   packages/nano-ui
+  packages/nano-ui-shader
   packages/nano-ui-emit
   packages/nano-ui-ttf
   packages/nano-ui-sdl
