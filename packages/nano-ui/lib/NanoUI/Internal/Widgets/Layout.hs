@@ -7,6 +7,9 @@ module NanoUI.Internal.Widgets.Layout
   , callout
   , calloutWith
   , calloutWith'
+  , calloutTone
+  , calloutToneWith
+  , calloutToneWith'
   , row
   , rowWith
   , rowWith'
@@ -19,8 +22,7 @@ module NanoUI.Internal.Widgets.Layout
   , layersWith
   , layersWith'
   , layers'
-  , hstack
-  , vstack
+  , clipBox
   , label
   , label'
   , labelWith
@@ -28,24 +30,28 @@ module NanoUI.Internal.Widgets.Layout
   , labelEx
   , separator
   , spacer
+  , spacerW
+  , spacerH
   , flex
   , ScrollPolicy (..)
   , ScrollConfig (..)
   , defaultScrollConfig
+  , scroll2DConfig
   , scroll
   , scrollWith
+  , scrollWith'
   , scroll2D
   , scroll2DWith
-  , scrollArea
-  , scrollArea2D
+  , scroll2DWith'
   , scrollConfigured
-  , scrollAreaConfigured
+  , scrollConfigured'
   , scrollAreaIdConfigured
   , grid
   , gridWith
   , gridWith'
   , responsive
   , responsiveRowCol
+  , withContainerQuery
   , withContainerSize
   , withContainerWidth
   , responsiveIn
@@ -60,7 +66,7 @@ import NanoUI.Internal.Context (Context (..), getPrevRect, intKey, recordLayoutR
 import NanoUI.Internal.Layout.ScrollGeometry
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, currentId, liftIO, nextId, styled, windowSize, windowWidth, withContext)
+import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, askInput, currentId, liftIO, nextId, styled, uiTheme, windowSize, windowWidth, withContext)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Style qualified as Style
 import NanoUI.Internal.Types (Color (..), Rect (..), Size (..), lerpColor)
@@ -91,27 +97,45 @@ panel' = container NodePanel
 panelWith' :: (Layout -> Layout) -> NanoUI a -> NanoUI (a, Response)
 panelWith' f = withDefaultWith f (containerResponse NodePanel)
 
--- | Full-width panel tinted by a colour, with a matching border. See 'calloutWith'.
+-- | Full-width panel tinted by a color, with a matching border. See 'calloutWith'.
 {-# INLINE callout #-}
 callout :: Color -> NanoUI a -> NanoUI a
 callout borderCol = calloutWith borderCol id
 
+calloutTheme :: Color -> Theme -> Theme
+calloutTheme col t =
+  panelStyle (Style.background (lerpColor col (Style.styleBg (Style.themePanel t)) 0.88) . Style.borderColor col) t
+
 -- | A panel tinted with @col@: a border in it and a faint wash of it over the
--- panel colour. The tint applies to the callout's own panel and to panels
+-- panel color. The tint applies to the callout's own panel and to panels
 -- nested in it.
 {-# INLINE calloutWith #-}
 calloutWith :: Color -> (Layout -> Layout) -> NanoUI a -> NanoUI a
-calloutWith col f =
-  styled
-    (\t -> panelStyle (Style.background (lerpColor col (Style.styleBg (Style.themePanel t)) 0.88) . Style.borderColor col) t)
-    . panelWith (f . padXY 10 6 . gap 8 . fillW)
+calloutWith col f = styled (calloutTheme col) . panelWith (f . padXY 10 6 . gap 8 . fillW)
 
 -- | 'calloutWith' returning its 'Response', as 'rowWith'' does.
 calloutWith' :: Color -> (Layout -> Layout) -> NanoUI a -> NanoUI (a, Response)
-calloutWith' col f =
-  styled
-    (\t -> panelStyle (Style.background (lerpColor col (Style.styleBg (Style.themePanel t)) 0.88) . Style.borderColor col) t)
-    . panelWith' (f . padXY 10 6 . gap 8 . fillW)
+calloutWith' col f = styled (calloutTheme col) . panelWith' (f . padXY 10 6 . gap 8 . fillW)
+
+-- | Full-width callout panel tinted by a semantic theme 'Tone' (for example,
+-- @calloutTone Warning@ or @calloutTone Danger@).
+{-# INLINE calloutTone #-}
+calloutTone :: Tone -> NanoUI a -> NanoUI a
+calloutTone t = calloutToneWith t id
+
+-- | 'calloutTone' with a layout modifier.
+{-# INLINE calloutToneWith #-}
+calloutToneWith :: Tone -> (Layout -> Layout) -> NanoUI a -> NanoUI a
+calloutToneWith t f body = do
+  col <- flip toneColor t <$> uiTheme
+  calloutWith col f body
+
+-- | 'calloutToneWith' returning its 'Response'.
+{-# INLINE calloutToneWith' #-}
+calloutToneWith' :: Tone -> (Layout -> Layout) -> NanoUI a -> NanoUI (a, Response)
+calloutToneWith' t f body = do
+  col <- flip toneColor t <$> uiTheme
+  calloutWith' col f body
 
 -- | Lay out children left to right, using current defaults and a child id scope.
 {-# INLINE row #-}
@@ -161,7 +185,7 @@ column' layout = container NodeContainer (layout {layoutDirection = Column})
 -- | Stack children in the same box, later ones on top, such as a badge on
 -- an icon or a caption over an image. The box is as large as its largest
 -- child, and each child is placed by its alignment: @alignEnd . alignTop@
--- for a corner badge, @alignCenter . alignMid@ to centre it. A growing
+-- for a corner badge, @alignCenter . alignMiddle@ to center it. A growing
 -- child ('fillW', 'grow') fills the box on that axis. The pointer goes to
 -- the child on top: where one widget covers another, hover, presses and
 -- focus go to the top one, and the one underneath shows no hover or tooltip
@@ -187,15 +211,13 @@ layers' = container NodeContainer . layered
 layersWith' :: (Layout -> Layout) -> NanoUI a -> NanoUI (a, Response)
 layersWith' f = withDefaultWith (layered . f) (containerResponse NodeContainer)
 
--- | Run a collection of widgets side by side, as in @hstack (map label names)@.
-{-# INLINE hstack #-}
-hstack :: Foldable f => f (NanoUI ()) -> NanoUI ()
-hstack = row . sequence_
-
--- | Run a collection of widgets top to bottom.
-{-# INLINE vstack #-}
-vstack :: Foldable f => f (NanoUI ()) -> NanoUI ()
-vstack = column . sequence_
+-- | A plain container that clips its children to its bounds without painting
+-- a panel background or border.
+{-# INLINE clipBox #-}
+clipBox :: LayoutModifier -> NanoUI a -> NanoUI a
+clipBox f body = do
+  base <- askDefaultLayout
+  clipContainer (f (tight base)) body
 
 -- | Place children in a grid with at least one column. The count is clamped to 1.
 {-# INLINE grid #-}
@@ -225,91 +247,77 @@ responsive breakpoint wideContainer narrowContainer child = do
 responsiveRowCol :: Float -> (Layout -> Layout) -> NanoUI a -> NanoUI a
 responsiveRowCol breakpoint f = responsive breakpoint (rowWith f) (columnWith f)
 
+-- | Shared container-size measurement scaffold. Runs @body@ with the derived
+-- value @q@ computed from the container's inner content size (or window size
+-- minus padding on its first frame), requesting a follow-up frame only when
+-- @changed@ reports a meaningful transition.
+containerQuery ::
+  LayoutModifier ->
+  (Size -> q) ->
+  (q -> q -> Bool) ->
+  (q -> Layout -> Layout) ->
+  (q -> NanoUI a) ->
+  NanoUI a
+containerQuery f project changed adjustLayout body = do
+  wid <- currentId
+  ctx <- askContext
+  winSz <- windowSize
+  base <- askDefaultLayout
+  let layout0 = f (fillW (tight base))
+      Padding pl pr pt pb = layoutPadding layout0
+      innerOf (Rect _ _ rw rh) = Size (max 0 (rw - pl - pr)) (max 0 (rh - pt - pb))
+      fallback = Size (max 0 (sizeW winSz - pl - pr)) (max 0 (sizeH winSz - pt - pb))
+      valOf = project . maybe fallback innerOf
+  q <- liftIO $ do
+    cur <- valOf <$> getPrevRect ctx wid
+    recordLayoutRead ctx (intKey wid) $ do
+      next <- valOf <$> getPrevRect ctx wid
+      pure (changed cur next)
+    pure cur
+  container NodeContainer (adjustLayout q layout0) (tagContainer wid >> body q)
+
+-- | Run @body@ inside an unpadded container that fills the available width
+-- (unless @f@ overrides sizing), projecting the container's inner content
+-- 'Size' to a discrete value @a@. A follow-up frame is scheduled only when
+-- the projected value changes (not on every pixel of divider drag), making
+-- this ideal for multi-tier breakpoints or responsive grid column counts.
+withContainerQuery :: Eq a => LayoutModifier -> (Size -> a) -> (a -> NanoUI r) -> NanoUI r
+withContainerQuery f project = containerQuery f project (/=) (\_ l -> l)
+
 -- | Run @body@ inside an unpadded container that fills the available width
 -- (unless @f@ overrides sizing), passing the container's inner content 'Size'
 -- (outer laid-out bounds less its padding, or 'windowSize' before its first
 -- layout). When layout changes that size by more than half a pixel, a
 -- follow-up frame is scheduled; pure scrolling or movement does not.
-withContainerSize :: (Layout -> Layout) -> (Size -> NanoUI a) -> NanoUI a
-withContainerSize f body = do
-  wid <- currentId
-  ctx <- askContext
-  winSz <- windowSize
-  base <- askDefaultLayout
-  let layout = f (fillW (tight base))
-      Padding pl pr pt pb = layoutPadding layout
-      innerOf (Rect _ _ rw rh) = Size (max 0 (rw - pl - pr)) (max 0 (rh - pt - pb))
-      fallback = Size (max 0 (sizeW winSz - pl - pr)) (max 0 (sizeH winSz - pt - pb))
-  sz <- liftIO $ do
-    mPrev <- getPrevRect ctx wid
-    let sizeOf = maybe fallback innerOf
-        cur@(Size w h) = sizeOf mPrev
-    recordLayoutRead ctx (intKey wid) $ do
-      Size w' h' <- sizeOf <$> getPrevRect ctx wid
-      pure (abs (w' - w) > 0.5 || abs (h' - h) > 0.5)
-    pure cur
-  container NodeContainer layout (tagContainer wid >> body sz)
+withContainerSize :: LayoutModifier -> (Size -> NanoUI a) -> NanoUI a
+withContainerSize f =
+  containerQuery f id (\(Size w h) (Size w' h') -> abs (w' - w) > 0.5 || abs (h' - h) > 0.5) (\_ l -> l)
 
 -- | Like 'withContainerSize', passing only the container's inner content width
 -- and scheduling a follow-up frame only when that width changes.
-withContainerWidth :: (Layout -> Layout) -> (Float -> NanoUI a) -> NanoUI a
-withContainerWidth f body = do
-  wid <- currentId
-  ctx <- askContext
-  ww <- windowWidth
-  base <- askDefaultLayout
-  let layout = f (fillW (tight base))
-      Padding pl pr _ _ = layoutPadding layout
-      innerW (Rect _ _ rw _) = max 0 (rw - pl - pr)
-      fallback = max 0 (ww - pl - pr)
-  w <- liftIO $ do
-    mPrev <- getPrevRect ctx wid
-    let widthOf = maybe fallback innerW
-        cur = widthOf mPrev
-    recordLayoutRead ctx (intKey wid) $ do
-      w' <- widthOf <$> getPrevRect ctx wid
-      pure (abs (w' - cur) > 0.5)
-    pure cur
-  container NodeContainer layout (tagContainer wid >> body w)
+withContainerWidth :: LayoutModifier -> (Float -> NanoUI a) -> NanoUI a
+withContainerWidth f =
+  containerQuery f sizeW (\w w' -> abs (w' - w) > 0.5) (\_ l -> l)
 
 -- | Container-scoped counterpart to 'responsive': chooses between
 -- @wideContainer@ and @narrowContainer@ based on the enclosing container's
--- laid-out width (rather than 'windowWidth'), settling automatically when a
--- split pane or parent resizes across @breakpoint@.
+-- laid-out inner width (rather than 'windowWidth'), settling automatically
+-- when a split pane or parent resizes across @breakpoint@.
 responsiveIn :: Float -> (NanoUI a -> NanoUI a) -> (NanoUI a -> NanoUI a) -> NanoUI a -> NanoUI a
-responsiveIn breakpoint wideContainer narrowContainer child = do
-  wid <- currentId
-  ctx <- askContext
-  ww <- windowWidth
-  isWide <- liftIO $ do
-    mPrev <- getPrevRect ctx wid
-    let wideOf = (>= breakpoint) . maybe ww rectW
-        cur = wideOf mPrev
-    recordLayoutRead ctx (intKey wid) ((/= cur) . wideOf <$> getPrevRect ctx wid)
-    pure cur
-  base <- askDefaultLayout
-  let outer = (fillW (tight base)) {layoutDirection = Column}
-  container NodeContainer outer $ do
-    tagContainer wid
+responsiveIn breakpoint wideContainer narrowContainer child =
+  withContainerQuery (direction Column) ((>= breakpoint) . sizeW) $ \isWide ->
     if isWide then wideContainer child else narrowContainer child
 
--- | A row while its own laid-out width is at least @breakpoint@, a column
--- below it. Defaults to 'fillW' unless @f@ overrides width.
-responsiveRowColIn :: Float -> (Layout -> Layout) -> NanoUI a -> NanoUI a
-responsiveRowColIn breakpoint f child = do
-  wid <- currentId
-  ctx <- askContext
-  ww <- windowWidth
-  base <- askDefaultLayout
-  let layout0 = f (fillW base)
-  isWide <- liftIO $ do
-    mPrev <- getPrevRect ctx wid
-    let wideOf = (>= breakpoint) . maybe ww rectW
-        cur = wideOf mPrev
-    recordLayoutRead ctx (intKey wid) ((/= cur) . wideOf <$> getPrevRect ctx wid)
-    pure cur
-  let dir = if isWide then Row else Column
-  container NodeContainer (layout0 {layoutDirection = dir}) (tagContainer wid >> child)
+-- | A row while its own laid-out inner width is at least @breakpoint@, a
+-- column below it. Defaults to 'fillW' and 'tight' unless @f@ overrides them.
+responsiveRowColIn :: Float -> LayoutModifier -> NanoUI a -> NanoUI a
+responsiveRowColIn breakpoint f child =
+  containerQuery
+    f
+    ((>= breakpoint) . sizeW)
+    (/=)
+    (\isWide l -> l {layoutDirection = if isWide then Row else Column})
+    (const child)
 
 -- | A line of text. Newlines start new lines.
 {-# INLINE label #-}
@@ -372,6 +380,16 @@ spacer w h = do
   wid <- nextId
   withContext (\ctx -> addSizedLeaf ctx wid NodeSpacer Row w h)
 
+-- | Fixed horizontal space in logical pixels.
+{-# INLINE spacerW #-}
+spacerW :: Float -> NanoUI ()
+spacerW w = spacer (Fixed w) Fit
+
+-- | Fixed vertical space in logical pixels.
+{-# INLINE spacerH #-}
+spacerH :: Float -> NanoUI ()
+spacerH h = spacer Fit (Fixed h)
+
 -- | A leaf with no content under the current parent, sized on each axis. It
 -- takes no input, so it resolves no 'Response'.
 addSizedLeaf :: Context -> WidgetId -> NodeType -> Direction -> Sizing -> Sizing -> IO ()
@@ -385,10 +403,10 @@ addSizedLeaf ctx wid nt dir w h = do
 -- | Fill the available space and put the body in its middle on both axes.
 -- The body is one block whose children stack top to bottom as in a
 -- 'column', each placed across the block by its own alignment: give a child
--- narrower than its siblings 'alignCenter' to centre it under them too.
+-- narrower than its siblings 'alignCenter' to center it under them too.
 {-# INLINE center #-}
 center :: NanoUI a -> NanoUI a
-center = layersWith grow . columnWith (tight . alignCenter . alignMid)
+center = layersWith grow . columnWith (tight . alignCenter . alignMiddle)
 
 -- | Scroll along the current layout direction, vertical by default. Constrain
 -- the viewport size so content can overflow it; the body still runs each frame.
@@ -396,17 +414,17 @@ center = layersWith grow . columnWith (tight . alignCenter . alignMid)
 scroll :: NanoUI a -> NanoUI a
 scroll = scrollWith id
 
--- | 'scroll' with modified viewport layout. Use 'scrollArea' when scroll commands
--- need the container's id.
+-- | 'scroll' with modified viewport layout. Use 'scrollWith'' when scroll
+-- commands or overlays need the container's 'Response' ('respId', 'respRect').
 {-# INLINE scrollWith #-}
-scrollWith :: (Layout -> Layout) -> NanoUI a -> NanoUI a
-scrollWith f child = snd <$> scrollArea f child
+scrollWith :: LayoutModifier -> NanoUI a -> NanoUI a
+scrollWith f child = fst <$> scrollWith' f child
 
--- | 'scrollWith' that also returns the container's widget id, which keys its
--- scroll offset.
-{-# INLINE scrollArea #-}
-scrollArea :: (Layout -> Layout) -> NanoUI a -> NanoUI (WidgetId, a)
-scrollArea = scrollAreaFrom (scrollDefault1D . layoutDirection)
+-- | 'scrollWith' returning the body's result and the container's 'Response',
+-- whose 'respId' keys its scroll offset.
+{-# INLINE scrollWith' #-}
+scrollWith' :: LayoutModifier -> NanoUI a -> NanoUI (a, Response)
+scrollWith' = scrollFrom' (scrollDefault1D . layoutDirection)
 
 {-# INLINE scrollAreaIdConfigured #-}
 scrollAreaIdConfigured :: WidgetId -> Layout -> ScrollConfig -> NanoUI a -> NanoUI a
@@ -429,28 +447,31 @@ scroll2D = scroll2DWith id
 
 -- | 'scroll2D' with modified viewport layout.
 {-# INLINE scroll2DWith #-}
-scroll2DWith :: (Layout -> Layout) -> NanoUI a -> NanoUI a
-scroll2DWith f child = snd <$> scrollArea2D f child
+scroll2DWith :: LayoutModifier -> NanoUI a -> NanoUI a
+scroll2DWith f child = fst <$> scroll2DWith' f child
 
--- | 'scroll2DWith' that also returns the container's widget id.
-{-# INLINE scrollArea2D #-}
-scrollArea2D :: (Layout -> Layout) -> NanoUI a -> NanoUI (WidgetId, a)
-scrollArea2D = scrollAreaFrom (const defaultScrollConfig)
+-- | 'scroll2DWith' returning the body's result and the container's 'Response'.
+{-# INLINE scroll2DWith' #-}
+scroll2DWith' :: LayoutModifier -> NanoUI a -> NanoUI (a, Response)
+scroll2DWith' = scrollFrom' (const scroll2DConfig)
 
 -- | Scroll container with an explicit 'ScrollConfig' and viewport layout.
 {-# INLINE scrollConfigured #-}
-scrollConfigured :: ScrollConfig -> (Layout -> Layout) -> NanoUI a -> NanoUI a
-scrollConfigured cfg f child = snd <$> scrollAreaConfigured cfg f child
+scrollConfigured :: ScrollConfig -> LayoutModifier -> NanoUI a -> NanoUI a
+scrollConfigured cfg f child = fst <$> scrollConfigured' cfg f child
 
--- | 'scrollConfigured' returning the container's 'WidgetId'.
-{-# INLINE scrollAreaConfigured #-}
-scrollAreaConfigured :: ScrollConfig -> (Layout -> Layout) -> NanoUI a -> NanoUI (WidgetId, a)
-scrollAreaConfigured cfg = scrollAreaFrom (const cfg)
+-- | 'scrollConfigured' returning the body's result and the container's 'Response'.
+{-# INLINE scrollConfigured' #-}
+scrollConfigured' :: ScrollConfig -> LayoutModifier -> NanoUI a -> NanoUI (a, Response)
+scrollConfigured' cfg = scrollFrom' (const cfg)
 
-{-# INLINE scrollAreaFrom #-}
-scrollAreaFrom ::
-  (Layout -> ScrollConfig) -> (Layout -> Layout) -> NanoUI a -> NanoUI (WidgetId, a)
-scrollAreaFrom config f child = do
+{-# INLINE scrollFrom' #-}
+scrollFrom' ::
+  (Layout -> ScrollConfig) -> LayoutModifier -> NanoUI a -> NanoUI (a, Response)
+scrollFrom' config f child = do
   layout <- f <$> askDefaultLayout
   wid <- nextId
-  (wid,) <$> scrollAreaIdConfigured wid layout (config layout) child
+  inp <- askInput
+  r <- scrollAreaIdConfigured wid layout (config layout) child
+  resp <- withContext (\ctx -> resolveInteraction ctx inp (-1) wid)
+  pure (r, resp)

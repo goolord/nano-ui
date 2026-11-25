@@ -2,7 +2,7 @@
 
 -- | Pure-Haskell GLSL 150 (OpenGL 3.2, @nano-ui-rgfw@) and GLSL ES 300
 -- (WebGL2, @nano-ui-sdl-web@) fragment shader emitters for 'ShaderIR'.
-module NanoUI.Shader.Emit.Glsl
+module NanoUI.Shader.Internal.Emit.Glsl
   ( GlslTarget (..)
   , emitGlsl
   , emitGlsl150
@@ -19,7 +19,7 @@ import Data.Vector qualified as V
 import Data.Word (Word32)
 import GHC.Float (castWord32ToFloat)
 import NanoUI.Internal.Uniforms (GpuType (..), UniformField (..))
-import NanoUI.Shader.IR
+import NanoUI.Shader.Internal.IR
 import Numeric (showFFloat)
 
 -- | GLSL dialect target.

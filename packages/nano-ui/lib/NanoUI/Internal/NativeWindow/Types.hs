@@ -125,25 +125,25 @@ data WindowHost = WindowHost
 -- the reported state says what happened.
 data WindowCapabilities = WindowCapabilities
   { wcTitle :: !Bool
-  -- ^ 'NanoUI.setWindowTitleUi'.
+  -- ^ 'NanoUI.setWindowTitle'.
   , wcIcon :: !Bool
-  -- ^ 'NanoUI.setWindowIconUi'.
+  -- ^ 'NanoUI.setWindowIcon'.
   , wcSizeLimits :: !Bool
-  -- ^ 'NanoUI.setWindowMinSizeUi' and 'NanoUI.setWindowMaxSizeUi'.
+  -- ^ 'NanoUI.setWindowMinSize' and 'NanoUI.setWindowMaxSize'.
   , wcOpacity :: !Bool
-  -- ^ 'NanoUI.setWindowOpacityUi'.
+  -- ^ 'NanoUI.setWindowOpacity'.
   , wcMode :: !Bool
-  -- ^ 'NanoUI.setWindowModeUi'.
+  -- ^ 'NanoUI.setWindowMode'.
   , wcMove :: !Bool
-  -- ^ 'NanoUI.moveWindowUi' and 'NanoUI.centerWindowUi'. Not on Wayland,
+  -- ^ 'NanoUI.moveWindow' and 'NanoUI.centerWindow'. Not on Wayland,
   -- where only the compositor places windows.
   , wcResize :: !Bool
-  -- ^ 'NanoUI.resizeWindowUi'.
+  -- ^ 'NanoUI.resizeWindow'.
   , wcMinimize :: !Bool
-  -- ^ 'NanoUI.minimizeWindowUi'.
+  -- ^ 'NanoUI.minimizeWindow'.
   , wcMaximize :: !Bool
-  -- ^ 'NanoUI.maximizeWindowUi', 'NanoUI.restoreWindowUi' and
-  -- 'NanoUI.toggleMaximizedUi'.
+  -- ^ 'NanoUI.maximizeWindow', 'NanoUI.restoreWindow' and
+  -- 'NanoUI.toggleMaximized'.
   }
   deriving (Eq, Show)
 

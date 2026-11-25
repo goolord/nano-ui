@@ -101,7 +101,7 @@ view = do
   let phase = if anim then realToFrac now * 2.5 else 0.0
 
   columnWith (padAll 16 . gap 12 . grow) $ do
-    rowWith (tight . gap 12 . alignMid . fillW) $ do
+    rowWith (tight . gap 12 . alignMiddle . fillW) $ do
       heading "Typed Fragment Shaders"
       flex
       checkbox "Animate" animateOn
@@ -167,7 +167,7 @@ view = do
         labelWith fontBold "Tier 2: Subtree Effects"
         muted "Wraps any interactive subtree. Controls inside stay clickable."
 
-        boundedRadio modeLabel modeVar
+        enumRadioBy modeLabel modeVar
         mode <- readVar modeVar
 
         scope $ case mode of
@@ -187,7 +187,7 @@ view = do
 
         let sampleCard =
               panelWith (padAll 16 . gap 10 . fixedW 360) $ do
-                rowWith (tight . gap 8 . alignMid) $ do
+                rowWith (tight . gap 8 . alignMiddle) $ do
                   box (fixedWH 28 28) (colorRGB 235 80 70)
                   box (fixedWH 28 28) (colorRGB 70 195 110)
                   box (fixedWH 28 28) (colorRGB 70 145 245)
@@ -228,7 +228,7 @@ view = do
               withShader groupOpacity oVal sampleCard
 
 sliderRow :: T.Text -> Float -> Float -> Var Float -> NanoUI ()
-sliderRow title lo hi v = rowWith (tight . gap 10 . alignMid . fillW) $ do
+sliderRow title lo hi v = rowWith (tight . gap 10 . alignMiddle . fillW) $ do
   labelWith (fixedW 100) title
   sliderWith (fixedW 180) lo hi v
   cur <- readVar v

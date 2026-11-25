@@ -25,7 +25,7 @@ import Input (inputChecks, queueChecks)
 import NanoUI
   ( Color, ImageId (..), Rect (..), ShaderCapabilities (..), ShaderConfig (..), V2 (..), box, canvas, colorA, colorBlack
   , colorB, colorG, colorR, colorRGBA, colorWhite, column, columnWith, defaultLightTheme, defaultShaderConfig
-  , defaultTheme, drawStrokePathWith, fixedWH, followSystemTheme, getTheme, lightDark, padAll, pageColor, respRect
+  , defaultTheme, drawStrokePathWith, fixedWH, lightDark, padAll, pageColor, respRect
   , shaderBox, shaderConfigured, tight, withShader
   )
 import NanoUI.Internal.Shader (CpuFragCtx (..), Shader (..))
@@ -36,7 +36,7 @@ import NanoUI.Shader
 import NanoUI.Path qualified as P
 import NanoUI.Backend
   ( Appearance (..), cursorFallback, emptyEffectSpans, emptyInput, emptyShaderCalls, emptyUniformBytes
-  , getShaderCapabilities, getSystemAppearance, setSystemAppearance, snapDamage
+  , followSystemThemeIO, getShaderCapabilities, getSystemAppearance, getThemeIO, setSystemAppearance, setThemeIO, snapDamage
   )
 import NanoUI.Internal.Context (lookupImageUv)
 import NanoUI.Sdl.Internal.Cursor (SdlCursors (..), destroyCursors, initCursors, sdlSystemCursor, showCursorKind)
@@ -45,7 +45,7 @@ import NanoUI.Sdl.Internal.Image (ImageAtlas, destroyImageAtlas, newImageAtlas, 
 import NanoUI.Sdl.Internal.Render (destroyRenderBatch, flushRenderBatch, newRenderBatch, renderDrawDataPass)
 import NanoUI.Testing
   ( Context, Damage (..), DrawCmd (..), DrawData (..), Layer (..), UiCursorKind (..), atlasTextureId
-  , glyphPageTextureId, newPixelContext, registerImage, setTheme
+  , glyphPageTextureId, newPixelContext, registerImage
   )
 import NanoUI.Testing.Assert (withInput)
 import NanoUI.Testing.Harness (warmupDraw)
@@ -304,10 +304,10 @@ systemThemeChecks env ctx = do
       Video.SDL_SYSTEM_THEME_DARK -> Just AppearanceDark
       _ -> Nothing
   setSystemAppearance ctx (Just (if want == Just AppearanceLight then AppearanceDark else AppearanceLight))
-  followSystemTheme ctx (lightDark defaultLightTheme defaultTheme)
+  followSystemThemeIO ctx (lightDark defaultLightTheme defaultTheme)
   (synced, _) <- syncDisplay ctx env emptyInput
   got <- getSystemAppearance synced
-  theme <- getTheme synced
+  theme <- getThemeIO synced
   unless (got == want) (fail ("system appearance " ++ show got ++ ", SDL reports " ++ show want))
   unless (theme == lightDark defaultLightTheme defaultTheme want) $
     fail "a context following the system kept the stale theme after the sync"
@@ -474,7 +474,7 @@ main = do
   ctx <- newPixelContext
   -- These checks read pixels over a black clear: a black page makes the
   -- frame's clear black.
-  getTheme ctx >>= setTheme ctx . pageColor colorBlack
+  getThemeIO ctx >>= setThemeIO ctx . pageColor colorBlack
   withSdlBench ctx $ \_ env -> bracket newImageAtlas destroyImageAtlas $ \images ->
     bracket (newRenderBatch (sdlRenderer env)) destroyRenderBatch $ \batch -> do
       let drawScaled scale glyphs dd dmg =

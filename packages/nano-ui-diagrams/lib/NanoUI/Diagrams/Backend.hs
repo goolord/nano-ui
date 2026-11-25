@@ -56,14 +56,13 @@ import Diagrams.TwoD.Size (mkHeight)
 import Diagrams.TwoD.Text (Text (..), TextAlignment (..))
 import NanoUI
   ( Color
-  , DrawOp (..)
   , Rect (..)
   , colorA
   , colorRGBA
   , defaultTheme
-  , shiftDrawOp
   , themeMuted
   )
+import NanoUI.Widgets.Custom (DrawOp (..), shiftDrawOp)
 import NanoUI.Internal.Path qualified as P
 
 -- | Diagrams backend that emits nano-ui draw operations for paths and text.

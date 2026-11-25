@@ -22,9 +22,19 @@ module Spec
   , module Data.IORef
   , module NanoUI
   , module NanoUI.Backend
+  , module NanoUI.Chrome
+  , module NanoUI.Shader.Raw
   , module NanoUI.Testing
   , module NanoUI.Testing.Assert
   , module NanoUI.Testing.Harness
+  , module NanoUI.Themes
+  , module NanoUI.Widgets.Custom
+  , module NanoUI.Widgets.PaneGrid
+  , module NanoUI.Widgets.TextDocument
+  , anyButtonPressed
+  , anyButtonReleased
+  , nextId
+  , module TestSupport
   ) where
 
 import Control.Monad
@@ -33,9 +43,18 @@ import Data.Text qualified as T
 import GHC.Stack (HasCallStack, withFrozenCallStack)
 import NanoUI
 import NanoUI.Backend
+import NanoUI.Chrome
+import NanoUI.Input (anyButtonPressed, anyButtonReleased)
+import NanoUI.Monad (nextId)
+import NanoUI.Shader.Raw
 import NanoUI.Testing
 import NanoUI.Testing.Assert
 import NanoUI.Testing.Harness
+import NanoUI.Themes
+import NanoUI.Widgets.Custom
+import NanoUI.Widgets.PaneGrid
+import NanoUI.Widgets.TextDocument
+import TestSupport
 import NanoUI.Testing.Sim (Sim, runSim)
 import Test.QuickCheck (Args (..), Testable, isSuccess, quickCheckWithResult, stdArgs)
 import Test.QuickCheck qualified as QC

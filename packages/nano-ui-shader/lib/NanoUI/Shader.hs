@@ -113,7 +113,7 @@ module NanoUI.Shader
   , (.&&)
   , (.||)
   , notE
-  , select
+  , selectE
     -- * 2D SDF, color, and noise helpers
   , sdCircle
   , sdRoundedBox
@@ -200,7 +200,7 @@ import NanoUI.Shader.Expr
   , sampleLayerUv
   , sdCircle
   , sdRoundedBox
-  , select
+  , selectE
   , signE
   , smoothstep
   , splat2
@@ -241,4 +241,4 @@ import NanoUI.Shader.Expr
   , (.>=)
   , (.||)
   )
-import NanoUI.Shader.Swizzle ()
+import NanoUI.Shader.Internal.Swizzle ()

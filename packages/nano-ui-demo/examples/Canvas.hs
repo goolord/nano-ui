@@ -95,13 +95,13 @@ view st = do
       undo = unless (null strokes) (modifyVar (sketchVar st) (edit (drop 1)))
       colour = palette !! colourIx
   columnWith (padAll 16 . gap 12 . grow) $ do
-    rowWith (tight . gap 8 . alignMid . fillW) $ do
+    rowWith (tight . gap 8 . alignMiddle . fillW) $ do
       -- Swatches are plain buttons filled with their color; the active
       -- swatch gets a border in the theme's text color.
       forM_ (zip [0 ..] palette) $ \(i, c) -> do
         let ring = if i == colourIx then buttonStyle (borderWidth 3 . borderColor (styleFg (themePanel theme))) else id
         whenM (styled (ring . tinted (const c)) (buttonWith (fixedWH 28 28) "")) (writeVar colourVar i)
-      labelWith (tight . alignMid . padLeft 12) "Width"
+      labelWith (tight . alignMiddle . padLeft 12) "Width"
       sliderWith (fixedW 140) 1 30 width
       flex
       disabledWhen (null strokes) $ whenM (button "Undo") undo
@@ -111,10 +111,10 @@ view st = do
 
     -- Everything the drawing reads: finished strokes (by revision) and the
     -- live stroke's shape. The paper background color is constant.
-    let liveKey = fmap (\s -> (colorToWord32 (inkColor s), inkWidth s, length (inkPoints s))) live
+    let liveKey = fmap (\s -> (inkColor s, inkWidth s, length (inkPoints s))) live
         cfg =
           defaultCanvasConfig
-            { canvasLayout = (fillW . grow) defaultLayout
+            { canvasLayout = fillW . grow
             , canvasContent = contentKeyOf [keyPart (sketchRevision sketch), keyPart liveKey]
             }
     resp <-

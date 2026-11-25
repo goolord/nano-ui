@@ -99,7 +99,7 @@ mixedCols eaten =
   mconcat
     [ headed "Fruit" (textCell . fst)
     , headed "Count" (\(_, n) -> cellSort (T.pack (show n)) (cellWidget (label (T.pack (show n)))))
-    , headed "Button" (widgetCell (\(f, _) -> whenM (button ("Eat " <> f)) (eat f)))
+    , headed "Button" (\(f, _) -> cellWidget (whenM (button ("Eat " <> f)) (eat f)))
     ]
   where
     eat f = liftIO (modifyIORef' eaten (f :))
@@ -272,14 +272,14 @@ runTableFrozenTest ctx failed = do
   let cfg = defaultTableConfig {tableFreezeCols = 1, tableColSizes = map ColFixed [150, 100, 500]}
   runSim ctx failed (withInputOff 400 240) (tableOf cfg (fixedH 200) (peopleCols 3) people) $ do
     Just wid <- onContext bodyWid
-    metrics <- onContext (`getScrollMetrics` wid)
+    metrics <- onContext (`getScrollMetricsIO` wid)
     checkEq (Just ScrollAxisXY) (scrollAxes <$> metrics)
-    checkEq metrics =<< (frame >> onContext (`getScrollMetrics` wid))
+    checkEq metrics =<< (frame >> onContext (`getScrollMetricsIO` wid))
     Rect fx fy fw fh : _ <- headers
     _ <- wheel (at (fx + fw / 2) (fy + fh + 10)) (V2 1 0)
     V2 offX _ <- scrollOffset2DOf wid
     checkGt offX 0
-    onContext (\c -> setScrollOffset2D c wid (V2 120 0))
+    onContext (\c -> setScrollOffset2DIO c wid (V2 120 0))
     [Rect _ _ frozenW _, Rect hx hy hw hh, _] <- settle >> headers
     check (hx + hw < fx + frozenW)
     check . (/= UiCursorColResize) =<< cursorAt (at (hx + hw - 1) (hy + hh / 2))
@@ -305,7 +305,7 @@ runTableScrollRevealTest :: Context -> IORef Int -> IO ()
 runTableScrollRevealTest ctx failed = do
   -- A one-line step keeps the rows the scroll lands on in ascending label
   -- order (the labels sort as text, so "row-2" comes after "row-19").
-  setScrollTuning ctx defaultScrollTuning {scrollWheelStep = 20}
+  setScrollTuningIO ctx defaultScrollTuning {scrollWheelStep = 20}
   let rowSpans = (\ss -> [(r, t) | (r, t, _, _, _) <- ss, "row-" `T.isPrefixOf` t]) <$> spans
       -- The N of the lowest "row-N" label.
       rowIndex t = readMaybe (T.unpack (T.takeWhile (/= ' ') (T.drop 4 t))) :: Maybe Int
@@ -411,7 +411,7 @@ runTableNarrowColumnsTest ctx failed = do
   let stretched = sizedTable [ColStretch, ColFixed 60] (pairs "Stretch" "Fixed") [(T.replicate 400 "x", "1")]
   _ <- warmup2 floored (withInputOff 300 200) stretched
   scrolls <- nodesOfType NodeScrollContainer floored
-  ranges <- mapM (fmap (fmap (v2X . scrollRange)) . getScrollMetrics floored . fst) scrolls
+  ranges <- mapM (fmap (fmap (v2X . scrollRange)) . getScrollMetricsIO floored . fst) scrolls
   assert failed (all (maybe True (<= 0)) ranges)
   lane <- newContext
   -- Fixed columns plus rules (403) fit the narrowed viewport; the stretch
@@ -618,11 +618,11 @@ bodyWid ctx = traverse (getWidgetId (ctxNodeArena ctx)) =<< bodyNode ctx
 
 -- | The body scroller's 2D offset.
 bodyOffset :: Context -> IO V2
-bodyOffset ctx = maybe (pure (V2 0 0)) (getScrollOffset2D ctx) =<< bodyWid ctx
+bodyOffset ctx = maybe (pure (V2 0 0)) (getScrollOffset2DIO ctx) =<< bodyWid ctx
 
 -- | The body scroller's published metrics.
 bodyMetrics :: Context -> IO (Maybe ScrollMetrics)
-bodyMetrics ctx = maybe (pure Nothing) (getScrollMetrics ctx) =<< bodyWid ctx
+bodyMetrics ctx = maybe (pure Nothing) (getScrollMetricsIO ctx) =<< bodyWid ctx
 
 -- | At the end of a sideways scroll the last column clears the vertical
 -- bar's lane, which the reachable range counts. Header and cells move as one.
@@ -675,7 +675,7 @@ runTableSqueezeTest ctx failed = do
   tiny <- newContext
   _ <- warmup2 tiny ((withInput 74 120) {inputMousePos = V2 30 60}) ui
   assertJustM failed (rangeX tiny) $ \r -> assertGt failed r 0
-  let cell txt = cellSort txt (cellWidget (rowWith (tight . fillW . fillH . alignMid) (labelWith fillW txt)))
+  let cell txt = cellSort txt (cellWidget (rowWith (tight . fillW . fillH . alignMiddle) (labelWith fillW txt)))
       squeezed = defaultTableConfig {tableColSizes = suspectSizes, tableSqueeze = True}
       suspects layout n = tableOf squeezed layout (suspectCols cell) (suspectRows n)
       inPane = columnWith (fillW . gap 8) $ do

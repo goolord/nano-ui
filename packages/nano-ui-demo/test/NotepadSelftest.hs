@@ -14,6 +14,7 @@ import GHC.IO.Encoding (getLocaleEncoding, setLocaleEncoding)
 import NanoUI
 import NanoUI.Backend (runNanoUI)
 import NanoUI.Shortcut
+import NanoUI.Widgets.TextDocument (textDocument)
 import Notepad qualified
 import System.Directory (getTemporaryDirectory, removeFile)
 import System.IO (hClose, latin1, openTempFile)

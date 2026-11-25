@@ -30,7 +30,7 @@ instance Enum OffsetChoice where
 runBoundedRadioTest :: Context -> IORef Int -> IO ()
 runBoundedRadioTest ctx failed = do
   v <- newVar (OffsetChoice 11)
-  runSim ctx failed (withInputOff 300 160) (snd <$> held v (boundedRadio' (T.pack . show))) $ do
+  runSim ctx failed (withInputOff 300 160) (snd <$> held v (enumRadioBy' (T.pack . show))) $ do
     checkEq (OffsetChoice 11) =<< result
     checkEq (OffsetChoice 12) =<< click "OffsetChoice 12"
     checkEq (OffsetChoice 12) =<< frame
@@ -48,7 +48,7 @@ runControlsTabHeightTest ctx failed = do
         _ <- withValue 50 (slider 0 100)
         _ <- withValue 1 (select ["Low", "Medium", "High"])
         (cp, _) <- withValue (colorRGBA 204 102 102 255) colorPicker'
-        _ <- withValue (OffsetChoice 11) (boundedRadio (T.pack . show))
+        _ <- withValue (OffsetChoice 11) (enumRadioBy (T.pack . show))
         (ti, _) <- withValue "" textInput'
         separator
         liftIO $ writeIORef dumpRef [cb, cp, ti]

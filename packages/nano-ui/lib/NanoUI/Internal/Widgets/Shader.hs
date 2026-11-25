@@ -9,7 +9,9 @@ module NanoUI.Internal.Widgets.Shader
   , shaderConfigured
   , shaderConfigured'
   , withShader
+  , withShader'
   , withShaderWith
+  , withShaderWith'
   , askShaderCapabilities
   ) where
 
@@ -33,7 +35,7 @@ import NanoUI.Internal.Layout.Arena
   , setStyleIdx
   , setWidgetId
   )
-import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, liftIO, nextId, withContext)
+import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, askInput, liftIO, nextId, withContext)
 import NanoUI.Internal.Shader
   ( IsNodeEffect (..)
   , PackedShaderPass (..)
@@ -47,10 +49,10 @@ import NanoUI.Internal.Shader
   , emptyShaderProgram
   , packShaderPass
   )
-import NanoUI.Internal.Style (LayoutModifier, defaultLayout, tight)
+import NanoUI.Internal.Style (LayoutModifier, defaultLayout, inheritFont, tight)
 import NanoUI.Internal.Types (V2 (..), colorToWord32)
 import NanoUI.Internal.WidgetText (containerFlagShaderEffect)
-import NanoUI.Internal.Widgets.Node (Response, addWidgetNode, currentParent, withContainerNode)
+import NanoUI.Internal.Widgets.Node (Response, addWidgetNode, currentParent, resolveInteraction, withContainerNode)
 
 -- | Paint a leaf rectangle using a 'Surface' fragment shader and typed
 -- uniform value @u@. Uniform changes invalidate the node automatically via
@@ -75,13 +77,14 @@ shaderConfigured' :: ShaderConfig -> Shader 'Surface u -> u -> NanoUI Response
 shaderConfigured' cfg sh u = do
   wid <- nextId
   ctx <- askContext
+  amb <- askDefaultLayout
   pass <- liftIO $ case shaderPasses sh of
     (p : _) -> packShaderPass p u
     [] -> pure (PackedShaderPass (shaderHash sh) emptyShaderProgram emptyByteArray 0)
   let !radius = max 0 (scCornerRadius cfg)
       !fallback = scFallback cfg
       !tint = scTint cfg
-      !lay = scLayout cfg defaultLayout
+      !lay = scLayout cfg (inheritFont amb defaultLayout)
       !paintH =
         mix64
           (pspHash pass `xor` pspUniformHash pass)
@@ -107,11 +110,24 @@ shaderConfigured' cfg sh u = do
 withShader :: IsNodeEffect k => Shader k u -> u -> NanoUI a -> NanoUI a
 withShader = withShaderWith id
 
+-- | Like 'withShader', returning the body's result and the effect container's
+-- 'Response' (for hover, clicks, or size-reactive shader uniforms).
+{-# INLINE withShader' #-}
+withShader' :: IsNodeEffect k => Shader k u -> u -> NanoUI a -> NanoUI (a, Response)
+withShader' = withShaderWith' id
+
 -- | Like 'withShader', applying a 'LayoutModifier' to the effect container.
+{-# INLINE withShaderWith #-}
 withShaderWith :: forall k u a. IsNodeEffect k => LayoutModifier -> Shader k u -> u -> NanoUI a -> NanoUI a
-withShaderWith f sh u child = do
+withShaderWith f sh u child = fst <$> withShaderWith' f sh u child
+
+-- | Like 'withShaderWith', returning the body's result and the effect
+-- container's 'Response'.
+withShaderWith' :: forall k u a. IsNodeEffect k => LayoutModifier -> Shader k u -> u -> NanoUI a -> NanoUI (a, Response)
+withShaderWith' f sh u child = do
   let !_ = nodeEffectKind (Proxy @k)
   wid <- nextId
+  inp <- askInput
   base <- askDefaultLayout
   let !lay = f (tight base)
   idx <- withContext $ \ctx -> do
@@ -134,7 +150,9 @@ withShaderWith f sh u child = do
     mixNodePaintHash arena i (mix64 uHash mHash)
     registerShaderEffectAt ctx i entry
     pure i
-  withContainerNode True idx child
+  r <- withContainerNode True idx child
+  resp <- withContext (\ctx -> resolveInteraction ctx inp (-1) wid)
+  pure (r, resp)
 
 -- | Query which shader tiers the active backend supports.
 askShaderCapabilities :: NanoUI ShaderCapabilities

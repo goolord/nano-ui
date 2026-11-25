@@ -27,14 +27,6 @@ module NanoUI.Emit
   , reducerModel
   , reduceFrame
 
-    -- * Deprecated
-  , emitWhenE
-  , emitChangedE
-  , emitEditedE
-  , liftNanoUI
-  , withNanoUI
-  , withRunInNanoUIE
-
     -- * Core widgets
   , module NanoUI
   )
@@ -52,11 +44,8 @@ import NanoUI.Emit.Internal
   ( NanoUIE
   , collectMessages
   , emit
-  , liftNanoUI
   , mapMessages
   , runNanoUIE
-  , withNanoUI
-  , withRunInNanoUIE
   , withSink
   )
 
@@ -86,25 +75,6 @@ emitEdited ::
 emitEdited widget old toMsg = do
   (r, new) <- withValue old widget
   when (respChanged (toResponse r) && new /= old) (emit (toMsg new))
-
--- | 'emitWhen', from when widgets needed wrapping.
-{-# DEPRECATED emitWhenE "Use emitWhen" #-}
-{-# INLINE emitWhenE #-}
-emitWhenE :: NanoUI Bool -> msg -> NanoUIE msg ()
-emitWhenE = emitWhen
-
--- | 'emitChanged', from when widgets needed wrapping.
-{-# DEPRECATED emitChangedE "Use emitChanged" #-}
-{-# INLINE emitChangedE #-}
-emitChangedE :: Eq a => (Var a -> NanoUI r) -> a -> (a -> msg) -> NanoUIE msg ()
-emitChangedE = emitChanged
-
--- | 'emitEdited', from when widgets needed wrapping.
-{-# DEPRECATED emitEditedE "Use emitEdited" #-}
-{-# INLINE emitEditedE #-}
-emitEditedE ::
-  (Eq a, HasResponse r) => (Var a -> NanoUI r) -> a -> (a -> msg) -> NanoUIE msg ()
-emitEditedE = emitEdited
 
 -- | Run a complete frame and collect messages from all its passes in order.
 -- The queue belongs to this invocation: an exception cannot leak messages

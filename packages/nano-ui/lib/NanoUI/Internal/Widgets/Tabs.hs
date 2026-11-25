@@ -5,8 +5,8 @@ module NanoUI.Internal.Widgets.Tabs
   , tab, closableTab
   , tabs, tabs', tabsConfigured, tabsConfigured'
   , tabBar, tabBar', tabBarConfigured, tabBarConfigured'
-  , boundedTabs, boundedTabsConfigured, enumTabs
-  , boundedTabBar, boundedTabBarConfigured, enumTabBar
+  , enumTabsBy, enumTabsByConfigured, enumTabs
+  , enumTabBarBy, enumTabBarByConfigured, enumTabBar
   )
 where
 
@@ -25,7 +25,7 @@ import NanoUI.Internal.Layout.ScrollGeometry (scrollAxisRange, scrollBare, scrol
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input (MouseButton (..), inputMousePos, inputScroll)
 import NanoUI.Internal.Layout.Arena (setStyleIdx, setWidgetId)
-import NanoUI.Internal.Monad (NanoUI, askInput, disabledWhen, freshWidget, lastRect, nextId, liftIO, styled, uiFontSize, uiTheme, withContext, withKey)
+import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, disabledWhen, freshWidget, lastRect, nextId, liftIO, styled, uiFontSize, uiTheme, withContext, withKey)
 import NanoUI.Internal.Var (Binding (..), bindVarOn)
 import NanoUI.Internal.Var.Types (Var, zoomVar)
 import NanoUI.Internal.Store (fieldInt, findSpec, lookupSlot, slotWrite, specKey, specWrite)
@@ -132,7 +132,7 @@ tabHeaderH = 30
 -- | A header's layout. The headers of a vertical strip share its width, and
 -- start their labels at their padding ('tabLabelAtStart').
 tabHeaderLay :: Bool -> Layout
-tabHeaderLay vertical = (if vertical then fillW else id) . fixedH tabHeaderH . alignMid . gap 6 $ defaultLayout
+tabHeaderLay vertical = (if vertical then fillW else id) . fixedH tabHeaderH . alignMiddle . gap 6 $ defaultLayout
 
 -- | Name the current container @wid@ and give it @part@ of a strip's chrome,
 -- painted under its children ('NanoUI.Internal.Frame.Chrome.paintTabChrome').
@@ -261,13 +261,13 @@ scrollableHeaders ctx style barGap headers = withKey ("tab-headers" :: Text) $ d
         | overflow = withKey (k :: Text) $ do
             theme <- uiTheme
             let muted = if enabled then Nothing else Just (themeMuted theme)
-                lay = (fixedWH 26 stripH . alignCenter . alignMid $ defaultLayout) {layoutFontColor = muted}
+                lay = (fixedWH 26 stripH . alignCenter . alignMiddle $ defaultLayout) {layoutFontColor = muted}
             resp <- styled subtle (buttonStyledEx enabled glyph 0 lay 0)
             liftIO (writeSlot fieldInt ctx (respId resp) (intKey (respId resp)) (fromEnum enabled))
             pure (respClicked resp)
         | otherwise = pure False
   (leftClicked, tabResp, rightClicked) <-
-    row' (tight . grow . alignMid . fixedH stripH $ defaultLayout) $ do
+    row' (tight . grow . alignMiddle . fixedH stripH $ defaultLayout) $ do
       tagContainer groupId
       (,,)
         <$> arrow "tab-arrow-left" canLeft "\8249"
@@ -378,9 +378,10 @@ renderHeaders ctx style orient follow cur tabList = do
 renderHeader :: Eq a => TabStyle -> TabOrientation -> a -> Tab a body -> NanoUI (a, Response, Bool)
 renderHeader style orient cur t = disabledWhen (tabDisabled t) $ do
   theme <- uiTheme
+  amb <- askDefaultLayout
   let isActive = tabKey t == cur
       packed = tabEncodeStyle (fromEnum style) (fromEnum orient)
-      lay = tabHeaderLay (orient == TabLeft || orient == TabRight)
+      lay = inheritFont amb (tabHeaderLay (orient == TabLeft || orient == TabRight))
       labelCol = styleFg (tabHeaderVisualStyle theme packed isActive)
   resp <- buttonStyledEx (not (tabDisabled t)) (tabTitle t) (if isActive then 1 else 0) lay packed
   closeRef <- if tabClosable t then Just <$> liftIO (newIORef Nothing) else pure Nothing
@@ -404,7 +405,7 @@ tabBadgeView col txt = do
   -- Scaled from the base size the title is drawn at.
   size <- uiFontSize
   styled (panelStyle (\s -> s {styleBg = fadeAlpha col 44, styleBorderWidth = 0, styleCornerRadius = 8})) $
-    panel' (padXY 6 1 . tight . minH 17 . alignCenter . alignMid $ defaultLayout) $
+    panel' (padXY 6 1 . tight . minH 17 . alignCenter . alignMiddle $ defaultLayout) $
       () <$ labelEx (tight . fontSize (size * 0.78) . fontColor col $ defaultLayout) txt
 
 -- | Tab headers and the active tab's body, with the active key bound to
@@ -478,46 +479,46 @@ tabBarConfigured cfg active ts = void (tabBarConfigured' cfg active ts)
 tabBarConfigured' :: (Foldable f, Hashable a) => TabsConfig -> Var a -> f (Tab a body) -> NanoUI (TabResponse a)
 tabBarConfigured' cfg active ts = bindTabs cfg False active (\cur -> tabStrip cfg cur (toList ts) Nothing)
 
--- | 'tabs' with a tab for every value of a bounded enumeration, labelled by
+-- | 'tabs' with a tab for every value of a bounded enumeration, labeled by
 -- @encode@, each showing @body@ of its value. The Var holds the selected
 -- value itself, so the enumeration needs no 'Hashable' instance.
 --
 -- > page <- useEnumVar Overview
--- > boundedTabs pageTitle page pageBody
-{-# INLINE boundedTabs #-}
-boundedTabs :: (Bounded a, Enum a) => (a -> Text) -> Var a -> (a -> NanoUI ()) -> NanoUI ()
-boundedTabs = boundedTabsConfigured defaultTabsConfig
+-- > enumTabsBy pageTitle page pageBody
+{-# INLINE enumTabsBy #-}
+enumTabsBy :: (Bounded a, Enum a) => (a -> Text) -> Var a -> (a -> NanoUI ()) -> NanoUI ()
+enumTabsBy = enumTabsByConfigured defaultTabsConfig
 
--- | 'boundedTabs' with a header style and placement.
-{-# INLINE boundedTabsConfigured #-}
-boundedTabsConfigured :: (Bounded a, Enum a) => TabsConfig -> (a -> Text) -> Var a -> (a -> NanoUI ()) -> NanoUI ()
-boundedTabsConfigured cfg encode active body =
+-- | 'enumTabsBy' with a header style and placement.
+{-# INLINE enumTabsByConfigured #-}
+enumTabsByConfigured :: (Bounded a, Enum a) => TabsConfig -> (a -> Text) -> Var a -> (a -> NanoUI ()) -> NanoUI ()
+enumTabsByConfigured cfg encode active body =
   tabsConfigured cfg (enumIndex active) (map (\x -> tab (fromEnum x) (encode x) (body x)) [minBound .. maxBound])
 
--- | 'boundedTabs' labelled with 'show'.
+-- | 'enumTabsBy' labeled with 'show'.
 {-# INLINE enumTabs #-}
 enumTabs :: (Bounded a, Enum a, Show a) => Var a -> (a -> NanoUI ()) -> NanoUI ()
-enumTabs = boundedTabs (T.pack . show)
+enumTabs = enumTabsBy (T.pack . show)
 
 -- | 'tabBar' with a header for every value of a bounded enumeration,
--- labelled by @encode@.
-{-# INLINE boundedTabBar #-}
-boundedTabBar :: (Bounded a, Enum a) => (a -> Text) -> Var a -> NanoUI ()
-boundedTabBar = boundedTabBarConfigured defaultTabsConfig
+-- labeled by @encode@.
+{-# INLINE enumTabBarBy #-}
+enumTabBarBy :: (Bounded a, Enum a) => (a -> Text) -> Var a -> NanoUI ()
+enumTabBarBy = enumTabBarByConfigured defaultTabsConfig
 
--- | 'boundedTabBar' with a header style and placement; with 'TabSegmented'
+-- | 'enumTabBarBy' with a header style and placement; with 'TabSegmented'
 -- it is a segmented control:
 --
--- > boundedTabBarConfigured defaultTabsConfig {tabsStyle = TabSegmented} alignName alignment
-{-# INLINE boundedTabBarConfigured #-}
-boundedTabBarConfigured :: (Bounded a, Enum a) => TabsConfig -> (a -> Text) -> Var a -> NanoUI ()
-boundedTabBarConfigured cfg encode active =
+-- > enumTabBarByConfigured defaultTabsConfig {tabsStyle = TabSegmented} alignName alignment
+{-# INLINE enumTabBarByConfigured #-}
+enumTabBarByConfigured :: (Bounded a, Enum a) => TabsConfig -> (a -> Text) -> Var a -> NanoUI ()
+enumTabBarByConfigured cfg encode active =
   tabBarConfigured cfg (enumIndex active) (map (\x -> tab (fromEnum x) (encode x) ()) [minBound .. maxBound])
 
--- | 'boundedTabBar' labelled with 'show'.
+-- | 'enumTabBarBy' labeled with 'show'.
 {-# INLINE enumTabBar #-}
 enumTabBar :: (Bounded a, Enum a, Show a) => Var a -> NanoUI ()
-enumTabBar = boundedTabBar (T.pack . show)
+enumTabBar = enumTabBarBy (T.pack . show)
 
 -- | An enumeration's Var seen as its index, which keys the tabs. The tabs
 -- only ever write the index of a value they list.

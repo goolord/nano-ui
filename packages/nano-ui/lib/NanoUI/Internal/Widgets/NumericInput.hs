@@ -23,10 +23,10 @@ import NanoUI.Internal.Context (getStore, intKey, requestWakeAt, modifyStore)
 import NanoUI.Internal.Equality (sameDouble)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, liftIO)
+import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, freshWidget, liftIO)
 import NanoUI.Internal.Store (deleteSpec, fieldDouble, fieldText, findSlot, findSpec, insertSlot, insertSpec, lookupSlot, memberSpec)
 import NanoUI.Internal.Store.Slots (slotNumericHeld, slotNumericRepeat, slotTextChanged, slotTextMode)
-import NanoUI.Internal.Style (Layout (..), Sizing (..), defaultLayout)
+import NanoUI.Internal.Style (Layout (..), LayoutModifier, Sizing (..), defaultLayout, inheritFont)
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains)
 import NanoUI.Internal.WidgetText (numericStepperRects, packTextNodeStyle, textInputFlagNumeric)
 import NanoUI.Internal.Widgets.Node (Response, addWidgetStyled, respHovered, respRect, setChanged, setSubmitted)
@@ -51,10 +51,10 @@ data NumericInputConfig = NumericInputConfig
   , nicHex :: !Bool
     -- ^ Show and accept the value as a whole hexadecimal number (default
     -- 'False'). 'nicDecimals' is ignored in this mode.
-  , nicLayout :: !Layout
-    -- ^ The field's layout (default: grows to fill, at least 80 wide).
+  , nicLayout :: !LayoutModifier
+    -- ^ Layout modifier applied on top of the default numeric layout (grows to
+    -- fill, at least 80 wide).
   }
-  deriving (Eq, Show)
 
 -- | Unbounded decimal range, integer display, step 1, and an 80-pixel minimum width.
 defaultNumericInputConfig :: NumericInputConfig
@@ -65,7 +65,7 @@ defaultNumericInputConfig =
     , nicStep = 1
     , nicDecimals = 0
     , nicHex = False
-    , nicLayout = defaultLayout {layoutWidth = Grow 1, layoutMinW = 80}
+    , nicLayout = id
     }
 
 -- | Numeric field over whole numbers bound to mutable state ('Var'): typing,
@@ -123,8 +123,10 @@ numericInputCore cfg value = do
     s0 = loadTextInputState store key text0
     lastValue = if adopted then given else findSlot fieldDouble given key store
   mEdited <- if isFocus then liftIO (editTextInput ctx singleLineMode inp store key s0) else pure Nothing
+  amb <- askDefaultLayout
+  let lay = nicLayout cfg (inheritFont amb defaultLayout {layoutWidth = Grow 1, layoutMinW = 80})
   -- Its font face, weight and slant ride in the style bits, as on a label.
-  resp <- addWidgetStyled wid NodeTextInput "" 0 (nicLayout cfg) (textInputFlagNumeric .|. packTextNodeStyle (nicLayout cfg) 0)
+  resp <- addWidgetStyled wid NodeTextInput "" 0 lay (textInputFlagNumeric .|. packTextNodeStyle lay 0)
 
   let
     -- An edit that would leave text no number can start with is dropped.

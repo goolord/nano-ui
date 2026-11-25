@@ -54,7 +54,7 @@ import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, askInput, fr
 import NanoUI.Internal.Store
 import NanoUI.Internal.Store.Slots (slotSearchAge, slotSearchCommitted, slotTextChanged, slotTextHistory, slotTextMode)
 import NanoUI.Internal.Store.Types (TextHistory (..))
-import NanoUI.Internal.Style (Layout (..), Style (..), Theme (..), defaultLayout, fieldIconColor, fillW, minW)
+import NanoUI.Internal.Style (Layout (..), LayoutModifier, Style (..), Theme (..), defaultLayout, fieldIconColor, fillW, inheritFont, minW)
 import NanoUI.Internal.Types (Color)
 import NanoUI.Internal.Var (Binding (..), bindVar)
 import NanoUI.Internal.Var.Types (Var)
@@ -181,10 +181,9 @@ textInputFieldEditor store key =
 data TextInputConfig = TextInputConfig
   { ticPlaceholder :: !Text
   , ticPassword :: !Bool
-  , ticLayout :: !Layout
+  , ticLayout :: !LayoutModifier
   , ticAdornments :: !Adornments
   }
-  deriving (Show)
 
 -- | No placeholder, no password masking, the standard text-input layout, and
 -- no adornments.
@@ -193,7 +192,7 @@ defaultTextInputConfig =
   TextInputConfig
     { ticPlaceholder = ""
     , ticPassword = False
-    , ticLayout = textInputLayout
+    , ticLayout = id
     , ticAdornments = mempty
     }
 
@@ -221,7 +220,9 @@ textInputConfigured cfg v = void (textInputConfigured' cfg v)
 
 -- | 'textInputConfigured' returning its 'Response'.
 textInputConfigured' :: TextInputConfig -> Var Text -> NanoUI Response
-textInputConfigured' (TextInputConfig placeholder password lay adorns) v = do
+textInputConfigured' (TextInputConfig placeholder password f adorns) v = do
+  amb <- askDefaultLayout
+  let lay = f (inheritFont amb textInputLayout)
   -- Write the field's text before running adornments so an adornment
   -- control that modifies the 'Var' overwrites the field's value.
   resp <-
@@ -362,9 +363,8 @@ debounceSearchChanged ctx key focused rawChanged ms = do
 data SearchInputConfig = SearchInputConfig
   { sicPlaceholder :: !Text
   , sicDebounceMs :: !Float
-  , sicLayout :: !Layout
+  , sicLayout :: !LayoutModifier
   }
-  deriving (Eq, Show)
 
 -- | Search placeholder, a 300 ms trailing debounce, and the standard search layout.
 defaultSearchInputConfig :: SearchInputConfig
@@ -372,7 +372,7 @@ defaultSearchInputConfig =
   SearchInputConfig
     { sicPlaceholder = "Search…"
     , sicDebounceMs = 300
-    , sicLayout = searchInputLayout
+    , sicLayout = id
     }
 
 -- | Search box with a magnifier and a clear button, bound to mutable state
@@ -397,11 +397,13 @@ searchInputConfigured cfg v = void (searchInputConfigured' cfg v)
 -- | 'searchInputConfigured' returning its 'Response'.
 {-# INLINE searchInputConfigured' #-}
 searchInputConfigured' :: SearchInputConfig -> Var Text -> NanoUI Response
-searchInputConfigured' cfg v =
+searchInputConfigured' cfg v = do
+  amb <- askDefaultLayout
+  let lay = sicLayout cfg (inheritFont amb searchInputLayout)
   bindVar RenderFinal v $ \value ->
     buildTextInput
       textInputFlagSearch
-      (sicLayout cfg)
+      lay
       (sicPlaceholder cfg)
       value
       (Just (sicDebounceMs cfg))

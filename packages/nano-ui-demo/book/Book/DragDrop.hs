@@ -8,6 +8,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Word (Word64)
 import NanoUI
+import NanoUI.Widgets.PaneGrid
 
 -- ANCHOR: reorder
 chips :: Var [Int] -> NanoUI ()

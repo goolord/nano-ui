@@ -42,7 +42,7 @@ runGridPlacementTest ctx failed = do
     >>= assertEq failed (map Just [Rect 6 6 24 12, Rect 407 6 24 12, Rect 605 26 24 12, Rect 3 49 60 12, Rect 404 49 60 12])
       . map (fmap fst)
   -- The short cell, the tall one and the next row's.
-  forM_ [(alignMid, 30), (alignBottom, 60)] $ \(align, y) -> do
+  forM_ [(alignMiddle, 30), (alignBottom, 60)] $ \(align, y) -> do
     _ <- warmup2 ctx (withInput 400 400) . columnWith tight $ gridWith 2 (tight . gap 0) $ do
       panelWith align (label "a")
       panelWith id (replicateM_ 4 (label "x"))
@@ -129,7 +129,7 @@ runFontStylesTest ctx failed = do
           labelWith (tight . alignBaseline . fontSize 32) "Big"
           labelWith (tight . alignBaseline) "small"
           void (buttonWith alignBaseline "Go")
-          textInputConfigured defaultTextInputConfig {ticLayout = alignBaseline (fixedW 90 defaultLayout)} fieldVar
+          textInputConfigured defaultTextInputConfig {ticLayout = alignBaseline . fixedW 90} fieldVar
           columnWith (tight . alignBaseline . padXY 0 5) (label "nested" >> labelWith (tight . fontSize 24) "second")
         label "after"
   spansOf ctx (withInput 500 200) ["Big", "small", "Go", "Field", "nested", "second", "after"] baselined >>= \hits ->

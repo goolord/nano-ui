@@ -17,6 +17,7 @@ import Drive
 import NanoUI
 import NanoUI.Backend
 import NanoUI.Backend.Sdl
+import NanoUI.Themes (tomorrowMinLightTheme)
 import NanoUI.Testing.Harness (findRightmost, spanCenter, spanLabel)
 
 selftest :: Bool -> IO ()
@@ -85,13 +86,13 @@ selftest continuous = do
       expectNot "muted"
       -- Theme is a radio fieldset whose options all stay visible.
       click "Tomorrow Light"
-      theme <- liftIO (getTheme ctx)
+      theme <- liftIO (getThemeIO ctx)
       check "the context theme was not updated to Tomorrow Light" (theme == tomorrowMinLightTheme)
       -- "Follow system" picks the default theme's light or dark version per
       -- SDL's reported desktop appearance.
       click "Follow system"
       appearance <- liftIO (getSystemAppearance ctx)
-      followed <- liftIO (getTheme ctx)
+      followed <- liftIO (getThemeIO ctx)
       check "following the system did not pick the default theme" $
         followed == lightDark defaultLightTheme defaultTheme appearance
       click "Tomorrow Light"

@@ -48,8 +48,8 @@ import NanoUI
   , rgbaBytes
   , rgbaHeight
   , rgbaWidth
-  , tomorrowNightMinDarkTheme
   )
+import NanoUI.Themes (tomorrowNightMinDarkTheme)
 import NanoUI.Backend
   ( Damage (..)
   , Input (..)

@@ -19,12 +19,6 @@ module NanoUI.Internal.Input
   , Pressable (..)
   , anyButtonPressed
   , anyButtonReleased
-  , inputMouseDown
-  , inputMousePressed
-  , inputMouseReleased
-  , inputMouseRightDown
-  , inputMouseRightPressed
-  , inputMouseRightReleased
   , DropType (..)
   , DropEvent (..)
   , emptyInput
@@ -303,18 +297,6 @@ anyButtonPressed = not . buttonsNull . inputButtonsPressed
 {-# INLINE anyButtonReleased #-}
 anyButtonReleased :: Input -> Bool
 anyButtonReleased = not . buttonsNull . inputButtonsReleased
-
--- | Left and right button state under their nano-ui 0.1 field names.
-inputMouseDown, inputMousePressed, inputMouseReleased :: Input -> Bool
-inputMouseDown = heldIn MouseLeft
-inputMousePressed = pressedIn MouseLeft
-inputMouseReleased = releasedIn MouseLeft
-
--- | The right button is held, went down this frame, or came up this frame.
-inputMouseRightDown, inputMouseRightPressed, inputMouseRightReleased :: Input -> Bool
-inputMouseRightDown = heldIn MouseRight
-inputMouseRightPressed = pressedIn MouseRight
-inputMouseRightReleased = releasedIn MouseRight
 
 -- | No events or held buttons, with an 800x600 window and zero elapsed time.
 -- Override window size and delta time when driving headless frames.

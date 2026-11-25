@@ -14,13 +14,16 @@ import Data.Text qualified as T
 import Foreign.C.Types (CUChar (..))
 import Foreign.Ptr (Ptr)
 import NanoUI
-  ( AlignX (..), AlignY (..), DrawOp (..), Input (..), Modifiers (..), MouseButton (..), NanoUI, Pressable (..)
+  ( AlignX (..), AlignY (..), Input (..), Modifiers (..), MouseButton (..), NanoUI, Pressable (..)
   , Rect (..), Shader, ShaderKind (..), Size (..), V2 (..), V4 (..), WindowMode (..), WindowSettings (..)
   , WindowState (..), askInput, askWindow, box, button', canvas, colorB, colorBlack, colorG, colorR, colorRGBA, column
-  , columnWith, defaultWindowSettings, drawText, drawing, emptyShaderProgram, fixedWH, inlineText, padAll, pageColor
-  , quitUi, rawShader, requestFrame, rgbaBytes, rgbaHeight, rgbaWidth, richText, setWindowTitleUi, shaderBox, strong
-  , tight, tomorrowNightMinDarkTheme, windowColor, windowSize, withShader
+  , columnWith, defaultWindowSettings, drawText, fixedWH, inlineText, padAll, pageColor
+  , quit, requestFrame, rgbaBytes, rgbaHeight, rgbaWidth, richText, setWindowTitle, shaderBox, strong
+  , tight, windowColor, windowSize, withShader
   )
+import NanoUI.Shader.Raw (emptyShaderProgram, rawShader)
+import NanoUI.Themes (tomorrowNightMinDarkTheme)
+import NanoUI.Widgets.Custom (DrawOp (..), drawing)
 import NanoUI.Shader (TintParams (..), composeColor, gaussianBlur, grayscale, groupOpacity, tint)
 import NanoUI.Backend (Damage (..), ShaderProgram (..))
 import NanoUI.Backend.Rgfw (RgfwOptions (..), defaultRgfwOptions, runRgfwApp, runRgfwAppReduce)
@@ -249,7 +252,7 @@ testSessionWindow assert =
                 size <- windowSize
                 st <- askWindow
                 let V2 mx my = inputMousePos inp
-                setWindowTitleUi "renamed"
+                setWindowTitle "renamed"
                 liftIO (writeIORef opened (Just (size, winScale st, mx < -1000 && my < -1000)))
                 requestFrame
               1 -> do
@@ -265,7 +268,7 @@ testSessionWindow assert =
                       writeIORef clicked (Just (heldIn MouseLeft inp && modShift (inputModifiers inp)))
                       click False
                       key R.rgfw_keyShiftR R.rgfw_modShift False
-                    quitUi
+                    quit
                 | otherwise -> requestFrame
           hidden = defaultWindowSettings {wsSize = Size 200 150, wsMode = Hidden}
           options = defaultRgfwOptions {optScale = 2, optWindow = hidden}
@@ -282,7 +285,7 @@ testSessionWindow assert =
 -- | A reducer session's further window ('UI.nativeWindow'), hidden: it runs
 -- its view on its own OpenGL context, a message it emits reaches the model,
 -- and it sees the new model through the declaring view's frame, which it
--- closes over. 'quitUi' in it closes it and writes 'False', which the first
+-- closes over. 'quit' in it closes it and writes 'False', which the first
 -- window shows promptly though nothing else wakes it.
 testChildWindow :: (String -> Bool -> IO ()) -> IO ()
 testChildWindow assert =
@@ -305,10 +308,10 @@ testChildWindow assert =
               when (m == 0) (emit ())
               when (m >= 1) $ do
                 liftIO (getMonotonicTime >>= writeIORef closedAt . Just)
-                quitUi
+                quit
             stillOpen <- UI.readVar open
             when (not stillOpen) $ liftIO (getMonotonicTime >>= writeIORef noticedAt . Just)
-            when (not stillOpen || n > 2000) quitUi
+            when (not stillOpen || n > 2000) quit
       ended <- try (runRgfwAppReduce options (\() k -> k + 1) (0 :: Int) view)
       saw <- readIORef childSaw
       if null saw && not (isRight (ended :: Either IOException ()))
@@ -318,4 +321,4 @@ testChildWindow assert =
           assert "RGFW further window: its message reaches the model, which its view sees" (any (>= 1) saw)
           shut <- not <$> UI.readVarIO open
           lag <- (\a b -> (-) <$> b <*> a) <$> readIORef closedAt <*> readIORef noticedAt
-          assert "RGFW further window: quitUi in it closes it, which the first window shows" (shut && maybe False (< 1) lag)
+          assert "RGFW further window: quit in it closes it, which the first window shows" (shut && maybe False (< 1) lag)

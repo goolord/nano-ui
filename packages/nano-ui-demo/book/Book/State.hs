@@ -7,10 +7,11 @@ import Data.Text qualified as T
 import GHC.Generics (Generic)
 import NanoUI
 import NanoUI.Backend.Sdl (defaultSdlOptions, runSdlApp)
+import NanoUI.Widgets.TextDocument (TextDocument, emptyDocument)
 
 -- ANCHOR: counter
 counter :: NanoUI ()
-counter = rowWith (gap 8 . alignMid) $ do
+counter = rowWith (gap 8 . alignMiddle) $ do
   n <- useVar (0 :: Int)
   whenM (button "-") (modifyVar n (subtract 1))
   label . T.pack . show =<< readVar n

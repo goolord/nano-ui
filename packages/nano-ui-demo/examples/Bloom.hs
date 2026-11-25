@@ -131,7 +131,7 @@ bloomViewWith spinning = do
         setting "Twist" degrees (-0.6) 0.6 twist
         setting "Depth" percentage 0.1 0.9 depth
       chosen <- readVar swatch
-      rowWith (tight . wrap . gap 8 . lineGap 10 . alignMid . fillW . padTop 4) $ do
+      rowWith (tight . wrap . gap 8 . lineGap 10 . alignMiddle . fillW . padTop 4) $ do
         forM_ (zip [0 ..] swatches) $ \(i, c) -> do
           let ring = if i == chosen then buttonStyle (borderWidth 3 . borderColor (styleFg (themePanel theme))) else id
           whenM (styled (ring . tinted (const c)) (buttonWith (fixedWH 28 28) "")) (writeVar swatch i)
@@ -167,7 +167,7 @@ bloomViewWith spinning = do
         else
           canvasConfigured
             defaultCanvasConfig
-              { canvasLayout = (grow . minH 200) defaultLayout
+              { canvasLayout = grow . minH 200
               , canvasContent = bloomKey bloom
               , canvasCursor = Just (\cdc _ _ -> if cdcActive cdc then UiCursorGrabbing else UiCursorGrab)
               }
@@ -213,7 +213,7 @@ turned (Rect x y w h) drag = atan2 (sin delta) (cos delta)
 -- reuse cached vector geometry.
 bloomKey :: Bloom -> Int
 bloomKey (Bloom p l t d a inner mid outer) =
-  contentKeyOf [keyPart [p, l, t, d, a], keyPart (colorToWord32 inner, colorToWord32 mid, colorToWord32 outer)]
+  contentKeyOf [keyPart [p, l, t, d, a], keyPart (inner, mid, outer)]
 
 -- | 2D vector canvas fallback when GPU surface shaders are unavailable.
 drawBloom :: Bloom -> Rect -> CanvasM ()

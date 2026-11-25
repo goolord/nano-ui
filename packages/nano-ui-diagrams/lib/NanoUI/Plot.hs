@@ -7,11 +7,9 @@ module NanoUI.Plot
   , module NanoUI.Plot.Chrome
   , module NanoUI.Plot.Widget
   , module NanoUI.Plot.Builder
-  , module NanoUI.Plot.Hit
   ) where
 
 import NanoUI.Plot.Builder
-import NanoUI.Plot.Hit
 import NanoUI.Plot.Chrome
 import NanoUI.Plot.Decimate
 import NanoUI.Plot.Scale

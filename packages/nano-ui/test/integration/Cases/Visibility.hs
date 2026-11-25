@@ -95,7 +95,7 @@ runScrollTest ctx failed = do
   -- frame asks for no second.
   (sid, _) : _ <- go (replicate 4 (off, False))
   -- Row 10 now starts 70 pixels down the 100-pixel viewport.
-  setScrollOffset ctx sid 330
+  setScrollOffsetIO ctx sid 330
   [_, (_, v2)] <- go [(off, True), (cameIn, False)]
   -- The view shows nothing new for the event, so that frame repaints nothing.
   assert failed . damageIsEmpty =<< takeDamage ctx
@@ -104,14 +104,14 @@ runScrollTest ctx failed = do
   assertJustM failed (getPrevRect ctx sid) $ \viewport ->
     assertEq failed (rectIntersect viewport (visRect v2)) (Just (visRect v2))
   -- Moving within view updates the rect next frame without requesting one.
-  setScrollOffset ctx sid 320
+  setScrollOffsetIO ctx sid 320
   [_, (_, v4)] <- go [(on, False), (on, False)]
   assertEq failed (rectY (visRect v4)) (rectY (visRect v2) + 10)
   takeDamage ctx >>= assert failed . (/= DamageFull)
-  setScrollOffset ctx sid 0
+  setScrollOffsetIO ctx sid 0
   [_, (_, gone), _] <- go [(on, True), (wentOut, False), (off, False)]
   assertEq failed 40 (rectH (visBounds gone))
-  setScrollOffset ctx sid 380
+  setScrollOffsetIO ctx sid 380
   [_, (_, v)] <- go [(off, True), (cameIn, False)]
   assertEq failed 40 (rectH (visRect v))
 
@@ -137,16 +137,16 @@ runNestedScrollTest ctx failed = do
         pure (vis, respRect deep, flags)
   (outer, (inner, _)) <- evalUi ctx inp ui
   -- Inner scrolled by 100: the button is above the inner viewport, at about y 50.
-  setScrollOffset ctx inner 100 >> settle ctx inp ui 3 >> go [(off, False)]
+  setScrollOffsetIO ctx inner 100 >> settle ctx inp ui 3 >> go [(off, False)]
   (vis1, Rect _ by _ bh, flags1) <- probe
   assert failed (by >= 0 && by + bh < 100)
   assertEq failed (reported hidden, [False, False, False]) (reported vis1, flags1)
   -- Unscrolled, it is below the outer viewport.
-  setScrollOffset ctx inner 0 >> settle ctx inp ui 3 >> go [(off, False)]
-  setScrollOffset ctx outer 150 >> go [(off, True), (cameIn, False)]
+  setScrollOffsetIO ctx inner 0 >> settle ctx inp ui 3 >> go [(off, False)]
+  setScrollOffsetIO ctx outer 150 >> go [(off, True), (cameIn, False)]
   (vis2, _, flags2) <- probe
   assertEq failed (True, [True, True, True]) (visVisible vis2, flags2)
-  setScrollOffset ctx inner 100 >> go [(on, True), (wentOut, False)]
+  setScrollOffsetIO ctx inner 100 >> go [(on, True), (wentOut, False)]
 
 -- Sensors clipped by a panel, or in a zero-height container, are hidden. One in a
 -- window declared in scrolled-out content is visible, and so is one pinned out of a
@@ -165,7 +165,7 @@ runClippedTest ctx failed = do
   expectVis failed [off, off, on] vs >> assert failed (not follow)
   let floating = scrollArea (fixedH 100 . fixedW 60) . columnWith (tight . gap 0 . fillW) $ do
         replicateM_ 10 bar
-        (_, inWindow) <- window' (constVar True) "Panel" (fst <$> sensor (label "in window"))
+        (_, inWindow) <- floatingWindow' (constVar True) "Panel" (fst <$> sensor (label "in window"))
         (,) inWindow . fst <$> sensor bar
   c <- newContext
   settle c (withInput 400 300) floating 2
@@ -181,7 +181,7 @@ runClippedTest ctx failed = do
   p <- newContext
   (sid, _) <- evalUi p inp pinned
   -- The strip is above the viewport; its pinned box is 50 pixels into it.
-  setScrollOffset p sid 100 >> settle p inp pinned 3
+  setScrollOffsetIO p sid 100 >> settle p inp pinned 3
   ((_, pvs), draw, pfollow) <- runFrame p inp pinned
   colours <- map snd <$> drawQuads draw
   assertEq failed ([True, True], False) (map (`elem` colours) [red, blue], pfollow)
@@ -202,7 +202,7 @@ runAnticipateTest ctx failed = do
   (sid, vs@[_, near, _]) <- warmup2 ctx inp ui
   expectVis failed [cameIn, cameIn, off] vs
   assertEq failed (visRect near) (Rect 0 0 0 0)
-  setScrollOffset ctx sid 30 >> settle ctx inp ui 1
+  setScrollOffsetIO ctx sid 30 >> settle ctx inp ui 1
   expectVis failed [wentOut, on, cameIn] . snd =<< evalUi ctx inp ui
 
 -- An unbuilt sensor is forgotten: no frames while gone, a fresh report on
@@ -277,7 +277,7 @@ runUseVisibilityTest ctx failed = do
         (vis, target, respId after) <$ replicateM_ 5 bar
       go = frames failed ctx inp ui (\(_, (v, _, _)) -> v)
   [(sid, (_, target0, after0))] <- go [(off, False)]
-  setScrollOffset ctx sid 180
+  setScrollOffsetIO ctx sid 180
   [_, (_, (v, target, after))] <- go [(off, True), (cameIn, False)]
   assertJustM failed (getPrevRect ctx target) $ \r ->
     assertEq failed (rectIntersect r (visRect v)) (Just (visRect v))
@@ -321,7 +321,7 @@ runDelayTest ctx failed = do
   (sid, _) <- evalUi ctx inp ui
   settle ctx inp ui 2
   -- Row 10 is in view, but not yet for long enough.
-  setScrollOffset ctx sid 380
+  setScrollOffsetIO ctx sid 380
   settle ctx inp ui 2
   report >>= assertEq failed off
   assert failed . (> 0) =<< getWakeAt ctx
@@ -329,7 +329,7 @@ runDelayTest ctx failed = do
   -- The woken frame measures it visible; the next frame reports it.
   _ <- step ctx inp ui
   report >>= assertEq failed cameIn
-  setScrollOffset ctx sid 0
+  setScrollOffsetIO ctx sid 0
   _ <- step ctx inp ui
   report >>= assertEq failed wentOut
   assertEq failed 0 =<< getWakeAt ctx

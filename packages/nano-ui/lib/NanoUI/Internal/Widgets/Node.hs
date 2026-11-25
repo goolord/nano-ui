@@ -39,6 +39,7 @@ module NanoUI.Internal.Widgets.Node
   , tagContainer
   , setWidgetValue
   , moveSelection
+  , resolveInteraction
   )
 where
 

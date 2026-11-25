@@ -158,7 +158,7 @@ generateProbeMatrix =
         , (ImpactPrimary, "Sets `styleCornerRadius` to 999, turning the button into a pill (`rx` = half the height).")
         , (ImpactPrimary, "Dims the fill, border, and label, and blocks clicks and focus.")
         ]
-        ( rowWith (gap 8 . alignMid) $ do
+        ( rowWith (gap 8 . alignMiddle) $ do
             void (button "Save")
             void (styled subtle (button "Subtle"))
         )
@@ -181,7 +181,7 @@ generateProbeMatrix =
         , (ImpactPrimary, "Rounds both states into pills. The active state keeps `styleCornerRadius` from `themeButton`.")
         , (ImpactPrimary, "Dims both states and blocks toggling.")
         ]
-        ( rowWith (gap 8 . alignMid) $ do
+        ( rowWith (gap 8 . alignMiddle) $ do
             vOff <- useVar False
             vOn <- useVar True
             toggleButton Accent "Off (False)" vOff
@@ -509,7 +509,7 @@ generateProbeMatrix =
         ]
         ( do
             vWin <- useVar True
-            window vWin "Inspector" $
+            floatingWindow vWin "Inspector" $
               label "Floating window"
         )
     ]
@@ -550,17 +550,17 @@ generateTypoDemos = do
       viewFor mask =
         let m = applyTypoMask mask
          in panelWith (fillW . fillH . padAll 10 . gap 8) $ do
-              rowWith (gap 8 . alignMid . fillW) $ do
+              rowWith (gap 8 . alignMiddle . fillW) $ do
                 labelWith (fixedW 142 . fontMono) "labelWith"
                 labelWith m "Hamburgefonstiv 0123"
-              rowWith (gap 8 . alignMid . fillW) $ do
+              rowWith (gap 8 . alignMiddle . fillW) $ do
                 labelWith (fixedW 142 . fontMono) "textInput"
                 vTxt <- useVar ("Hamburgefonstiv 0123" :: Text)
-                textInputConfigured (defaultTextInputConfig {ticLayout = m (fillW defaultLayout)}) vTxt
-              rowWith (gap 8 . alignMid . fillW) $ do
+                textInputConfigured (defaultTextInputConfig {ticLayout = m . fillW}) vTxt
+              rowWith (gap 8 . alignMiddle . fillW) $ do
                 labelWith (fixedW 142 . fontMono) "buttonWith"
                 void (buttonWith (m . fillW) "Hamburgefonstiv 0123")
-              rowWith (gap 8 . alignMid . fillW) $ do
+              rowWith (gap 8 . alignMiddle . fillW) $ do
                 labelWith (fixedW 142 . fontMono) "buttonContent"
                 void $
                   buttonContentWith fillW $
@@ -576,18 +576,18 @@ generateTypoDemos = do
   svgLabels <-
     renderSvg "typo-labels" 480 124 $
       panelWith (fillW . fillH . padAll 10 . gap 6) $ do
-        rowWith (gap 12 . alignMid) $ do
+        rowWith (gap 12 . alignMiddle) $ do
           label "label (14px)"
           heading "heading (WeightMedium)"
           labelWith (fontTone Accent) "fontTone Accent"
-        rowWith (gap 12 . alignMid) $ do
+        rowWith (gap 12 . alignMiddle) $ do
           muted "muted"
           mono "mono"
           danger "danger"
           bold "bold"
           italic "italic"
           underline "underline"
-        rowWith (gap 12 . alignMid) $ do
+        rowWith (gap 12 . alignMiddle) $ do
           labelWith fontStrike "fontStrike"
           labelWith (fontColor (colorRGBA 56 189 248 255) . fontBold) "fontColor + fontBold"
           kv "Key" "Value"
@@ -595,13 +595,13 @@ generateTypoDemos = do
   svgToneMatrix <-
     renderSvg "typo-tone-matrix" 480 116 $
       panelWith (fillW . fillH . padAll 10 . gap 8) $ do
-        rowWith (gap 6 . alignMid) $ do
+        rowWith (gap 6 . alignMiddle) $ do
           void (styled primary (button "primary"))
           void (styled destructive (button "destructive"))
           void (styled success (button "success"))
           void (styled warning (button "warning"))
           void (styled subtle (button "subtle"))
-        rowWith (gap 6 . alignMid) $ do
+        rowWith (gap 6 . alignMiddle) $ do
           void (styled (tinted themeAccent) (button "tinted Accent"))
           void (styled (tinted themeDanger) (button "tinted Danger"))
           void (styled (tinted themeSuccess) (button "tinted Success"))
@@ -735,7 +735,7 @@ generateInteractions = do
     renderSvg "i7-bad" 260 80 $
       styled probeButton $
         panelWith (fillW . fillH . padAll 10 . gap 8) $
-          rowWith (gap 8 . alignMid) $ do
+          rowWith (gap 8 . alignMiddle) $ do
             vOff <- useVar False
             vOn <- useVar True
             toggleButton Warning "OFF (uses buttonStyle)" vOff
@@ -744,7 +744,7 @@ generateInteractions = do
     renderSvg "i7-good" 260 80 $
       styled (probeButton . probeAccent) $
         panelWith (fillW . fillH . padAll 10 . gap 8) $
-          rowWith (gap 8 . alignMid) $ do
+          rowWith (gap 8 . alignMiddle) $ do
             vOff <- useVar False
             vOn <- useVar True
             toggleButton Accent "OFF (buttonStyle)" vOff
@@ -926,12 +926,12 @@ generateStateStrip = do
       buildView :: Bool -> NanoUI ()
       buildView focusBtn =
         panelWith (fillW . fillH . padAll 10 . gap 8) $ do
-          rowWith (gap 10 . alignMid . fillW) $ do
+          rowWith (gap 10 . alignMiddle . fillW) $ do
             rBtn <- buttonWith' (fixedW 195) "Action Button"
             if focusBtn then requestFocus (respId rBtn) else pure ()
             vInp <- useVar ("Editable Input" :: Text)
-            textInputConfigured (defaultTextInputConfig {ticLayout = fillW defaultLayout}) vInp
-          rowWith (gap 10 . alignMid . fillW) $ do
+            textInputConfigured (defaultTextInputConfig {ticLayout = fillW}) vInp
+          rowWith (gap 10 . alignMiddle . fillW) $ do
             vSel <- useVar (0 :: Int)
             selectWith (fixedW 195) ["Select (themeButton)" :: Text, "Popup Row 2", "Popup Row 3"] vSel
             label "Click a state or style pill"
@@ -968,7 +968,7 @@ generateRainbowBanner = do
   let compositeView :: NanoUI ()
       compositeView =
         panelWith (fillW . fillH . padAll 10 . gap 8) $ do
-          rowWith (gap 8 . alignMid . fillW) $ do
+          rowWith (gap 8 . alignMiddle . fillW) $ do
             heading "Surface Anatomy"
             void (button "Button")
             vOn <- useVar True
@@ -977,9 +977,9 @@ generateRainbowBanner = do
             checkbox "Check" vChk
             vChk2 <- useVar True
             checkbox "On" vChk2
-          rowWith (gap 8 . alignMid . fillW) $ do
+          rowWith (gap 8 . alignMiddle . fillW) $ do
             vTxt <- useVar ("textInput (themeInput)" :: Text)
-            textInputConfigured (defaultTextInputConfig {ticLayout = fixedW 170 defaultLayout}) vTxt
+            textInputConfigured (defaultTextInputConfig {ticLayout = fixedW 170}) vTxt
             vSel <- useVar (0 :: Int)
             selectWith (fixedW 130) ["select (btn)" :: Text, "Item 2"] vSel
             vSl <- useVar (60 :: Float)

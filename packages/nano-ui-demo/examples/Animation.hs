@@ -65,7 +65,7 @@ view = do
 
       -- 2. Springs: same target, two feels. Click "Move" rapidly to watch
       -- velocity carry smoothly through a retarget.
-      rowWith (tight . gap 12 . alignMid) $ do
+      rowWith (tight . gap 12 . alignMiddle) $ do
         whenM (button "Move") (modifyVar right not)
         muted "Bouncy overshoots; stiff settles cleanly."
       isRight <- readVar right
@@ -78,7 +78,7 @@ view = do
       -- Animating one Float and blending with 'lerpColor' works too.
       isWarm <- readVar warm
       swatch <- keyed "swatch" (animateToA (Tween EaseInOutCubic 0.6 0) (if isWarm then themeOrange theme else themeAccent theme))
-      rowWith (tight . gap 12 . alignMid) $ do
+      rowWith (tight . gap 12 . alignMiddle) $ do
         whenM (button (if isWarm then "Cool down" else "Warm up")) (modifyVar warm not)
         box (fixedWH 120 36) swatch
 
@@ -95,7 +95,7 @@ view = do
       checkbox "Run" running
       isRunning <- readVar running
       scope . when isRunning $
-        rowWith (tight . gap 12 . alignMid . fillW) $ do
+        rowWith (tight . gap 12 . alignMiddle . fillW) $ do
           p <- pulse 1.2
           box (fixedWH 14 14) (withAlpha (themeAccent theme) (0.25 + 0.75 * p))
           bar <- progressBarWith' id 8 p
@@ -106,10 +106,10 @@ view = do
 rail :: T.Text -> Float -> NanoUI ()
 rail name t =
   keyed name $
-    rowWith (tight . gap 12 . alignMid) $ do
+    rowWith (tight . gap 12 . alignMiddle) $ do
       labelWith (tight . fixedW 56) name
       panelWith (fixedWH (travel + 2 * slack + knobSize) (knobSize + 8) . padXY 0 4) $
-        rowWith (tight . alignMid) $ do
+        rowWith (tight . alignMiddle) $ do
           spacer (Fixed (max 0 (slack + t * travel))) Fit
           box (fixedWH knobSize knobSize) (colorRGB 214 51 132)
   where

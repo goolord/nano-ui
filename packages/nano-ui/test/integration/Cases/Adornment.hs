@@ -56,7 +56,7 @@ spanClips txt spans = [clip | (_, t, _, _, clip) <- spans, t == txt]
 -- | A config with these adornments and a fixed width.
 adornedInput :: Float -> A.Adornments -> TextInputConfig
 adornedInput w adornments =
-  defaultTextInputConfig {ticAdornments = adornments, ticLayout = fixedW w (ticLayout defaultTextInputConfig)}
+  defaultTextInputConfig {ticAdornments = adornments, ticLayout = fixedW w}
 
 -- | A field lays an icon and an affix out inside its box, its text between them. A
 -- press on the icon, or left of a plain field's text, puts the caret at the start.
@@ -90,7 +90,7 @@ runAdornedFieldTest ctx failed = do
 -- and a button inside its content is display.
 runAdornedButtonTest :: Context -> IORef Int -> IO ()
 runAdornedButtonTest ctx failed = do
-  theme <- getTheme ctx
+  theme <- getThemeIO ctx
   removes <- newIORef (0 :: Int)
   inner <- newIORef False
   let inp0 = withInputOff 400 300
@@ -159,7 +159,7 @@ runAdornmentIdsTest ctx failed = do
 -- adornment colour; a press on a button's spinner is the button's.
 runAdornedViewsTest :: Context -> IORef Int -> IO ()
 runAdornedViewsTest ctx failed = do
-  theme <- getTheme ctx
+  theme <- getThemeIO ctx
   let inp0 = withInput 400 200
       value = T.replicate 60 "9"
       spinning = A.view (void (spinnerWith' id 14))
@@ -260,12 +260,12 @@ runAdornmentClipTest ctx failed = do
   (shortClip, kg) <- withUnit "kg"
   (longClip, kilograms) <- withUnit "kilograms"
   assert failed (kilograms < kg && longClip < shortClip)
-  let search = defaultSearchInputConfig {sicLayout = fixedW 200 (sicLayout defaultSearchInputConfig)}
+  let search = defaultSearchInputConfig {sicLayout = fixedW 200}
   searching <- newContext
   (field, clip, _) <- clipped searching (fst <$> withValue value (searchInputConfigured' search)) value
   assert failed (rightOf clip + 15 <= rightOf (respRect field))
   weighing <- newContext
   let weigh =
-        defaultButtonConfig {bcLayout = fixedW 60 defaultLayout, bcAdornments = A.trailing (A.affix "kilograms")}
+        defaultButtonConfig {bcLayout = fixedW 60, bcAdornments = A.trailing (A.affix "kilograms")}
   (weighed, kgClip, _) <- clipped weighing (buttonConfigured' weigh "Weigh") "kilograms"
   assert failed (covers (respRect weighed) kgClip)

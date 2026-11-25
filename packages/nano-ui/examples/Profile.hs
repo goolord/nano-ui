@@ -9,10 +9,12 @@ import Data.Text qualified as T
 import Data.Foldable (toList)
 import Data.Primitive.SmallArray (SmallArray)
 import NanoUI
-import NanoUI.Backend (applyMouseButton, emptyInput, inputKeysFromList, monospaceMetrics)
+import NanoUI.Backend (applyMouseButton, buttonsFromList, emptyInput, inputKeysFromList, monospaceMetrics)
 import NanoUI.Path qualified as P
 import NanoUI.Svg (rasterizeSvg)
 import NanoUI.Testing (newContext, runFrame, setDrawReuse, uiCursorKind)
+import NanoUI.Widgets.Custom (CustomWidgetSpec (..), DrawOp, customWidget, defaultCustomWidgetSpec, runCanvasFor)
+import NanoUI.Widgets.TextDocument (TextDocument, textDocument)
 import GHC.Clock (getMonotonicTime)
 import System.Environment (getArgs)
 import System.IO.Unsafe (unsafePerformIO)
@@ -28,7 +30,7 @@ windowScene n = columnWith (fillW . fillH) $ do
     forM_ [1 .. n] $ \i -> rowWith (tight . fillW) $ do
       label (T.pack ("row " <> show i))
       void (button (T.pack ("b" <> show i)))
-  window (constVar True) "Tools" $ columnWith (tight . gap 4 . minW 200) $ do
+  floatingWindow (constVar True) "Tools" $ columnWith (tight . gap 4 . minW 200) $ do
     label "a floating window"
     void (button "ok")
 
@@ -53,7 +55,7 @@ growScene frame = columnWith (tight . gap 0 . fillW . fillH) $ do
   label (T.pack (show frame))
   forM_ (take 60 (iterate (lcg . lcg . lcg) 7)) $ \seed ->
     rowWith (tight . gap 0 . fillW) $ forM_ (growRow seed) $ \(c, g) ->
-      columnWith (\l -> (tight l) {layoutWidth = Grow g}) (spacer (Fixed c) (Fixed 1))
+      columnWith (tight . growW g) (spacer (Fixed c) (Fixed 1))
  where
   lcg x = (x * 1103515245 + 12345) `mod` 2147483648 :: Int
   growRow seed =
@@ -130,7 +132,7 @@ canvasScene key =
   void $
     customWidget
       defaultCustomWidgetSpec
-        { widgetLayout = fixedWH 512 512 defaultLayout
+        { widgetLayout = fixedWH 512 512
         , widgetContent = key
         , widgetDraw = countedCanvasOps
         }
@@ -161,7 +163,7 @@ pathScene =
   void $
     customWidget
       defaultCustomWidgetSpec
-        { widgetLayout = fixedWH 512 512 defaultLayout
+        { widgetLayout = fixedWH 512 512
         , widgetDraw = countedPathOps
         }
 

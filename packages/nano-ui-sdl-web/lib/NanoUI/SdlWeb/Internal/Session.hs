@@ -47,7 +47,6 @@ import NanoUI
   , Theme
   , WindowSettings (..)
   , defaultWindowSettings
-  , followSystemTheme
   )
 import NanoUI.Backend
   ( Backend (..)
@@ -66,6 +65,7 @@ import NanoUI.Backend
   , defaultWindowHost
   , defaultWindowState
   , emptyInput
+  , followSystemThemeIO
   , installWindowHost
   , markDirty
   , noWindowCapabilities
@@ -237,7 +237,7 @@ runWebSession :: WebHost -> SdlWebOptions -> WebFrame -> IO ()
 runWebSession host opts frame = do
   base <- newPixelContext
   ctx0 <- maybe (pure base) (withTheme base) (webTheme opts)
-  forM_ (webThemeFor opts) (followSystemTheme ctx0)
+  forM_ (webThemeFor opts) (followSystemThemeIO ctx0)
   setExplainLayout ctx0 (webExplainLayout opts)
   canvas <- queryCanvas host
   let zoom = if webUiScale opts > 0 then webUiScale opts else 1

@@ -24,7 +24,7 @@ appView = columnWith (gap 12 . padAll 20 . alignCenter) $ do
   -- State at this call site; allocated on the first frame only.
   n <- useVar (0 :: Int)
 
-  rowWith (gap 8 . alignMid) $ do
+  rowWith (gap 8 . alignMiddle) $ do
     whenM (button "-") (modifyVar n (subtract 1))
 
     value <- readVar n

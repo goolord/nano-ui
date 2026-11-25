@@ -124,7 +124,7 @@ fileDialogSection st opened = do
         Cancelled -> writeVar (fdStatus st) "Cancelled"
   heading "File Dialogs"
   muted "Browsers do not expose local file paths, so files open by contents and save through the browser."
-  rowWith (tight . gap 12 . alignMid . fillW) $ do
+  rowWith (tight . gap 12 . alignMiddle . fillW) $ do
     let ask action = modifyVar (fdRequest st) (\(k, _) -> (k + 1, action))
     whenM (button "Open File…") (ask OpenFiles)
     whenM (button "Open Folder…") (ask OpenFolder)

@@ -15,7 +15,7 @@ import Control.Monad (forM_, replicateM_, unless, void, when)
 import GHC.Clock (getMonotonicTime)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import NanoUI
-import NanoUI.Backend (applyMouseButton)
+import NanoUI.Backend (applyMouseButton, buttonsFromList)
 import NanoUI.Backend.Sdl
 import NanoUI.Testing (Context, collectOverlayTextSpans, collectTextSpans)
 import NanoUI.Testing.Harness (DemoSpan, findExact, findHeader, findRightmost, keyInp)

@@ -38,6 +38,16 @@ module NanoUI.Backend
   , withFontSize
   , withClipboard
   , withTheme
+  , setThemeIO
+  , getThemeIO
+  , followSystemThemeIO
+  , Layout (..)
+  , onGrid
+  , roundHalfUp
+  , colorToWord32
+  , scrollBarTrackColor
+  , scrollBarThumbColor
+  , scrollBarThumbHoverColor
   , markDirty
   , clearDirty
   , isDirty
@@ -293,7 +303,7 @@ module NanoUI.Backend
     -- title, size, mode, resizability and transparency, then calls
     -- 'installWindowHost', which applies the remaining settings through the
     -- 'WindowHost'. The host carries out view requests such as
-    -- 'NanoUI.setWindowTitleUi' and 'NanoUI.moveWindowUi'. Build it by
+    -- 'NanoUI.setWindowTitle' and 'NanoUI.moveWindow'. Build it by
     -- updating 'defaultWindowHost', so fields added later are no-ops, and
     -- set 'hostCapabilities' to the operations it carries out, which views
     -- read with 'NanoUI.askWindowCapabilities'.
@@ -309,7 +319,7 @@ module NanoUI.Backend
     --
     -- @runSessionLoop@ in "NanoUI.Runner" handles closing: a close request
     -- either ends the session or, per the settings, is passed to the view,
-    -- and 'NanoUI.quitUi' ends it. A backend's own loop does the same with
+    -- and 'NanoUI.quit' ends it. A backend's own loop does the same with
     -- 'requestWindowClose' and 'quitRequested'; the next frame to run the
     -- view clears the request ('clearWindowClose').
   , WindowHost (..)
@@ -410,6 +420,7 @@ import NanoUI.Internal.Context
   , withBackendSession, setBackendSession, backendSession
   , setShaderCapabilities, getShaderCapabilities, setDrawPixelScale
   )
+import NanoUI.Internal.Context qualified as Ctx
 import NanoUI.Internal.Shader (ShaderCapabilities (..), ShaderProgram (..), noShaderCapabilities)
 import NanoUI.Internal.Uniforms (sysUniformBytes)
 import NanoUI.Internal.Frame (runFrame)
@@ -442,10 +453,22 @@ import NanoUI.Internal.NativeWindow
   , requestWindowClose
   , sizeLimitAt
   )
-import NanoUI.Internal.Style (Appearance (..), windowMargin, windowPad)
+import NanoUI.Internal.Style (Appearance (..), Layout (..), Theme, scrollBarThumbColor, scrollBarThumbHoverColor, scrollBarTrackColor, windowMargin, windowPad)
 import NanoUI.Internal.Tasks (cancelTasks)
 import NanoUI.Internal.Types
 import NanoUI.Internal.WidgetText (textNodeFontStyle, textNodeFontTone, textNodeFontVariant, textNodeFontWeight, textNodeTextDecoration)
+
+-- | Set a fixed theme on a context from outside a view.
+setThemeIO :: Context -> Theme -> IO ()
+setThemeIO = Ctx.setTheme
+
+-- | Read the context's current base theme from outside a view.
+getThemeIO :: Context -> IO Theme
+getThemeIO = Ctx.getTheme
+
+-- | Configure a context to follow OS light/dark changes from outside a view.
+followSystemThemeIO :: Context -> (Maybe Appearance -> Theme) -> IO ()
+followSystemThemeIO = Ctx.followSystemTheme
 
 -- | Run an action on a bound thread, one OS thread for the whole run, or
 -- as it is under the non-threaded runtime, which runs Haskell on one OS

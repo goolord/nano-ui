@@ -241,7 +241,7 @@ closeWindows w = do
   mapM_ (closeChild w) =<< readIORef (wTop w)
   writeIORef (wTop w) []
 
--- | The window asked to close (its close button, or 'NanoUI.quitUi' in its
+-- | The window asked to close (its close button, or 'NanoUI.quit' in its
 -- view): write 'False' to its 'NanoUI.Var', close it now, and ask the
 -- declaring window for the frame that shows it closed, which nothing else
 -- would ask for once no further window is open. A read-only 'NanoUI.Var'

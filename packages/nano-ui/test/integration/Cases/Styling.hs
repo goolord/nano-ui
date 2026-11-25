@@ -24,6 +24,7 @@ tests =
   , pixelSpec "font-size-scale-relative" runFontSizeScaleRelativeTest
   , pixelSpec "uniform-control-heights" runUniformControlHeightsTest
   , spec "button-group" runButtonGroupTest
+  , pixelSpec "single-line-and-font-inheritance" runSingleLineAndFontInheritanceTest
   ]
 
 inp :: Input
@@ -55,7 +56,7 @@ runDisabledPointerTest ctx failed = do
   untouched (0 :: Int) (select' ["One", "Two"])
   untouched ("initial" :: Text) textInput'
   untouched (5 :: Double) numericInput'
-  theme <- getTheme ctx
+  theme <- getThemeIO ctx
   let enabledBg = styleBg (themeButton theme)
       fadedBg = styleBg (themeButton (disabledTheme theme))
   quads <- map snd <$> (drawQuads . snd =<< warmupDraw ctx inp (column (disabledWhen True (button "Off"))))
@@ -95,7 +96,7 @@ runStyledPaintTest base failed = do
 -- | Nested scopes modify the theme around them.
 runStyledNestingTest :: Context -> IORef Int -> IO ()
 runStyledNestingTest ctx failed = do
-  base <- getTheme ctx
+  base <- getThemeIO ctx
   let teal = colorRGBA 20 160 150 255
   seen <- warmup2 ctx inp $ column $ do
     (o, (i, r)) <- styled (accentColor teal) $ do
@@ -112,7 +113,7 @@ runFontSizeLabelFitTest :: Context -> IORef Int -> IO ()
 runFontSizeLabelFitTest base failed = do
   doc <- either fail pure (parseSvg "<svg viewBox='0 0 24 24'><rect width='24' height='24'/></svg>")
   let ctx = withMonospaceFonts 12 24 base
-      sized = fontSize 24 defaultLayout
+      sized = fontSize 24
       adornedCfg = defaultButtonConfig {bcLayout = sized, bcAdornments = A.leading (A.iconSized 16 doc)}
       ui = column $ (,,) <$> buttonWith' (fontSize 24) "Big" <*> button' "Big" <*> buttonConfigured' adornedCfg "Big"
   (big, plain, adorned) <- warmup2 ctx (withInputOff 600 300) ui
@@ -137,7 +138,7 @@ runBorderLeftTest ctx failed = do
 -- to the theme's well when focused); a shade equal to the old fill follows it.
 runBackgroundMovesShadesTest :: Context -> IORef Int -> IO ()
 runBackgroundMovesShadesTest ctx failed = do
-  base <- getTheme ctx
+  base <- getThemeIO ctx
   ref <- newVar ("text" :: Text)
   let teal = colorRGBA 13 148 136 255
       field = background teal (themeInput base)
@@ -156,7 +157,7 @@ runBackgroundMovesShadesTest ctx failed = do
 -- leaving the widget's own style bits alone.
 runLabelFontFlagsTest :: Context -> IORef Int -> IO ()
 runLabelFontFlagsTest ctx failed = do
-  base <- getTheme ctx
+  base <- getThemeIO ctx
   sel <- newVar (0 :: Int)
   on <- newVar False
   let flags = fontBold . fontItalic . fontDanger
@@ -192,7 +193,7 @@ runCheckboxBoxCenterTest base failed = do
         r2 <- checkboxWith' (fontSize 24 . fixedH 48) "Big" on
         pure (r1, r2)
   ((r1, r2), _) <- warmupDraw ctx (withInputOff 300 200) ui
-  theme <- getTheme ctx
+  theme <- getThemeIO ctx
   ops <- drawRecordedOps ctx
   -- Checked checkbox fills its rounded box in themeAccent.
   let accentBox r = [q | RecordedOp _ _ _ (FillRoundedRect q _ c) <- ops, c == themeAccent theme, covers (respRect r) q]
@@ -213,7 +214,7 @@ runFontSizeScaleRelativeTest base failed = do
   doc <- either fail pure (parseSvg "<svg viewBox='0 0 24 24'><rect width='24' height='24'/></svg>")
   let ctx = withFontMetrics (withFontSize base 12) (monospaceMetrics 12)
       btnPlain = defaultButtonConfig {bcAdornments = A.leading (A.icon doc)}
-      btnScaled = defaultButtonConfig {bcLayout = fontSizeScale 1.5 defaultLayout, bcAdornments = A.leading (A.icon doc)}
+      btnScaled = defaultButtonConfig {bcLayout = fontSizeScale 1.5, bcAdornments = A.leading (A.icon doc)}
       ui = columnWith (tight . gap 4) $ do
         labelWith (fontSizeScale 1.5) "Scaled"
         labelWith (fontSizeScale 0.5 . fontSizeScale 1.5) "Composed"
@@ -247,15 +248,15 @@ runUniformControlHeightsTest ctx failed = do
         rSel <- select' ["One", "Two"] sel
         rTxt <- textInput' txt
         rSrch <- searchInput' "Find" qry
-        rNum <- numericInputConfigured' defaultNumericInputConfig {nicLayout = fixedW 90 defaultLayout} num
+        rNum <- numericInputConfigured' defaultNumericInputConfig {nicLayout = fixedW 90} num
         rCmb <- comboBox' "Pick" ["One", "Two"] cmb
         pure (map (rectH . respRect) [rBtn, rSel, rTxt, rSrch, rNum, rCmb])
       rowMono = rowWith (tight . gap 8) $ do
         rBtn <- buttonWith' fontMono "Save"
         rSel <- selectWith' fontMono ["One", "Two"] sel
-        rTxt <- textInputConfigured' defaultTextInputConfig {ticLayout = fontMono (ticLayout defaultTextInputConfig)} txt
-        rSrch <- searchInputConfigured' defaultSearchInputConfig {sicLayout = fontMono (sicLayout defaultSearchInputConfig)} qry
-        rNum <- numericInputConfigured' defaultNumericInputConfig {nicLayout = fontMono (fixedW 90 defaultLayout)} num
+        rTxt <- textInputConfigured' defaultTextInputConfig {ticLayout = fontMono . ticLayout defaultTextInputConfig} txt
+        rSrch <- searchInputConfigured' defaultSearchInputConfig {sicLayout = fontMono . sicLayout defaultSearchInputConfig} qry
+        rNum <- numericInputConfigured' defaultNumericInputConfig {nicLayout = fontMono . fixedW 90} num
         pure (map (rectH . respRect) [rBtn, rSel, rTxt, rSrch, rNum])
   (hsProp, hsMono) <- warmup2 ctx (withInputOff 900 300) $ column ((,) <$> rowProp <*> rowMono)
   case hsProp of
@@ -285,7 +286,7 @@ runButtonGroupTest ctx failed = do
     -- Adjacent with zero gap.
     assertEq failed (rectX ra + rectW ra) (rectX rb)
     assertEq failed (rectX rb + rectW rb) (rectX rc)
-    theme <- getTheme ctx
+    theme <- getThemeIO ctx
     ops <- drawRecordedOps ctx
     let borderCol = styleBorder (themeButton theme)
         -- Shared internal 1px dividers sit at the left edge of Mid and Right, not Left.
@@ -318,3 +319,90 @@ runButtonGroupTest ctx failed = do
   let selFills = [r | RecordedOp _ clip _ (FillRoundedRect r _ _) <- opsOpen, clip == sr]
   -- Trailing select extends past its left edge (shared seam) but NOT past its right edge (rounded cap).
   assert failed (any (\r -> rectX r < rectX sr && rectX r + rectW r <= rectX sr + rectW sr + 0.5) selFills)
+
+-- | 'singleLine' and ellipsis modes truncate inside a 'column' instead of wrapping;
+-- 'withDefaultLayout' font modifiers inherit into all controls and 'fontProportional'
+-- restores proportional text; 'colorHex'/'colorHexA' and 'Hashable Color' work;
+-- 'calloutTone'/'calloutToneWith'' tint from the active theme's 'Tone'.
+runSingleLineAndFontInheritanceTest :: Context -> IORef Int -> IO ()
+runSingleLineAndFontInheritanceTest base failed = do
+  let ctx = withFontMetrics (withFontSize base 12) (monospaceMetrics 12)
+      longTxt = "Alpha Beta Gamma Delta Epsilon Zeta"
+  -- In a narrow column, a plain fillW label wraps onto multiple lines, whereas
+  -- singleLine / ellipsisEnd / ellipsisMiddle stay single-line and ellipsize.
+  let colUi = columnWith (tight . gap 4 . fixedW 100) $ do
+        rWrap <- labelWith' fillW longTxt
+        rSingle <- labelWith' (fillW . singleLine) longTxt
+        rEnd <- labelWith' (fillW . ellipsisEnd) longTxt
+        rMid <- labelWith' (fillW . ellipsisMiddle) longTxt
+        pure (rWrap, rSingle, rEnd, rMid)
+  (rWrap, rSingle, rEnd, rMid) <- warmup2 ctx (withInputOff 400 300) colUi
+  assertGt failed (rectH (respRect rWrap)) (rectH (respRect rSingle) * 2)
+  assertEq failed (rectH (respRect rSingle)) (rectH (respRect rEnd))
+  assertEq failed (rectH (respRect rSingle)) (rectH (respRect rMid))
+  ss <- collectTextSpans ctx
+  assert failed (any (\(_, t, _, _, _) -> "..." `T.isInfixOf` t) ss)
+  -- withDefaultLayout propagates fontSizeScale and fontMono to all built-in controls;
+  -- fontProportional resets the font variant inside a fontMono block.
+  selV <- newVar (0 :: Int)
+  chkV <- newVar False
+  txtV <- newVar ("abc" :: Text)
+  qryV <- newVar ("qry" :: Text)
+  numV <- newVar (12 :: Double)
+  tabV <- newVar ("A" :: Text)
+  let inheritUi = columnWith (tight . gap 4) $ do
+        bPlain <- button' "PlainBtn"
+        withDefaultLayout (fontSizeScale 1.5 . fontMono . fontTabular) $ do
+          bBig <- button' "BigBtn"
+          cBig <- checkbox' "BigChk" chkV
+          rBig <- radio' ["BigRad"] selV
+          sBig <- select' ["BigSel"] selV
+          tBig <- textInput' txtV
+          qBig <- searchInput' "Find" qryV
+          nBig <- numericInput' numV
+          void (tabBar tabV [tab ("A" :: Text) "BigTab" ()])
+          lMono <- label' "MonoLbl"
+          lReg <- labelWith' (fontRegular . fontProportional) "RegLbl"
+          pure (bPlain, bBig, cBig, rBig, sBig, tBig, qBig, nBig, lMono, lReg)
+  (bPlain, bBig, _, _, _, _, _, _, lMono, lReg) <- warmup2 ctx (withInputOff 600 400) inheritUi
+  assertGt failed (rectH (respRect bBig)) (rectH (respRect bPlain) + 2)
+  let na = ctxNodeArena ctx
+  Just idxMono <- lookupNodeByWidgetId na (respId lMono)
+  Just idxReg <- lookupNodeByWidgetId na (respId lReg)
+  Just idxBtn <- lookupNodeByWidgetId na (respId bBig)
+  stMono <- getStyleIdx na idxMono
+  stReg <- getStyleIdx na idxReg
+  stBtn <- getStyleIdx na idxBtn
+  assertEq failed FontMono (textNodeFontVariant (nodeFontBits NodeText stMono))
+  assertEq failed FontRegular (textNodeFontVariant (nodeFontBits NodeText stReg))
+  assertEq failed FontMono (textNodeFontVariant (nodeFontBits NodeButton stBtn))
+  ss2 <- collectTextSpans ctx
+  forM_ ["BigBtn", "BigChk", "BigRad", "BigSel", "BigTab"] $ \needle ->
+    assertJust failed (spanRect needle ss2) $ \r -> assertEq failed 18 (rectH r)
+  -- fontProportional overrides inherited fontTabular end-to-end.
+  let propFm =
+        (monospaceMetrics 12)
+          { fmAdvance = \c -> case c of
+              ' ' -> 4
+              '1' -> 5
+              '8' -> 10
+              _ -> 7
+          }
+      tabUi = withDefaultLayout fontTabular $ columnWith (tight . gap 4) $ do
+        rTab <- label' "1111"
+        rProp <- labelWith' fontProportional "1111"
+        pure (rTab, rProp)
+  propCtx <- (`withFontMetrics` propFm) <$> newContext
+  (rTab, rProp) <- warmup2 propCtx (withInputOff 300 200) tabUi
+  assertGt failed (rectW (respRect rTab)) (rectW (respRect rProp) + 10)
+  -- colorHex, colorHexA, and Hashable Color
+  assertEq failed (colorRGBA 0x1E 0x29 0x3B 0xFF) (colorHex 0x1E293B)
+  assertEq failed (colorRGBA 0x1E 0x29 0x3B 0x80) (colorHexA 0x1E293B80)
+  assert failed (contentKeyOf [keyPart (colorHex 0x112233)] /= contentKeyOf [keyPart (colorHex 0x112234)])
+  -- calloutTone and calloutToneWith'
+  let calloutUi = columnWith (tight . gap 4 . fixedW 260) $ do
+        calloutTone Warning (label "WarnMsg")
+        (_, r) <- calloutToneWith' Danger (fixedH 44) (label "ErrMsg")
+        pure r
+  rCallout <- warmup2 ctx (withInputOff 400 300) calloutUi
+  assertEq failed (260, 44) (rectW (respRect rCallout), rectH (respRect rCallout))

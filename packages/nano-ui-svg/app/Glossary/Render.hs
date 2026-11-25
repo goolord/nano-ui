@@ -400,8 +400,8 @@ applyStyleMask :: Bool -> Int -> NanoUI () -> NanoUI ()
 applyStyleMask isOverlay mask view0 =
   let applyBase =
         if testBit mask 0
-          then (setUiTheme defaultLightTheme >>) . themed defaultLightTheme
-          else (setUiTheme defaultTheme >>)
+          then (setTheme defaultLightTheme >>) . themed defaultLightTheme
+          else (setTheme defaultTheme >>)
       hasThemeMod = (mask .&. 0x3E) /= 0
       pnlMod = if isOverlay then probePanel . probePopup . probeWindow else probePanel
       themeMod =

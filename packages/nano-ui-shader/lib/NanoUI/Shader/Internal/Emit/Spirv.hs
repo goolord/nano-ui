@@ -8,7 +8,7 @@
 -- * Sampled input texture (when 'irNeedsInput'): @DescriptorSet 2, Binding 0@
 -- * Std140 uniform block: @DescriptorSet 3, Binding 0@
 -- * Entry point: @"main"@ with @OriginUpperLeft@
-module NanoUI.Shader.Emit.Spirv
+module NanoUI.Shader.Internal.Emit.Spirv
   ( emitSpirv
   , emitSpirvWords
   ) where
@@ -29,7 +29,7 @@ import Data.Vector qualified as V
 import Data.Word (Word32, Word8)
 import GHC.Float (castFloatToWord32)
 import NanoUI.Internal.Uniforms (GpuType (..), UniformField (..))
-import NanoUI.Shader.IR
+import NanoUI.Shader.Internal.IR
 
 -- ---------------------------------------------------------------------------
 -- SPIR-V 1.0 and GLSL.std.450 constants (Khronos specification)

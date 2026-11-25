@@ -23,7 +23,7 @@ refreshButton = do
 
 -- ANCHOR: button_content
 iconSaveButton =
-  whenM (buttonContent $ rowWith (gap 6 . alignMid) $ do
+  whenM (buttonContent $ rowWith (gap 6 . alignMiddle) $ do
             svgIcon 16 saveIcon
             label "Save") $
     saveDocument
@@ -37,13 +37,13 @@ fileMenu = do
   when (respClicked btn) (writeVar fileOpen (not isOpen))
 
   let cfg = (defaultPopupConfig (AnchorRect (respRect btn)))
-              {cfgPlacement = PlacementBelow, cfgOffset = 0}
+              {popupPlacement = PlacementBelow, popupOffset = 0}
   (popupResp, _) <- popup' (constVar isOpen) cfg $
     columnWith (tight . gap 0) $ do
       whenM (menuItemShortcut "New" (cmdOrCtrl <> key 'n')) newDocument
       whenM (menuItem "Open...") openDocument
       menuSeparator
-      whenM (menuItem "Exit") (writeVar fileOpen False >> quitUi)
+      whenM (menuItem "Exit") (writeVar fileOpen False >> quit)
   when (respClicked popupResp) (writeVar fileOpen False)
 -- ANCHOR_END: menu_bar
 

@@ -7,7 +7,6 @@ import Control.Monad (when)
 import Data.Foldable (for_)
 import Data.Text (Text)
 import NanoUI
-import NanoUI.Monad (askContext)
 
 -- ANCHOR: modifiers
 settingsPanel :: NanoUI ()
@@ -29,7 +28,7 @@ virtualizedList :: [Item] -> NanoUI ()
 virtualizedList items = do
   sid <- currentId
   scrollWith (fixedH 500 . fillW) $ do
-    metrics <- getScrollMetricsUi sid
+    metrics <- getScrollMetrics sid
     let rowH = 28
         total = length items
         (offsetY, viewH) = case metrics of
@@ -52,14 +51,13 @@ virtualizedList items = do
 reveal :: WidgetId -> Float -> Int -> Bool -> NanoUI ()
 reveal sid rowH index shouldReveal =
   when shouldReveal $
-    scrollRectIntoViewUi sid (Rect 0 (fromIntegral index * rowH) 1 rowH) ScrollNearest ScrollInstant
+    scrollRectIntoView sid (Rect 0 (fromIntegral index * rowH) 1 rowH) ScrollNearest ScrollInstant
 -- ANCHOR_END: reveal
 
 -- ANCHOR: wheel_step
 oneRowPerNotch :: Float -> NanoUI ()
-oneRowPerNotch rowHeight = do
-  ctx <- askContext
-  liftIO $ setScrollTuning ctx defaultScrollTuning
+oneRowPerNotch rowHeight =
+  setScrollTuning defaultScrollTuning
     {scrollWheelStep = rowHeight, scrollSmoothTime = 0}
 -- ANCHOR_END: wheel_step
 

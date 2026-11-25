@@ -12,10 +12,11 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import GHC.Clock (getMonotonicTime)
 import NanoUI
-  ( Color, DrawOp (..), ImageId (..), NanoUI, Rect (..), Size (..), Style (..), TextFont (..), Theme (..)
-  , V2 (..), WidgetId, background, checkboxBoxSize, colorRGBA, columnWith, drawCheckbox, fillW, fixedH, fixedW, fontColor, foreground
-  , label, padAll, panel, rectIntersect, runCanvasFor, scrollArea, liftIO, withKey
+  ( Color, ImageId (..), NanoUI, Rect (..), Size (..), Style (..), TextFont (..), Theme (..)
+  , V2 (..), WidgetId, background, colorRGBA, columnWith, fillW, fixedH, fixedW, fontColor, foreground
+  , label, padAll, panel, rectIntersect, respId, scrollWith', liftIO, tight, withKey
   )
+import NanoUI.Widgets.Custom (DrawOp (..), checkboxBoxSize, drawCheckbox, runCanvasFor)
 import NanoUI.Backend (FontBackend (..), FontMetrics (..), monospaceMetrics)
 import NanoUI.Internal.Context (Context (..), CustomDrawingEntry (..), getTheme, lookupCustomDrawing)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
@@ -267,9 +268,10 @@ spec = before newMarkdownCache $ do
     ctx <- newContext
     let paras n = T.concat ["para " <> T.pack (show i) <> "\n\n" | i <- [1 .. n :: Int]]
         doc = parseMarkdown (paras 3 <> "```\ncode\n```\n\n" <> paras 30)
-        ui = scrollArea (fillW . fixedH 280) (columnWith (fillW . padAll 10) (markdown cache doc))
+        ui = scrollWith' (fillW . fixedH 280) (columnWith (fillW . padAll 10) (markdown cache doc))
     sim ctx 400 300 ui $ do
-      (sid, _) <- result
+      (_, scroller) <- result
+      let sid = respId scroller
       _ <- (`wheel` V2 0 3) =<< wordAt 0 "code"
       -- Let the glide settle.
       replicateM_ 30 (advance 0.05)
@@ -454,5 +456,11 @@ spec = before newMarkdownCache $ do
     let block c = columnWith (fixedW 500) (markdownConfigured cache (defaultMarkdownConfig :: MarkdownConfig) {mdCodeBlock = background c} (parseMarkdown "```\ncode\n```"))
     paints tint (block tint) `shouldReturn` True
     paints tint (block (colorRGBA 9 9 9 255)) `shouldReturn` False
+
+  it "applies layout modifiers via markdownWith" $ \cache -> do
+    let doc = parseMarkdown "hello markdown"
+    ctx <- drawn 600 400 (columnWith tight (markdownWith (fixedW 220 . padAll 12) cache doc))
+    ws <- drawnWords ctx
+    fmap wPos (wordNamed "hello" ws) `shouldBe` Just (V2 12 12)
   where
     styleFgOf theme = styleFg (themePanel theme)

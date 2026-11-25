@@ -6,7 +6,7 @@
 -- User uniform fields are emitted with explicit @float _padN@ spacers and
 -- @packed_float3@ for @GVec3@ so every field's byte offset matches the core's
 -- std140 byte layout exactly.
-module NanoUI.Shader.Emit.Msl
+module NanoUI.Shader.Internal.Emit.Msl
   ( emitMsl
   ) where
 
@@ -20,7 +20,7 @@ import Data.Vector qualified as V
 import Data.Word (Word32)
 import GHC.Float (castWord32ToFloat)
 import NanoUI.Internal.Uniforms (GpuType (..), UniformField (..), gpuTypeSize)
-import NanoUI.Shader.IR
+import NanoUI.Shader.Internal.IR
 import Numeric (showFFloat)
 
 -- | Emit an MSL fragment shader with entrypoint @main0@ for SDL 3.4 Metal.

@@ -7,6 +7,8 @@ module NanoUI.Internal.Types
   , Color (..)
   , colorRGBA
   , colorRGB
+  , colorHex
+  , colorHexA
   , withAlpha
   , fadeAlpha
   , colorWhite
@@ -58,6 +60,7 @@ module NanoUI.Internal.Types
 
 import Control.Monad.Primitive (PrimMonad, PrimState)
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
+import Data.Hashable (Hashable)
 import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, indexPrimArray, newPrimArray, primArrayFromList, setPrimArray)
 import Data.Primitive.Types (Prim)
 import Data.Word (Word8, Word32)
@@ -95,7 +98,7 @@ newtype ImageId = ImageId
 
 -- | Straight-alpha colour packed as @0xRRGGBBAA@, with 8 bits per channel.
 newtype Color = Color Word32
-  deriving (Eq, Show, Num)
+  deriving (Eq, Show, Num, Hashable)
 
 -- | Pack red, green, blue, and alpha channels; alpha 0 is transparent, 255 opaque.
 {-# INLINE colorRGBA #-}
@@ -111,6 +114,18 @@ colorRGBA r g b a =
 {-# INLINE colorRGB #-}
 colorRGB :: Word8 -> Word8 -> Word8 -> Color
 colorRGB r g b = colorRGBA r g b 255
+
+-- | An opaque colour from a 24-bit @0xRRGGBB@ hex literal (for example,
+-- @colorHex 0x2a7fff@).
+{-# INLINE colorHex #-}
+colorHex :: Word32 -> Color
+colorHex rgb = Color (((rgb .&. 0xFFFFFF) `shiftL` 8) .|. 0xFF)
+
+-- | A straight-alpha colour from a 32-bit @0xRRGGBBAA@ hex literal (for
+-- example, @colorHexA 0x2a7fff80@).
+{-# INLINE colorHexA #-}
+colorHexA :: Word32 -> Color
+colorHexA = Color
 
 -- | The colour with its alpha set to @a@, from 0 (transparent) to 1
 -- (opaque); values outside that range are clamped.

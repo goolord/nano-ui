@@ -13,10 +13,10 @@ module NanoUI.Internal.Widgets.Checkbox
 
 import Data.Functor (void)
 import Data.Text (Text)
-import NanoUI.Internal.Monad (NanoUI)
+import NanoUI.Internal.Monad (NanoUI, askDefaultLayout)
 import NanoUI.Internal.Var (Binding (..), bindVar)
 import NanoUI.Internal.Var.Types (Var)
-import NanoUI.Internal.Style (Layout, Tone, defaultLayout)
+import NanoUI.Internal.Style (Layout, Tone, defaultLayout, inheritFont)
 import NanoUI.Internal.WidgetText (buttonFlagChoice, buttonToneStyle)
 import NanoUI.Internal.Widgets.Combinators (choiceToggleWidget)
 import NanoUI.Internal.Widgets.Node (Response)
@@ -34,7 +34,7 @@ checkbox txt v = void (checkbox' txt v)
 checkbox' :: Text -> Var Bool -> NanoUI Response
 checkbox' = checkboxWith' id
 
--- | 'checkbox' with a layout modifier: @checkboxWith alignMid@ centres it in
+-- | 'checkbox' with a layout modifier: @checkboxWith alignMiddle@ centers it in
 -- a row taller than itself, and @checkboxWith fillW@ gives it the row.
 {-# INLINE checkboxWith #-}
 checkboxWith :: (Layout -> Layout) -> Text -> Var Bool -> NanoUI ()
@@ -43,10 +43,11 @@ checkboxWith f txt v = void (checkboxWith' f txt v)
 -- | 'checkboxWith' returning its 'Response'.
 {-# INLINE checkboxWith' #-}
 checkboxWith' :: (Layout -> Layout) -> Text -> Var Bool -> NanoUI Response
-checkboxWith' f txt v =
-  bindVar RenderFinal v (choiceToggleWidget txt (f defaultLayout) buttonFlagChoice)
+checkboxWith' f txt v = do
+  amb <- askDefaultLayout
+  bindVar RenderFinal v (choiceToggleWidget txt (f (inheritFont amb defaultLayout)) buttonFlagChoice)
 
--- | Toggle button bound to mutable state ('Var'): filled in the tone's colour
+-- | Toggle button bound to mutable state ('Var'): filled in the tone's color
 -- while on, a plain button while off. A click or Space/Enter toggles it in place.
 --
 -- > toggleButton Warning "M" muted
@@ -67,4 +68,6 @@ toggleButtonWith f t txt v = void (toggleButtonWith' f t txt v)
 -- | 'toggleButtonWith' returning its 'Response'.
 {-# INLINE toggleButtonWith' #-}
 toggleButtonWith' :: (Layout -> Layout) -> Tone -> Text -> Var Bool -> NanoUI Response
-toggleButtonWith' f t txt v = bindVar RenderFinal v (choiceToggleWidget txt (f defaultLayout) (buttonToneStyle t))
+toggleButtonWith' f t txt v = do
+  amb <- askDefaultLayout
+  bindVar RenderFinal v (choiceToggleWidget txt (f (inheritFont amb defaultLayout)) (buttonToneStyle t))

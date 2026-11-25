@@ -213,7 +213,7 @@ data ScrollMetrics = ScrollMetrics
 -- Reads the last frame's layout, so it is safe to call while building the
 -- next one, from the UI thread. A view that reads it gets another frame when
 -- this frame's layout changes the metrics, so rows it picked from them catch
--- up with a resize. From a view, 'NanoUI.getScrollMetricsUi' is the same.
+-- up with a resize. From a view, 'NanoUI.getScrollMetrics' is the same.
 getScrollMetrics :: Context -> WidgetId -> IO (Maybe ScrollMetrics)
 getScrollMetrics ctx wid = do
   m <- readScrollMetrics ctx wid

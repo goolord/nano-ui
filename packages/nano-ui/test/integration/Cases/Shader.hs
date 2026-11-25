@@ -204,20 +204,31 @@ runEffectSpanTest ctx failed = do
   let ui =
         columnWith (gap 8) $ do
           box (fixedWH 40 20) (colorRGBA 255 0 0 255)
-          withShader testColorEffect 0.5 $
+          (innerVal, effResp) <- withShaderWith' (padAll 4) testColorEffect 0.5 $ do
             box (fixedWH 60 30) (colorRGBA 0 255 0 255)
-          box (fixedWH 40 20) (colorRGBA 0 0 255 255)
+            pure (42 :: Int)
+          (inner2, effResp2) <- withShader' testColorEffect 0.5 $ do
+            box (fixedWH 40 20) (colorRGBA 0 0 255 255)
+            pure ("ok" :: String)
+          pure (innerVal, effResp, inner2, effResp2)
 
-  -- Without capNodeEffects, no effect spans are emitted and children draw directly.
+  -- Without capNodeEffects, no effect spans are emitted and children draw directly,
+  -- while withShader'/withShaderWith' still return the inner value and container Response.
   setShaderCapabilities ctx (ShaderCapabilities True False)
-  (_, ddOff, _) <- run2Frames ctx (withInput 320 200) ui
+  ((v1, r1, v2, r2), ddOff, _) <- run2Frames ctx (withInput 320 200) ui
+  assertEq failed (42, "ok") (v1, v2)
+  assert failed (respId r1 /= WidgetId 0 && respId r2 /= WidgetId 0)
+  assertEq failed (68, 38) (rectW (respRect r1), rectH (respRect r1))
+  assertEq failed (40, 20) (rectW (respRect r2), rectH (respRect r2))
   assertEq failed 0 (sizeofSmallArray (drawEffectSpans ddOff))
 
-  -- With capNodeEffects, one EffectSpan brackets the middle box without
-  -- merging commands from the sibling boxes before or after it.
+  -- With capNodeEffects, two EffectSpans bracket the wrapped subtrees without
+  -- merging commands from the sibling box before them.
   setShaderCapabilities ctx (ShaderCapabilities True True)
-  (_, ddOn, _) <- run2Frames ctx (withInput 320 200) ui
-  requireEq "effect span count" 1 (sizeofSmallArray (drawEffectSpans ddOn))
+  ((_, r1On, _, r2On), ddOn, _) <- run2Frames ctx (withInput 320 200) ui
+  assertEq failed (68, 38) (rectW (respRect r1On), rectH (respRect r1On))
+  assertEq failed (40, 20) (rectW (respRect r2On), rectH (respRect r2On))
+  requireEq "effect span count" 2 (sizeofSmallArray (drawEffectSpans ddOn))
   let es = indexSmallArray (drawEffectSpans ddOn) 0
   assertGt failed (esCmdEnd es) (esCmdStart es)
   assertEq failed 1 (sizeofSmallArray (esPasses es))

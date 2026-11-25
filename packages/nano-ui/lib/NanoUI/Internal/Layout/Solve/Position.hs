@@ -19,7 +19,7 @@ import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve.Flex
 import NanoUI.Internal.Layout.Solve.Measure
-import NanoUI.Internal.Style (AlignX (..), AlignY (..), ItemsAlign (..), Padding (..), lineAlignFraction, windowMargin)
+import NanoUI.Internal.Style (AlignX (..), AlignY (..), ItemsAlign (..), Justify (..), Padding (..), lineAlignFraction, windowMargin)
 import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp, foldUpTo, forUpTo_)
 import NanoUI.Internal.WidgetText
 
@@ -331,6 +331,19 @@ withSnapshot na depth n sizes act = do
   copyMutablePrimArray sizeSnap 0 (sizes s) 0 n
   act idxSnap sizeSnap
 
+-- | Leading offset and inter-child gap for a single-line container distributing
+-- leftover space according to 'Justify'.
+{-# INLINE justifyOffsets #-}
+justifyOffsets :: Justify -> Int -> Float -> Float -> Float -> (Float, Float)
+justifyOffsets j n avail used baseGap =
+  let !free = max 0 (avail - used)
+   in case j of
+        JustifyStart -> (0, baseGap)
+        JustifyCenter -> (free * 0.5, baseGap)
+        JustifyEnd -> (free, baseGap)
+        JustifyBetween ->
+          if n > 1 then (0, baseGap + free / fromIntegral (n - 1)) else (0, baseGap)
+
 positionRowFromParent ::
   SolveEnv ->
   Int ->
@@ -340,10 +353,18 @@ positionRowFromParent ::
   IO ()
 positionRowFromParent env@SolveEnv {seArena = na, seArrays = a} depth parent gap (Rect cx cy cw ch) = do
   pItems <- readItemsAlign a parent
+  pJustify <- readTagEnum a parent TagJustify
   n <- loadChildrenScratch na parent (flowChildSize env False cw ch)
-  distributeScratch na n cw (gap * fromIntegral (max 0 (n - 1))) True
-  withSnapshot na depth n fsOut $ \idxSnap outSnap ->
-    placeRowLine env depth pItems idxSnap outSnap n gap cx cy ch
+  let baseGaps = gap * fromIntegral (max 0 (n - 1))
+  distributeScratch na n cw baseGaps True
+  withSnapshot na depth n fsOut $ \idxSnap outSnap -> do
+    (startOff, stepGap) <-
+      if pJustify == JustifyStart || n <= 0
+        then pure (0, gap)
+        else do
+          used <- foldUpTo n (\t i -> (t +) <$> readPrimArray outSnap i) baseGaps
+          pure (justifyOffsets pJustify n cw used gap)
+    placeRowLine env depth pItems idxSnap outSnap n stepGap (cx + startOff) cy ch
 
 -- | Place the first @k@ snapshot children left to right from @x0@, each as
 -- wide as its @outSnap@ share, in a line @cross@ tall at @top@.
@@ -537,16 +558,24 @@ positionColumn ::
   Float ->
   Rect ->
   IO ()
-positionColumn env@SolveEnv {seArena = na, seArrays = a} !depth !parent !gap chrome scrollContent !px !pw box@(Rect _ _ cw ch) = do
+positionColumn env@SolveEnv {seArena = na, seArrays = a} !depth !parent !gap chrome scrollContent !px !pw box@(Rect cx cy cw ch) = do
   pItems <- readItemsAlign a parent
+  pJustify <- readTagEnum a parent TagJustify
   n <- loadChildrenScratch na parent (flowChildSize env True cw ch)
   -- The gaps come out of the height shared, as in a row, or grow children
   -- overflow the column by them.
   gapSum <-
     if chrome then columnGapSumScratch na n gap else pure (gap * fromIntegral (max 0 (n - 1)))
   distributeScratch na n (fromMaybe ch scrollContent) gapSum False
-  withSnapshot na depth n fsOut $ \idxSnap outSnap ->
-    placeColumnLine env depth pItems idxSnap outSnap n gap chrome scrollContent px pw box
+  withSnapshot na depth n fsOut $ \idxSnap outSnap -> do
+    (startOff, stepGap) <-
+      if pJustify == JustifyStart || isJust scrollContent || n <= 0
+        then pure (0, gap)
+        else do
+          used <- foldUpTo n (\t i -> (t +) <$> readPrimArray outSnap i) gapSum
+          pure (justifyOffsets pJustify n ch used gap)
+    let box' = if startOff == 0 then box else Rect cx (cy + startOff) cw (max 0 (ch - startOff))
+    placeColumnLine env depth pItems idxSnap outSnap n stepGap chrome scrollContent px pw box'
 
 -- | Place the first @k@ snapshot children top to bottom in the box, each as
 -- tall as its @outSnap@ share. Arguments after @gap@ are as for

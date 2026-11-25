@@ -33,14 +33,14 @@ module NanoUI.Internal.Monad.Core
   , resolveFontUi
   , lineWidthUi
   , truncateTextUi
-  , truncateTextMiddleUi
   , truncateTextWithUi
   , uiTime
   , uiTheme
   , styled
   , themed
   , disabledWhen
-  , setUiTheme
+  , setTheme
+  , followSystemTheme
   , systemAppearance
   , uiMousePos
   , mousePressed
@@ -87,8 +87,9 @@ import Effectful.Dispatch.Static (SideEffects (WithSideEffects), StaticRep, eval
 import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.BackendSession (BackendSession, SBackend)
 import NanoUI.Internal.Context (askHostIO, Host, Context (ctxNodeArena, ctxContainerStack, ctxIdCursor, ctxFontMetrics, ctxFontSize), currentTheme, damageFull, damageKey, damagePeers, damageRect, damageWidget, pushThemeScope, scopeRawTheme, routedInput, backendSession, getSystemAppearance, setThemeInView)
+import NanoUI.Internal.Context qualified as Ctx
 import NanoUI.Internal.Draw.Types (TextFont (..))
-import NanoUI.Internal.Font (FontMetrics, lineWidthIO, truncateTextIO, truncateTextMiddleIO, truncateTextWithIO)
+import NanoUI.Internal.Font (FontMetrics, lineWidthIO, truncateTextIO, truncateTextWithIO)
 import NanoUI.Internal.Frame.Node (resolveTextFont)
 import NanoUI.Internal.Id (enterKeyed, enterScope, scopeTag, IdContext, WidgetId)
 import NanoUI.Internal.Id.Cursor (peekWidgetId, readIdCursor, skipSiblingIds, takeWidgetId, writeIdCursor)
@@ -359,11 +360,6 @@ lineWidthUi fm txt = liftIO (lineWidthIO fm txt)
 truncateTextUi :: FontMetrics -> Float -> Text -> NanoUI Text
 truncateTextUi fm maxW txt = liftIO (truncateTextIO (lineWidthIO fm) maxW txt)
 
--- | Like 'truncateTextUi', placing the ellipsis in the middle so both prefix
--- and suffix remain readable (for module paths, symbols, or filenames).
-truncateTextMiddleUi :: FontMetrics -> Float -> Text -> NanoUI Text
-truncateTextMiddleUi fm maxW txt = liftIO (truncateTextMiddleIO (lineWidthIO fm) maxW txt)
-
 -- | Truncate one line of text to @maxW@ using an explicit 'TextEllipsis' mode.
 truncateTextWithUi :: TextEllipsis -> FontMetrics -> Float -> Text -> NanoUI Text
 truncateTextWithUi ell fm maxW txt = liftIO (truncateTextWithIO ell (lineWidthIO fm) maxW txt)
@@ -443,12 +439,18 @@ withPaintScope enter m = do
 -- a change limited to part of the view. Setting the same theme again is a
 -- no-op, so a view can pick its theme every frame:
 --
--- > setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
+-- > setTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
 --
--- This replaces a theme set by 'NanoUI.Internal.Context.followSystemTheme'.
-{-# INLINE setUiTheme #-}
-setUiTheme :: Theme -> NanoUI ()
-setUiTheme th = withContext (\ctx -> setThemeInView ctx th)
+-- This replaces a theme set by 'followSystemTheme'.
+{-# INLINE setTheme #-}
+setTheme :: Theme -> NanoUI ()
+setTheme th = withContext (`setThemeInView` th)
+
+-- | Switch the session's theme automatically whenever the OS light/dark
+-- preference changes. Calling 'setTheme' returns to a fixed theme.
+{-# INLINE followSystemTheme #-}
+followSystemTheme :: (Maybe Appearance -> Theme) -> NanoUI ()
+followSystemTheme pick = withContext (`Ctx.followSystemTheme` pick)
 
 -- | System light or dark preference, or 'Nothing' when the backend does not
 -- report it (RGFW never does). A change repaints the whole window.

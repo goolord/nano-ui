@@ -107,7 +107,7 @@ separatorExample =
 
 -- ANCHOR: spacer
 spacerExample =
-  rowWith (fillW . alignMid) $ do
+  rowWith (fillW . alignMiddle) $ do
     label "Left"
     spacer (Grow 1) Fit
     label "Right"
@@ -287,7 +287,7 @@ alignTopExample =
 alignMidExample =
   panelWith (fixedWH 300 110 . padAll 10) $
     rowWith (fillW . fillH . gap 8) $
-      void (buttonWith (alignMid . fixedW 140) "alignMid")
+      void (buttonWith (alignMiddle . fixedW 140) "alignMiddle")
 -- ANCHOR_END: alignmid
 
 -- ANCHOR: alignbottom

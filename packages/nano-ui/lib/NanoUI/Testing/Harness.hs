@@ -34,15 +34,10 @@ module NanoUI.Testing.Harness
   , covers
   , clipCovers
   , damageCovers
-  , assertScrollGutterPad
-  , assertWheelTitlePinned
   , findGrabHover
   , cursorOver
   , dragWindowEdge
   , vertUv
-  , checkLabelAlignEndInk
-  , checkIdleFullDamage
-  , windowTitleGrab
   , runDragFrom
   , DemoSpan
   , spanCenter
@@ -89,13 +84,12 @@ import GHC.Stats (RTSStats (..), getRTSStats)
 import NanoUI
 import NanoUI.Backend
 import NanoUI.Internal.Context (ctxFocusId, ctxNodeArena, takeWakes)
-import NanoUI.Internal.Font (alignedTextPen, textInkEnd)
 import NanoUI.Internal.Layout.Arena (arenaCount, getNodeRect, getNodeType, getWidgetId)
 import NanoUI.Internal.Types (clamp)
 import NanoUI.Shortcut (Shortcut (..))
 import NanoUI.Var (peekVar)
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertJustM, assertLt, bump, evalUi, run2Frames, withInput)
+import NanoUI.Testing.Assert (assert, evalUi, run2Frames, withInput)
 import System.Environment (lookupEnv)
 import System.Mem (performGC)
 import System.Timeout (timeout)
@@ -461,48 +455,6 @@ spanYOf lbl spans = [y | (Rect _ y _ _, txt, _, _, _) <- spans, txt == lbl]
 spanXOf :: T.Text -> [(Rect, T.Text, a, b, c)] -> [Float]
 spanXOf lbl spans = [x | (Rect x _ _ _, txt, _, _, _) <- spans, txt == lbl]
 
--- | Check that a child's right edge ends at the scroller's content edge,
--- given gutter width and end padding in logical pixels.
-assertScrollGutterPad ::
-  HasCallStack
-  => IORef Int
-  -> Context
-  -> WidgetId
-  -> Response
-  -> Float
-  -> Float
-  -> IO ()
-assertScrollGutterPad failed ctx sid child gutter endPad =
-  assertJustM failed (getPrevRect ctx sid) $ \(Rect sx _ sw _) -> do
-    let
-      Rect cx _ cw _ = respRect child
-      contentRight = sx + sw - endPad - gutter
-    assert failed (cx + cw >= contentRight - 0.5)
-    assert failed (cx + cw <= contentRight + 0.01)
-
--- | Scroll an overlay by one wheel step and require its title to stay fixed
--- while its first body line moves upward (if it is still shown).
-assertWheelTitlePinned ::
-  HasCallStack
-  => IORef Int
-  -> Context
-  -> Input
-  -> NanoUI a
-  -> T.Text
-  -> T.Text
-  -> V2
-  -> IO ()
-assertWheelTitlePinned failed ctx inp0 ui title line1 wheelAt = do
-  let wheel = inp0 {inputMousePos = wheelAt, inputScroll = V2 0 1}
-  spans0 <- collectOverlayTextSpans ctx inp0
-  _ <- runFrame ctx wheel ui
-  spans1 <- collectOverlayTextSpans ctx wheel
-  case (spanYOf title spans0, spanYOf title spans1, spanYOf line1 spans0) of
-    (y0 : _, y1 : _, b0 : _) -> do
-      assertEq failed y1 y0
-      forM_ (listToMaybe (spanYOf line1 spans1)) $ \b1 -> assertLt failed b1 b0
-    _ -> assert failed False
-
 -- | Run a frame with the pointer at @pos@ and return the resulting 'UiCursorKind'.
 cursorOver :: Context -> Input -> NanoUI a -> V2 -> IO UiCursorKind
 cursorOver ctx inp ui pos = do
@@ -539,43 +491,6 @@ dragWindowEdge ctx inp0 ui grab dest = do
 -- 'drawVertexCount' and the borrowed draw buffers must still be valid.
 vertUv :: DrawData -> Int -> IO (Float, Float)
 vertUv dd i = withForeignPtr (drawVertices dd) $ \vp -> (\v -> (vU v, vV v)) <$> vertexAt vp i
-
--- | Require the transition to idle input to need a frame, then require that
--- frame's damage to cover the whole window.
-checkIdleFullDamage ::
-  HasCallStack => IORef Int -> Context -> Input -> Input -> NanoUI a -> IO ()
-checkIdleFullDamage failed ctx inpAfter inpIdle ui = do
-  need <- needsRedraw ctx inpAfter inpIdle
-  assert failed need
-  _ <- runFrame ctx inpIdle ui
-  dmg <- takeDamage ctx
-  assert failed (dmg == DamageFull)
-
--- | Check that right-aligned labels share an ink edge despite different glyph advances.
--- Lives here rather than with its test case because the pen and ink helpers
--- are internal to the library.
-checkLabelAlignEndInk :: IORef Int -> IO ()
-checkLabelAlignEndInk failed =
-  forM_ ["10", "1i", "1."] $ \txt -> do
-    let (tx, _) = alignedTextPen AlignEnd 0 boxW 0 fm txt
-    when (abs (tx + textInkEnd fm txt - boxW) > 0.01) $ bump failed
-  where
-    boxW = 100
-    -- Narrow 'i', '.' and space advances, so the font is not taken as
-    -- monospace, with ink offset inside each glyph box.
-    glyph xoff gw = Just (GlyphQuad xoff 0 gw 10 0 0 1 1)
-    fm =
-      (monospaceMetrics 10)
-        { fmAdvance = \c -> if c == 'i' || c == '.' || c == ' ' then 4 else 10
-        , fmGlyph = \c -> case c of
-            'i' -> glyph 0.5 3
-            '.' -> glyph 1 1
-            _ -> glyph 1 8
-        }
-
--- | Point inside the standard floating-window title bar, away from its close button.
-windowTitleGrab :: Rect -> V2
-windowTitleGrab (Rect x0 y0 _ _) = V2 (x0 + 24) (y0 + padT windowPad + 19.5)
 
 -- | Run press and held-move frames from one point to another. Leaves the button
 -- held; the test supplies the release frame when needed.

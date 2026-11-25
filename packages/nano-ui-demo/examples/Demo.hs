@@ -43,6 +43,8 @@ import NanoUI.Adornment qualified as A
 import NanoUI.Diagrams
 import NanoUI.Path qualified as P
 import NanoUI.Shortcut
+import NanoUI.Themes
+import NanoUI.Widgets.PaneGrid
 import System.Environment (lookupEnv)
 import Text.Printf (printf)
 
@@ -164,9 +166,9 @@ demoUi st = do
   scrollWith (padAll 10 . grow) $
     columnWith (tight . gap 10 . fillW) $ do
       panelWith (padXY 16 12 . fillW) $
-        rowWith (tight . gap 12 . alignMid . fillW) $ do
-          labelWith (tight . alignMid . fontMedium . fontSize 22) "nano-ui"
-          labelWith (tight . alignMid . fontMuted) (backendLabel <> " / Widget sampler")
+        rowWith (tight . gap 12 . alignMiddle . fillW) $ do
+          labelWith (tight . alignMiddle . fontMedium . fontSize 22) "nano-ui"
+          labelWith (tight . alignMiddle . fontMuted) (backendLabel <> " / Widget sampler")
           flex
           -- F1 and F12 do what the buttons do.
           about <- button "About"
@@ -181,7 +183,7 @@ demoUi st = do
         -- Only the selected tab's body runs.
         panelWith (padAll 16 . gap 12 . fillW) $
           enumTabs activeTab (tabView st vals)
-  window debugOpen "Debug" debugBody
+  floatingWindow debugOpen "Debug" debugBody
   modal aboutOpen "About" $ do
     heading "nano-ui"
     muted "Immediate-mode GUI for Haskell."
@@ -208,8 +210,8 @@ statePane :: DemoState -> Values -> Bool -> NanoUI ()
 statePane st Values {..} wide = do
   open <- useVar False
   shown <- (wide ||) <$> readVar open
-  rowWith (tight . gap 12 . alignMid . fillW) $ do
-    labelWith (tight . alignMid . fontMedium) "State"
+  rowWith (tight . gap 12 . alignMiddle . fillW) $ do
+    labelWith (tight . alignMiddle . fontMedium) "State"
     flex
     unless wide $
       whenM (button (if shown then "Hide values" else "Show values")) (modifyVar open not)
@@ -221,12 +223,12 @@ statePane st Values {..} wide = do
     value "Volume" (T.pack . show . (round :: Float -> Int)) valVolume
     value "Quality" (qualities !!) valQuality
     -- The swatch sits beside the value, so the key lines up with the rows.
-    rowWith (tight . gap 4 . alignMid . fillW) $ do
+    rowWith (tight . gap 4 . alignMiddle . fillW) $ do
       accent <- readVar (demoAccentColor st)
-      labelWith (tight . alignMid . fontMuted . minW 88) "Accent"
+      labelWith (tight . alignMiddle . fontMuted . minW 88) "Accent"
       flex
-      box (alignMid . fixedWH 14 14) accent
-      labelWith (tight . alignMid) (colorToHexA accent)
+      box (alignMiddle . fixedWH 14 14) accent
+      labelWith (tight . alignMiddle) (colorToHexA accent)
     separator
     value "Theme" (fst . (themes !!)) valTheme
     value "Font" brief valFont
@@ -307,11 +309,11 @@ basicControls Values {..} = do
 -- frame costs nothing while it stays the same.
 themes :: [(Text, NanoUI ())]
 themes =
-  [ ("Default", setUiTheme defaultTheme)
-  , ("Tomorrow Night Min", setUiTheme tomorrowNightMinDarkTheme)
-  , ("Tomorrow Light", setUiTheme tomorrowMinLightTheme)
-  , ("Tomorrow at Midnight Min", setUiTheme tomorrowMidnightMinDarkTheme)
-  , ("Follow system", setUiTheme . defaultThemeFor =<< systemAppearance)
+  [ ("Default", setTheme defaultTheme)
+  , ("Tomorrow Night Min", setTheme tomorrowNightMinDarkTheme)
+  , ("Tomorrow Light", setTheme tomorrowMinLightTheme)
+  , ("Tomorrow at Midnight Min", setTheme tomorrowMidnightMinDarkTheme)
+  , ("Follow system", setTheme . defaultThemeFor =<< systemAppearance)
   ]
 
 appearanceControls :: DemoState -> Var Int -> Var Text -> NanoUI ()
@@ -334,7 +336,7 @@ appearanceControls st theme font = do
 popupsAndMenus :: Var Text -> NanoUI ()
 popupsAndMenus picked = do
   heading "Popups & Menus"
-  rowWith (tight . gap 12 . alignMid . fillW) $ do
+  rowWith (tight . gap 12 . alignMiddle . fillW) $ do
     tip <- button' "Hover for Tooltip"
     tooltip tip "This is a floating tooltip widget!"
     follow <- button' "Tooltip at Pointer"
@@ -410,7 +412,7 @@ imageFits owner = do
     rowWith (wrap . tight . gap 12 . fillW) $ do
       for_ [minBound .. maxBound] $ \fit -> thumb defaultImageConfig {icFit = fit} (enumLabel fit)
       thumb defaultImageConfig {icFit = FitCover, icCrop = Just (Rect 0 0 48 48)} "Crop"
-    rowWith (tight . gap 12 . alignMid . fillW) $ do
+    rowWith (tight . gap 12 . alignMiddle . fillW) $ do
       turn <- readVar angleVar
       fade <- readVar fadeVar
       zoom <- readVar scaleVar
@@ -445,11 +447,11 @@ iconsAndAdornments (Right Icons {..}) = do
   secretShown <- useVar False
   -- Single-color SVGs inherit the current text color or fontColor.
   tint <- themeAccent <$> uiTheme
-  rowWith (tight . gap 12 . alignMid) $
+  rowWith (tight . gap 12 . alignMiddle) $
     for_ [iconClock, iconCheck, iconStar, iconFace] $ \icon -> do
       svgIcon 20 icon
       svgIconWith (fixedWH 32 32 . fontColor tint) icon
-  rowWith (tight . gap 12 . alignMid) $ do
+  rowWith (tight . gap 12 . alignMiddle) $ do
     -- Any view can be a button's content; a spinner animates while shown.
     isSaving <- readVar saving
     whenM (buttonContent (if isSaving then spinnerWith' id 14 >> label "Saving" else svgIcon 16 iconCheck >> label "Save")) $
@@ -460,7 +462,7 @@ iconsAndAdornments (Right Icons {..}) = do
       defaultTextInputConfig
         { ticPlaceholder = "Weight"
         , ticAdornments = A.leading (A.icon iconClock) <> A.trailing (A.affix "kg")
-        , ticLayout = fixedW 200 (ticLayout defaultTextInputConfig)
+        , ticLayout = fixedW 200
         }
       weight
     -- A control: the Show button takes its own presses, and the field keeps
@@ -471,7 +473,7 @@ iconsAndAdornments (Right Icons {..}) = do
         { ticPlaceholder = "Password"
         , ticPassword = not shown
         , ticAdornments = A.trailing (A.control (whenM (buttonWith tight (if shown then "Hide" else "Show")) (modifyVar secretShown not)))
-        , ticLayout = fixedW 220 (ticLayout defaultTextInputConfig)
+        , ticLayout = fixedW 220
         }
       secret
 
@@ -521,7 +523,7 @@ typographyTab = do
   columnWith (tight . gap 12 . fillW) $ do
     muted "Preview text"
     textInput sample
-  rowWith (tight . gap 12 . fillW . alignMid) $ do
+  rowWith (tight . gap 12 . fillW . alignMiddle) $ do
     checkbox "Bold" isBold
     checkbox "Italic" isItalic
     checkbox "Underline" isUnderlined
@@ -569,9 +571,9 @@ styleRows :: Float -> [(Text, LayoutModifier, Text)] -> NanoUI ()
 styleRows nameW rows =
   columnWith (tight . gap 6 . fillW) $
     for_ rows $ \(name, style, sample) ->
-      rowWith (tight . gap 12 . alignMid . fillW) $ do
-        labelWith (tight . alignMid . fixedW nameW . fontMono . fontMuted) name
-        labelWith (alignMid . style) sample
+      rowWith (tight . gap 12 . alignMiddle . fillW) $ do
+        labelWith (tight . alignMiddle . fixedW nameW . fontMono . fontMuted) name
+        labelWith (alignMiddle . style) sample
 
 -- | Mixed styles and links in one wrapped paragraph.
 richTextSample :: NanoUI ()
@@ -605,7 +607,7 @@ listTab Values {valTreeItem = selected, valQuery = query} = do
   when (respChanged searchResp) (writeVar query =<< readVar search)
   committed <- readVar query
   let matches = filter (matchesQuery committed) demoPeople
-  rowWith (tight . gap 12 . fillW . alignMid) $ do
+  rowWith (tight . gap 12 . fillW . alignMiddle) $ do
     muted ("Committed: " <> if T.null committed then "(none)" else committed)
     flex
     muted ("Matches: " <> T.pack (show (length matches)))
@@ -657,8 +659,8 @@ tabsTab docsVar = do
   -- Two header-only strips control the style and placement of the tab view below.
   let segmented = defaultTabsConfig {tabsStyle = TabSegmented}
   responsiveRowCol 760 (tight . gap 12 . fillW) $ do
-    field "Style" (boundedTabBarConfigured segmented enumLabel look)
-    field "Placement" (boundedTabBarConfigured segmented enumLabel place)
+    field "Style" (enumTabBarByConfigured segmented enumLabel look)
+    field "Placement" (enumTabBarByConfigured segmented enumLabel place)
   docs <- readVar docsVar
   let fresh = 1 + maximum (3 : docs)
       -- Trailing actions sit right after the tab headers.
@@ -714,9 +716,9 @@ paneView showHeader pid pane = do
       title = "Pane " <> T.pack (show pid) <> if maximized then "  (maximized)" else ""
   panelWith (padAll 10 . gap 10 . grow) $ do
     when showHeader $ do
-      rowWith (tight . gap 6 . alignMid . fillW) $ do
-        box (alignMid . fixedWH 3 16) . themeAccent =<< uiTheme
-        labelWith (tight . alignMid . fontMedium) title
+      rowWith (tight . gap 6 . alignMiddle . fillW) $ do
+        box (alignMiddle . fixedWH 3 16) . themeAccent =<< uiTheme
+        labelWith (tight . alignMiddle . fontMedium) title
         flex
         whenM (button "+") (void (pgcSplit pane AxisV))
         whenM (button "=") (void (pgcSplit pane AxisH))
@@ -746,8 +748,8 @@ plotsTab cache = do
     theme <- uiTheme
     canvasConfigured
       defaultCanvasConfig
-        { canvasLayout = fixedWH 360 120 defaultLayout
-        , canvasContent = contentKeyOf (map (keyPart . colorToWord32) (themeSeries theme))
+        { canvasLayout = fixedWH 360 120
+        , canvasContent = contentKeyOf (map keyPart (themeSeries theme))
         }
       (pathSample theme)
 

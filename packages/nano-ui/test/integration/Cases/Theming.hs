@@ -34,7 +34,7 @@ frames n ctx ui = do
 -- disabled; a tone combines with a face in either order, stored apart in the node.
 runWarningToneTest :: Context -> IORef Int -> IO ()
 runWarningToneTest ctx failed = do
-  theme <- getTheme ctx
+  theme <- getThemeIO ctx
   let amber = themeWarning theme
       warned = labelWith (fontTone Warning)
       own = colorRGBA 1 2 3 255
@@ -43,14 +43,14 @@ runWarningToneTest ctx failed = do
     labelWith (fontMono . fontTone Warning) "mono warning"
     labelWith (fontTone Warning . fontMono) "warning mono"
     labelWith fontMuted "muted"
-    labelWith (\l -> l {layoutFontVariant = FontDanger}) "legacy danger"
+    labelWith fontDanger "danger tone"
     labelWith (fontTone Danger . fontColor own) "own colour"
     (,,) <$> styled warning (button' "Warn") <*> styled destructive (button' "Delete") <*> button' "Plain"
   let fills r = fillsIn (respRect r) quads
       faded = themeWarning (disabledTheme theme)
       fgs =
         [ ("Careful", amber), ("Broken", themeDanger theme), ("Faded", faded), ("mono warning", amber)
-        , ("warning mono", amber), ("muted", themeMuted theme), ("legacy danger", themeDanger theme)
+        , ("warning mono", amber), ("muted", themeMuted theme), ("danger tone", themeDanger theme)
         , ("own colour", own)
         ]
       regular = (,) FontRegular . Just
@@ -130,13 +130,13 @@ runFollowSystemThemeTest ctx failed = do
         assert failed (themeWarning theme `elem` fillsIn (respRect warn) quads)
         pure quads
   setSystemAppearance ctx (Just AppearanceLight)
-  followSystemTheme ctx (lightDark defaultLightTheme defaultTheme)
-  getTheme ctx >>= assertEq failed defaultLightTheme
+  followSystemThemeIO ctx (lightDark defaultLightTheme defaultTheme)
+  getThemeIO ctx >>= assertEq failed defaultLightTheme
   _ <- frames 2 ctx ui >>= painted defaultLightTheme
   wakes <- newIORef (0 :: Int)
   setWakeLoop ctx (modifyIORef' wakes (+ 1))
   setSystemAppearance ctx (Just AppearanceDark)
-  getTheme ctx >>= assertEq failed defaultTheme
+  getThemeIO ctx >>= assertEq failed defaultTheme
   getSystemAppearance ctx >>= assertEq failed (Just AppearanceDark)
   readIORef wakes >>= assert failed . (> 0)
   checkIdleFullDamage failed ctx inp inp ui
@@ -148,13 +148,13 @@ runFollowSystemThemeTest ctx failed = do
   readIORef wakes >>= assertEq failed 0
   -- Back to light, then to an unknown appearance, for which 'lightDark' picks dark.
   setSystemAppearance ctx (Just AppearanceLight)
-  getTheme ctx >>= assertEq failed defaultLightTheme
+  getThemeIO ctx >>= assertEq failed defaultLightTheme
   setSystemAppearance ctx (Just AppearanceLight) >> setSystemAppearance ctx Nothing
-  getTheme ctx >>= assertEq failed defaultTheme
-  setTheme ctx tomorrowMidnightMinDarkTheme
+  getThemeIO ctx >>= assertEq failed defaultTheme
+  setThemeIO ctx tomorrowMidnightMinDarkTheme
   warmup ctx inp ui
   setSystemAppearance ctx (Just AppearanceLight)
-  getTheme ctx >>= assertEq failed tomorrowMidnightMinDarkTheme
+  getThemeIO ctx >>= assertEq failed tomorrowMidnightMinDarkTheme
   checkIdleFullDamage failed ctx inp inp ui
 
 -- | A view sees an appearance change next frame; setting its theme from it every frame
@@ -165,7 +165,7 @@ runViewPicksThemeTest ctx failed = do
       picking extra = column $ do
         appearance <- systemAppearance
         label (shown appearance)
-        setUiTheme (lightDark defaultLightTheme defaultTheme appearance)
+        setTheme (lightDark defaultLightTheme defaultTheme appearance)
         extra >> button "Go"
       settles ui = do
         warmup ctx inp ui
@@ -176,21 +176,21 @@ runViewPicksThemeTest ctx failed = do
         needsRedraw ctx inp inp >>= assert failed
         _ <- warmup2 ctx inp (picking extra)
         collectTextSpans ctx >>= assertSpansHas failed (shown (Just appearance))
-        getTheme ctx >>= assertEq failed theme
+        getThemeIO ctx >>= assertEq failed theme
         settles (picking extra)
   warmup ctx inp (picking (pure ()))
   collectTextSpans ctx >>= assertSpansHas failed "unknown"
   switchTo AppearanceLight defaultLightTheme (pure ())
   switchTo AppearanceDark defaultTheme (pure ())
   -- Two themes per frame: the last wins, with one repaint.
-  _ <- warmup2 ctx inp (picking (setUiTheme tomorrowMinLightTheme))
-  getTheme ctx >>= assertEq failed tomorrowMinLightTheme
-  settles (picking (setUiTheme tomorrowMinLightTheme))
+  _ <- warmup2 ctx inp (picking (setTheme tomorrowMinLightTheme))
+  getThemeIO ctx >>= assertEq failed tomorrowMinLightTheme
+  settles (picking (setTheme tomorrowMinLightTheme))
   -- A view's theme overrides following the system.
-  followSystemTheme ctx (lightDark defaultLightTheme defaultTheme)
-  _ <- warmup2 ctx inp (setUiTheme tomorrowMinLightTheme >> button "Go")
+  followSystemThemeIO ctx (lightDark defaultLightTheme defaultTheme)
+  _ <- warmup2 ctx inp (setTheme tomorrowMinLightTheme >> button "Go")
   setSystemAppearance ctx (Just AppearanceLight)
-  getTheme ctx >>= assertEq failed tomorrowMinLightTheme
+  getThemeIO ctx >>= assertEq failed tomorrowMinLightTheme
   readIORef (ctxThemeFor ctx) >>= assert failed . isNothing
 
 -- | 'popupStyle' colours a modal's surface and not the panels inside it.
@@ -202,6 +202,6 @@ runPopupStyleTest ctx failed = do
         fmap respRect . snd <$> modal' (constVar True) "Dialog" body
   (inner, draw) <- warmupDraw ctx inp ui
   quads <- drawQuads draw
-  panelBg <- styleBg . themePanel <$> getTheme ctx
+  panelBg <- styleBg . themePanel <$> getThemeIO ctx
   assert failed (sea `elem` map snd quads)
   assertJust failed inner $ \r -> assert failed (panelBg `elem` fillsIn r quads)

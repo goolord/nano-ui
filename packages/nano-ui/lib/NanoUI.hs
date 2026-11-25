@@ -19,17 +19,24 @@
 -- Run a view with a backend: @runSdlApp@ from @nano-ui-sdl@ or @runRgfwApp@
 -- from @nano-ui-rgfw@.
 --
--- This module re-exports the view API. For custom backends or frame harnesses
--- (input construction, font callbacks, damage tracking, and layout metrics),
--- see "NanoUI.Backend".
+-- This module re-exports the core view API. Companion modules inside
+-- @nano-ui@ cover specialized subsystems:
+--
+-- * "NanoUI.Widgets.PaneGrid" for split-pane workspaces.
+-- * "NanoUI.Widgets.TextDocument" for multi-line text document queries and edits.
+-- * "NanoUI.Widgets.Custom" for authoring custom widgets ('CustomWidgetSpec', 'DrawOp', 'bindVar').
+-- * "NanoUI.Themes" for extra theme presets and Base16 palettes.
+-- * "NanoUI.Chrome" for frameless window title-bar chrome.
+-- * "NanoUI.Shader.Raw" for hand-written GPU shader programs and std140 metadata.
+-- * "NanoUI.Backend" for custom backends and frame harnesses.
 --
 -- = Conventions
 --
--- * Simple widgets return 'Bool' (buttons, menu items) or @()@ (inputs, text,
---   decoration).
+-- * Simple widgets return 'Bool' (buttons, menu items, selectable rows) or @()@
+--   (inputs, text, decoration).
 -- * A primed name returns the widget's 'Response' as well or instead, for
 --   hover state, geometry, tooltips, and change or submit flags:
---   @button'@, @slider'@.
+--   @button'@, @slider'@, @scrollWith'@.
 -- * Input widgets take a mutable 'Var' holding their state: @textInput draft@
 --   reads and mutates @draft@ in place. Pass @'constVar' x@ for a read-only
 --   value. Transient UI state such as caret position, an active drag, or an
@@ -110,9 +117,7 @@ module NanoUI
     -- wrap each item in 'withKey' with a sibling-unique key so state follows
     -- the key rather than the index.
   , scope
-  , keyedTag
   , withKey
-  , nextId
   , currentId
   , WidgetId (..)
 
@@ -130,9 +135,6 @@ module NanoUI
   , respClickedWith
   , respRightPressed
   , respRightClicked
-  , setChanged
-  , setClicked
-  , setSubmitted
 
     -- * Containers
   , row
@@ -141,11 +143,10 @@ module NanoUI
   , column
   , columnWith
   , columnWith'
-  , hstack
-  , vstack
   , grid
   , gridWith
   , gridWith'
+  , clipBox
   , panel
   , panelWith
   , panelWith'
@@ -153,10 +154,20 @@ module NanoUI
   , callout
   , calloutWith
   , calloutWith'
+  , calloutTone
+  , calloutToneWith
+  , calloutToneWith'
   , toolbar
   , center
+  , selectableRow
+  , selectableRow'
+  , selectableRowWith
+  , selectableRowWith'
+  , collapsing
+  , collapsingWith
   , responsive
   , responsiveRowCol
+  , withContainerQuery
   , withContainerSize
   , withContainerWidth
   , responsiveIn
@@ -164,16 +175,19 @@ module NanoUI
   , ScrollPolicy (..)
   , ScrollConfig (..)
   , defaultScrollConfig
+  , scroll2DConfig
   , scroll
   , scrollWith
+  , scrollWith'
   , scroll2D
   , scroll2DWith
-  , scrollArea
-  , scrollArea2D
+  , scroll2DWith'
   , scrollConfigured
-  , scrollAreaConfigured
+  , scrollConfigured'
   , separator
   , spacer
+  , spacerW
+  , spacerH
   , flex
   , layers
   , layersWith
@@ -241,16 +255,16 @@ module NanoUI
   , toggleButtonWith'
   , radio
   , radio'
-  , boundedRadio
-  , boundedRadio'
+  , enumRadioBy
+  , enumRadioBy'
   , enumRadio
   , enumRadio'
   , select
   , select'
   , selectWith
   , selectWith'
-  , boundedSelect
-  , boundedSelect'
+  , enumSelectBy
+  , enumSelectBy'
   , enumSelect
   , enumSelect'
   , slider
@@ -285,7 +299,6 @@ module NanoUI
   , textAreaDocument'
   , textAreaDocumentWith
   , textAreaDocumentWith'
-  , module NanoUI.Widgets.TextDocument
   , colorPicker
   , colorPicker'
   , colorPickerRGBA
@@ -332,11 +345,11 @@ module NanoUI
   , tabBar'
   , tabBarConfigured
   , tabBarConfigured'
-  , boundedTabs
-  , boundedTabsConfigured
+  , enumTabsBy
+  , enumTabsByConfigured
   , enumTabs
-  , boundedTabBar
-  , boundedTabBarConfigured
+  , enumTabBarBy
+  , enumTabBarByConfigured
   , enumTabBar
   , TreeItem (..)
   , tree
@@ -365,12 +378,11 @@ module NanoUI
   , Cell (..)
   , textCell
   , cellWidget
-  , widgetCell
   , cellSort
   , cellSortKey
   , cellSortNum
   , cellSortInt
-  , withText
+  , cellWidthText
 
     -- * Overlays
   , modal
@@ -381,8 +393,10 @@ module NanoUI
   , modalPanel'
   , modalPanelWith
   , modalPanelWith'
-  , window
-  , window'
+  , floatingWindow
+  , floatingWindow'
+  , floatingWindowWith
+  , floatingWindowWith'
   , PopupAnchor (..)
   , PopupPlacement (..)
   , PopupConfig (..)
@@ -407,41 +421,6 @@ module NanoUI
   , tooltipConfigured
   , tooltipWidgetConfigured
 
-    -- * Window caption
-
-    -- | Minimize, maximize, and close buttons for custom title bars, along
-    -- with hit-test geometry so the backend can drag and resize the window.
-  , CaptionGlyph (..)
-  , CaptionAction (..)
-  , CaptionConfig (..)
-  , defaultCaptionConfig
-  , captionButton
-  , captionButtons
-  , captionButtonsConfigured
-  , captionBarHeight
-  , dragSpans
-  , WindowFrame (..)
-  , defaultWindowFrame
-  , windowFrame
-
-    -- * Pane grids
-  , PaneGridConfig (..)
-  , defaultPaneGridConfig
-  , PaneGridCtx (..)
-  , PaneView (..)
-  , PaneGridResponse (..)
-  , PaneEdge (..)
-  , PaneDropLocation (..)
-  , PaneGridDrop, pgdLocation, pgdRect, pgdPane
-  , commitPaneDrop
-  , GridAxis (..)
-  , CenterDropMode (..)
-  , GridNode (..)
-  , PaneTree (..)
-  , validateGridTree
-  , paneGrid
-  , paneDragHandle
-
     -- * Rich text
   , module NanoUI.Widgets.RichText
 
@@ -465,38 +444,25 @@ module NanoUI
   , svgIconConfigured'
   , svgSize
   , box
-  , drawing
-  , drawingVersioned
-  , drawingCached
 
     -- ** Fragment shaders
 
     -- | Pure, phantom-typed fragment shaders for leaf surfaces ('shaderBox',
-    -- 'shaderConfigured') and subtree effects ('withShader'). Uniform records
-    -- derive 'Uniforms' via 'GHC.Generics' for std140 packing and automatic
-    -- paint-hash damage tracking. Use the @nano-ui-shader@ package to author
-    -- multi-backend fragment shaders in typed Haskell, or 'rawShader' for
-    -- hand-written backend sources.
+    -- 'shaderConfigured') and subtree effects ('withShader', 'withShader'').
+    -- Uniform records derive 'Uniforms' via 'GHC.Generics' for std140 packing
+    -- and automatic paint-hash damage tracking. Use @nano-ui-shader@ to author
+    -- multi-backend fragment shaders in typed Haskell, or "NanoUI.Shader.Raw"
+    -- for hand-written backend sources.
   , V3 (..)
   , V4 (..)
-  , GpuType (..)
-  , UniformField (..)
   , Uniforms (..)
-  , uniformLayout
-  , uniformSize
   , ShaderKind (..)
   , IsNodeEffect
   , ShaderCapabilities (..)
   , askShaderCapabilities
-  , ShaderProgram (..)
-  , emptyShaderProgram
-  , CpuFragCtx (..)
-  , CpuShaderEval
   , Shader
   , contramapShader
   , fixUniform
-  , rawShader
-  , rawLayerShader
   , ShaderConfig (..)
   , defaultShaderConfig
   , shaderBox
@@ -504,16 +470,9 @@ module NanoUI
   , shaderConfigured
   , shaderConfigured'
   , withShader
+  , withShader'
   , withShaderWith
-    -- | 'DrawOp' values use window coordinates. Construct them through the
-    -- canvas API ('canvas', 'runCanvasFor') rather than directly; constructors
-    -- after 'DrawTextStyled' are internal encodings of paths, clips, and
-    -- transforms and may change.
-  , DrawOp (..)
-  , TextFont (..)
-  , defaultTextFont
-  , DrawingBuild
-  , shiftDrawOp
+  , withShaderWith'
 
     -- * Image fit, opacity and rotation
 
@@ -538,24 +497,81 @@ module NanoUI
   , imageConfigured'
   , fitRect
 
-    -- * Custom widgets
+    -- * Canvas and built-in custom widgets
 
-    -- | "NanoUI.Widgets.Custom" also provides canvas-drawn widgets: toggle
-    -- switches, knobs, progress bars, spinners, and sparklines.
-    --
-    -- Measure callbacks and 'cdcFont' provide 'FontMetrics' for sizing text
-    -- via 'lineWidth' and 'fmLineHeight'. 'widgetCursor' sets the cursor shape
-    -- when hovered.
-    --
-    -- Paths, transforms, fill rules, strokes, and paints for 'drawPath',
-    -- 'drawStrokePath', 'drawPathWith', 'drawStrokePathWith', and
-    -- 'withTransform' live in "NanoUI.Path" (designed for qualified import).
-  , module NanoUI.Widgets.Custom
+    -- | 'canvas' draws 2D shapes, text, images, and "NanoUI.Path" vector paths
+    -- into a laid-out rectangle. Authoring full custom widgets with
+    -- 'NanoUI.Widgets.Custom.CustomWidgetSpec', 'NanoUI.Widgets.Custom.DrawOp',
+    -- and 'NanoUI.Widgets.Custom.bindVar' lives in "NanoUI.Widgets.Custom".
+  , CanvasM
+  , canvas
+  , CanvasConfig (..)
+  , defaultCanvasConfig
+  , canvasConfigured
+  , CustomDrawContext (..)
+  , drawContext
+  , drawRect
+  , drawRoundedRect
+  , drawCircle
+  , drawStroke
+  , drawStrokeRoundedRect
+  , drawStrokeCircle
+  , drawStrokeAA
+  , drawQuadGradient
+  , drawLinearGradientH
+  , drawLinearGradientV
+  , drawImage
+  , drawImageUV
+  , ImageDraw (..)
+  , imageDraw
+  , drawImageWith
+  , TextFont (..)
+  , defaultTextFont
+  , drawText
+  , drawTextWith
+  , drawTextClipped
+  , drawTextClippedWith
+  , drawPath
+  , drawPathWith
+  , drawStrokePath
+  , drawStrokePathWith
+  , withTransform
+  , withClip
+  , contentKey
+  , contentKeyOf
+  , KeyPart
+  , keyPart
+  , useDrag2DOn
+  , Drag2D (..)
+  , useWheelDeltaOn
+  , knob
+  , knob'
+  , knobWith
+  , knobWith'
+  , toggleSwitch
+  , toggleSwitch'
+  , toggleSwitchWith
+  , toggleSwitchWith'
+  , circularProgress
+  , circularProgress'
+  , circularProgressWith
+  , circularProgressWith'
+  , spinner
+  , spinner'
+  , spinnerWith
+  , spinnerWith'
+  , progressBar
+  , progressBar'
+  , progressBarWith
+  , progressBarWith'
+  , sparkline
+  , sparkline'
+  , sparklineWith
+  , sparklineWith'
   , FontMetrics (fmLineHeight, fmAscent)
   , lineWidth
   , lineWidthUi
   , truncateTextUi
-  , truncateTextMiddleUi
   , truncateTextWithUi
   , uiFontMetrics
   , uiFontSize
@@ -569,7 +585,7 @@ module NanoUI
     -- 'withCursorShape' sets a fallback cursor for a subtree when no inner
     -- widget overrides it:
     --
-    -- > withCursorShape UiCursorMove (drawing (fixedWH 320 200) board)
+    -- > withCursorShape UiCursorMove (canvas (fixedWH 320 200) board)
     --
     -- 'UiCursorDefault' indicates no widget override (or resets to the default
     -- arrow inside 'withCursorShape'). 'UiCursorHidden' hides the cursor.
@@ -653,40 +669,29 @@ module NanoUI
 
     -- | Scroll containers ('scroll', 'scroll2D') handle mouse wheel input and
     -- scrollbars automatically. The functions below control scroll position
-    -- programmatically using the 'WidgetId' returned by 'scrollArea' or
-    -- 'scrollArea2D'. They take the 'NanoUI.Monad.Context', which a view gets
-    -- from 'NanoUI.Monad.askContext'.
+    -- and tuning from inside a view using the 'WidgetId' from 'scrollWith'',
+    -- 'scroll2DWith'', or 'scrollConfigured'' (or 'currentId' immediately
+    -- before declaring the scroll container):
+    --
+    -- > sid <- currentId
+    -- > when moved (scrollRectIntoView sid (Rect 0 (row * rowH) 1 rowH) ScrollNearest ScrollInstant)
+    -- > metrics <- getScrollMetrics sid
+    -- > (picked, _) <- scrollWith' (fillW . fillH) (visibleRows metrics)
     --
     -- 'setScrollTuning' configures wheel step distance and smooth-scroll
-    -- duration globally:
-    --
-    -- > ctx <- askContext
-    -- > liftIO $ setScrollTuning ctx defaultScrollTuning
-    -- >   { scrollWheelStep = 3 * rowHeight  -- three rows a notch
-    -- >   , scrollSmoothTime = 0.12
-    -- >   }
-    --
-    -- 'setScrollStep' overrides the wheel step for a single scroll container.
-    -- When 'scrollSmoothTime' is positive, wheel steps and 'ScrollSmooth'
-    -- commands ease toward the target over that duration.
-    --
-    -- Tab and 'requestFocus' scroll the widget they focus into view on
-    -- their own. 'scrollIntoView' scrolls any child widget into view (for
-    -- example, a keyboard-selected row). For virtualized lists that only
-    -- instantiate visible rows, use 'scrollRectIntoView' with a rectangle in
-    -- content coordinates, and 'getScrollMetrics' to read the viewport size
-    -- and offset needed to compute the visible range.
+    -- duration globally; 'setScrollStep' overrides the wheel step for one
+    -- scroll container. Tab and 'requestFocus' scroll focused widgets into
+    -- view automatically.
   , ScrollTuning (..)
   , defaultScrollTuning
   , getScrollTuning
   , setScrollTuning
-  , getScrollStep
-  , setScrollStep
   , ScrollMetrics (..)
   , ScrollAxes (..)
-  , getScrollMetrics
   , ScrollBehavior (..)
   , ScrollAlign (..)
+  , getScrollMetrics
+  , setScrollOffset
   , scrollTo
   , scrollBy
   , scrollPages
@@ -694,33 +699,7 @@ module NanoUI
   , scrollToEnd
   , scrollIntoView
   , scrollRectIntoView
-  , scrollGliding
-  , getScrollOffset
-  , setScrollOffset
-  , getScrollOffset2D
-  , setScrollOffset2D
-
-    -- ** From a view
-
-    -- | View-monad variants of the scroll functions above. To apply a scroll
-    -- command on the current frame (or read metrics before building the
-    -- scroller), query 'currentId' immediately before declaring the scroll
-    -- container:
-    --
-    -- > sid <- currentId
-    -- > when moved (scrollRectIntoViewUi sid (Rect 0 (row * rowH) 1 rowH) ScrollNearest ScrollInstant)
-    -- > metrics <- getScrollMetricsUi sid
-    -- > (_, picked) <- scrollArea (fillW . fillH) (visibleRows metrics)
-  , getScrollMetricsUi
-  , setScrollOffsetUi
-  , scrollToUi
-  , scrollByUi
-  , scrollPagesUi
-  , scrollToStartUi
-  , scrollToEndUi
-  , scrollIntoViewUi
-  , scrollRectIntoViewUi
-  , setScrollStepUi
+  , setScrollStep
 
     -- * Visibility
 
@@ -801,7 +780,7 @@ module NanoUI
     -- overrides this: 'PointerBlock' captures pointer events across a
     -- container's full rect, and 'PointerPass' makes a subtree transparent to
     -- pointer hit-testing.
-  , Layout (..)
+  , Layout
   , LayoutModifier
   , Sizing (..)
   , Direction (..)
@@ -809,10 +788,12 @@ module NanoUI
   , AlignX (..)
   , AlignY (..)
   , ItemsAlign (..)
+  , Justify (..)
   , Padding (..)
   , defaultLayout
   , askDefaultLayout
   , withDefaultLayout
+  , direction
   , padAll
   , padXY
   , padLeft
@@ -823,7 +804,11 @@ module NanoUI
   , gap
   , fillW
   , fillH
+  , fitW
+  , fitH
   , grow
+  , growW
+  , growH
   , minW
   , maxW
   , fixedW
@@ -831,7 +816,7 @@ module NanoUI
   , maxH
   , fixedH
   , fixedWH
-  , alignMid
+  , alignMiddle
   , alignEnd
   , alignStart
   , alignCenter
@@ -843,8 +828,15 @@ module NanoUI
   , itemsCenter
   , itemsEnd
   , itemsBaseline
+  , itemsStretch
+  , justify
+  , justifyStart
+  , justifyCenter
+  , justifyEnd
+  , justifyBetween
   , tight
   , percent
+  , percentH
   , gridMinColW
   , gridCols
   , fixedAspectW
@@ -865,6 +857,7 @@ module NanoUI
   , FontStyle (..)
   , TextDecoration (..)
   , fontRegular
+  , fontProportional
   , fontHeading
   , fontMuted
   , fontMono
@@ -886,6 +879,7 @@ module NanoUI
   , fontUnderline
   , fontStrike
   , fontTabular
+  , singleLine
   , TextBreak (..)
   , textBreak
   , breakAnywhere
@@ -901,9 +895,9 @@ module NanoUI
 
     -- | A 'Theme' defines surface styles ('Style' for buttons, inputs, panels,
     -- floating windows, popups) and semantic colors (accents, text selection,
-    -- links). The context holds the active theme ('setTheme'), and 'styled'
-    -- applies a 'Theme' -> 'Theme' modifier to a subtree. Style and theme
-    -- modifiers compose with @(.)@:
+    -- links). 'setTheme' sets the active base theme, and 'styled' applies a
+    -- 'Theme' -> 'Theme' modifier to a subtree. Style and theme modifiers
+    -- compose with @(.)@:
     --
     -- > toolbar = styled (subtle . buttonStyle (cornerRadius 6)) $ row $ do
     -- >   whenM (button "Open") openFile
@@ -972,23 +966,8 @@ module NanoUI
   , Theme (..)
   , Style (..)
   , defaultTheme
-  , tomorrowNightMinDarkTheme
-  , tomorrowMinLightTheme
-  , tomorrowMidnightMinDarkTheme
-  , Base16 (..)
-  , themeFromBase16
-  , themeFromBase16Dark
-  , themeFromBase16Light
-  , base16TomorrowNight
-  , base16TomorrowLight
-  , withTheme
   , setTheme
-  , getTheme
-  , setUiTheme
   , themeSeries
-  , scrollBarTrackColor
-  , scrollBarThumbColor
-  , scrollBarThumbHoverColor
 
     -- ** Following the system
 
@@ -996,16 +975,11 @@ module NanoUI
     -- SDL; RGFW returns 'Nothing'). 'lightDark' selects a theme for an
     -- 'Appearance', defaulting to dark when 'Nothing':
     --
-    -- > setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
+    -- > setTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
     --
     -- Alternatively, 'followSystemTheme' (or the backends' @sdlAppThemeFor@
-    -- and @optThemeFor@ options) updates the context theme automatically when
-    -- the OS appearance changes. Like 'setTheme', it takes the context, which
-    -- a view gets from 'NanoUI.Monad.askContext':
-    --
-    -- > followSystemTheme ctx (lightDark defaultLightTheme defaultTheme)
-    --
-    -- 'setTheme' switches back to a fixed theme.
+    -- and @optThemeFor@ options) updates the theme automatically when the OS
+    -- appearance changes. 'setTheme' switches back to a fixed theme.
   , defaultLightTheme
   , Appearance (..)
   , lightDark
@@ -1014,18 +988,19 @@ module NanoUI
   , systemAppearance
   , followSystemTheme
 
-    -- * Geometry and colour
+    -- * Geometry and color
   , V2 (..)
   , Rect (..)
   , Size (..)
   , Color (..)
   , colorRGBA
   , colorRGB
+  , colorHex
+  , colorHexA
   , withAlpha
   , colorWhite
   , colorBlack
   , colorTransparent
-  , colorToWord32
   , colorLuminance
   , colorR
   , colorG
@@ -1039,8 +1014,6 @@ module NanoUI
   , rectUnion
   , v2Add
   , v2Sub
-  , onGrid
-  , roundHalfUp
 
     -- * Input
 
@@ -1059,8 +1032,6 @@ module NanoUI
   , Pressable (..)
   , Key (..)
   , Modifiers (..)
-  , inputKeysElem
-  , foldInputKeys
   , takeEscape
   , Composition (..)
   , InputPurpose (..)
@@ -1073,29 +1044,10 @@ module NanoUI
     -- 'mouseHeld' check mouse button state in the current view scope:
     --
     -- > whenM (mousePressed MouseBack) goBack
-    --
-    -- 'Input' stores held, pressed, and released buttons as 'MouseButtons'
-    -- sets, which can also be queried with 'pressedIn', 'releasedIn', and
-    -- 'heldIn'.
   , MouseButton (..)
   , mousePressed
   , mouseReleased
   , mouseHeld
-  , MouseButtons
-  , noButtons
-  , buttonsMember
-  , buttonsNull
-  , buttonsToList
-  , buttonsFromList
-  , anyButtonPressed
-  , anyButtonReleased
-  , inputPointerHeld
-  , inputMouseDown
-  , inputMousePressed
-  , inputMouseReleased
-  , inputMouseRightDown
-  , inputMouseRightPressed
-  , inputMouseRightReleased
 
     -- * Keyboard
 
@@ -1111,8 +1063,8 @@ module NanoUI
     -- key combination (for example, Ctrl+A in a focused text field). Focused
     -- controls only claim unmodified or Shift-modified keys, leaving chords
     -- like Alt+Left available for shortcuts. Custom widgets declare claimed
-    -- keys via 'widgetKeys'. 'menuItemShortcut' binds its chord while its menu
-    -- is open.
+    -- keys via 'NanoUI.Widgets.Custom.widgetKeys'. 'menuItemShortcut' binds its
+    -- chord while its menu is open.
     --
     -- Key auto-repeat counts as a press (so holding Ctrl+Z repeats undo). Use
     -- 'keyPressedOnce' and 'shortcutOnce' to ignore auto-repeat.
@@ -1130,6 +1082,7 @@ module NanoUI
   , KeyNav (..)
   , navStep
   , ListNav (..)
+  , ListNavScroll (..)
   , useListNav
   , useListNavWith
   , keyActivated
@@ -1159,17 +1112,17 @@ module NanoUI
     -- | Initial window configuration is passed via 'WindowSettings'
     -- (@sdlWindowSettings@ in @SdlOptions@, @optWindow@ in @RgfwOptions@).
     -- Inside a view, 'askWindow' reads the current 'WindowState', the setters
-    -- and commands below update the window, and 'quitUi' requests exit. In
+    -- and commands below update the window, and 'quit' requests exit. In
     -- headless test contexts, window operations are no-ops and
     -- 'requestScreenshot' answers its callback with 'Nothing' (as
     -- 'askScreenshot' does).
     --
-    -- Setters ('setWindowTitleUi', 'setWindowModeUi', ...) only issue a
+    -- Setters ('setWindowTitle', 'setWindowMode', ...) only issue a
     -- backend call when the value changes, so they can be called every frame.
-    -- Action commands ('moveWindowUi', 'resizeWindowUi', 'maximizeWindowUi',
+    -- Action commands ('moveWindow', 'resizeWindow', 'maximizeWindow',
     -- ...) run on every call and should be triggered by events. To confirm
     -- before closing, set 'wsExitOnCloseRequest' to 'False', check
-    -- 'winCloseRequested', and call 'quitUi' when confirmed:
+    -- 'winCloseRequested', and call 'quit' when confirmed:
     --
     -- > editor :: NanoUI ()
     -- > editor = do
@@ -1177,7 +1130,7 @@ module NanoUI
     -- >   closing <- winCloseRequested <$> askWindow
     -- >   when closing (writeVar asking True)
     -- >   modal asking "Discard your changes?" $ do
-    -- >     whenM (button "Discard") quitUi
+    -- >     whenM (button "Discard") quit
     -- >     whenM (button "Keep editing") (writeVar asking False)
   , WindowSettings (..)
   , defaultWindowSettings
@@ -1187,20 +1140,20 @@ module NanoUI
   , askWindow
   , WindowCapabilities (..)
   , askWindowCapabilities
-  , setWindowTitleUi
-  , setWindowIconUi
-  , setWindowMinSizeUi
-  , setWindowMaxSizeUi
-  , setWindowOpacityUi
-  , setWindowModeUi
-  , moveWindowUi
-  , centerWindowUi
-  , resizeWindowUi
-  , minimizeWindowUi
-  , maximizeWindowUi
-  , restoreWindowUi
-  , toggleMaximizedUi
-  , quitUi
+  , setWindowTitle
+  , setWindowIcon
+  , setWindowMinSize
+  , setWindowMaxSize
+  , setWindowOpacity
+  , setWindowMode
+  , moveWindow
+  , centerWindow
+  , resizeWindow
+  , minimizeWindow
+  , maximizeWindow
+  , restoreWindow
+  , toggleMaximized
+  , quit
 
     -- ** More windows
 
@@ -1224,33 +1177,60 @@ where
 
 import NanoUI.Internal.Animatable
 import NanoUI.Internal.Animation
+import NanoUI.Internal.ChildWindow (nativeWindow)
 import NanoUI.Internal.Context
-import NanoUI.Internal.Draw
+  ( ExplainedNode (..)
+  , ScrollAlign (..)
+  , ScrollAxes (..)
+  , ScrollBehavior (..)
+  , ScrollMetrics (..)
+  , ScrollTuning (..)
+  , defaultScrollTuning
+  )
+import NanoUI.Internal.Draw (TextFont (..), defaultTextFont)
 import NanoUI.Internal.Font (FontMetrics (..), lineWidth)
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input
 import NanoUI.Internal.Monad
 import NanoUI.Internal.NativeWindow
-import NanoUI.Internal.ChildWindow (nativeWindow)
 import NanoUI.Internal.Shader
+  ( IsNodeEffect
+  , Shader
+  , ShaderCapabilities (..)
+  , ShaderConfig (..)
+  , ShaderKind (..)
+  , contramapShader
+  , defaultShaderConfig
+  , fixUniform
+  )
 import NanoUI.Internal.Style
 import NanoUI.Internal.Tasks
-import NanoUI.Internal.Uniforms (GpuType (..), UniformField (..), Uniforms (..), V3 (..), V4 (..), uniformLayout, uniformSize)
-import NanoUI.Svg
-import NanoUI.Var
 import NanoUI.Internal.Types
-import NanoUI.Internal.WidgetText
+import NanoUI.Internal.Uniforms (Uniforms (..), V3 (..), V4 (..))
+import NanoUI.Internal.WidgetText (colorFromHex, colorToHex, colorToHexA)
 import NanoUI.Internal.Widgets.Animate
-import NanoUI.Internal.Widgets.Behavior (DragAxis (..), KeyNav (..), ListNav (..), Reorder (..), focusedKeyPressed, focusedKeyPressedOnce, keyActivated, navStep, useInputMethod, useKeyNav, useListNav, useListNavWith, useReorder)
+import NanoUI.Internal.Widgets.Behavior
+  ( DragAxis (..)
+  , KeyNav (..)
+  , ListNav (..)
+  , ListNavScroll (..)
+  , Reorder (..)
+  , focusedKeyPressed
+  , focusedKeyPressedOnce
+  , keyActivated
+  , navStep
+  , useInputMethod
+  , useKeyNav
+  , useListNav
+  , useListNavWith
+  , useReorder
+  )
 import NanoUI.Internal.Widgets.Button
-import NanoUI.Internal.Widgets.Caption
 import NanoUI.Internal.Widgets.Checkbox
 import NanoUI.Internal.Widgets.ColorPicker
 import NanoUI.Internal.Widgets.Cursor
-import NanoUI.Widgets.Combo
-import NanoUI.Widgets.Custom
+import NanoUI.Internal.Widgets.Disclosure
 import NanoUI.Internal.Widgets.Display
-import NanoUI.Internal.Widgets.Drawing
 import NanoUI.Internal.Widgets.Drop
 import NanoUI.Internal.Widgets.Image
 import NanoUI.Internal.Widgets.Layout
@@ -1258,10 +1238,8 @@ import NanoUI.Internal.Widgets.Menu
 import NanoUI.Internal.Widgets.Node
 import NanoUI.Internal.Widgets.NumericInput
 import NanoUI.Internal.Widgets.Overlay
-import NanoUI.Widgets.PaneGrid
 import NanoUI.Internal.Widgets.Popup
 import NanoUI.Internal.Widgets.Radio
-import NanoUI.Widgets.RichText
 import NanoUI.Internal.Widgets.Select
 import NanoUI.Internal.Widgets.Sensor
 import NanoUI.Internal.Widgets.Shader
@@ -1269,10 +1247,14 @@ import NanoUI.Internal.Widgets.Shortcut
 import NanoUI.Internal.Widgets.Slider
 import NanoUI.Internal.Widgets.Table
 import NanoUI.Internal.Widgets.Tabs
+import NanoUI.Internal.Widgets.TextInput
+import NanoUI.Internal.Widgets.Tree
+import NanoUI.Svg
+import NanoUI.Var
+import NanoUI.Widgets.Combo
+import NanoUI.Widgets.Custom
+import NanoUI.Widgets.RichText
 import NanoUI.Widgets.TextArea
 import NanoUI.Widgets.TextBuffer
 import NanoUI.Widgets.TextCommand
-import NanoUI.Widgets.TextDocument
 import NanoUI.Widgets.TextField
-import NanoUI.Internal.Widgets.TextInput
-import NanoUI.Internal.Widgets.Tree

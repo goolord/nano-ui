@@ -61,9 +61,9 @@ settledFrame n tag w h hoverPos ui = do
 chartSvg :: Text -> Float -> Maybe V2 -> (PlotCache -> NanoUI ()) -> IO Text
 chartSvg tag w pointerPos ui = do
   (_, ink) <- render w
-  let fitW = maybe w (\(Rect bx _ bw _) -> min w (fromIntegral (ceiling (bx + bw) :: Int) + 12)) ink
-  (svg, ink') <- render fitW
-  pure (cropSvg fitW h ink' svg)
+  let fittedW = maybe w (\(Rect bx _ bw _) -> min w (fromIntegral (ceiling (bx + bw) :: Int) + 12)) ink
+  (svg, ink') <- render fittedW
+  pure (cropSvg fittedW h ink' svg)
   where
     h = 1200
     render width = do
@@ -81,21 +81,21 @@ galleryControlsSpecimen = do
   volume <- useVar (62 :: Float)
   columnWith (fillW . padAll 18 . gap 14) $ do
     heading "Controls"
-    rowWith (tight . gap 10 . fillW . wrap . alignMid) $ do
+    rowWith (tight . gap 10 . fillW . wrap . alignMiddle) $ do
       void (button "Primary")
       void (button "Secondary")
       toggleButtonWith (fixedW 90) Accent "Bold" boldVar
       checkbox "Enabled" enabled
-    rowWith (tight . gap 14 . fillW . wrap . alignMid) $ do
+    rowWith (tight . gap 14 . fillW . wrap . alignMiddle) $ do
       textInputConfigured
-        defaultTextInputConfig {ticPlaceholder = "Project name", ticLayout = fixedW 210 defaultLayout}
+        defaultTextInputConfig {ticPlaceholder = "Project name", ticLayout = fixedW 210}
         query
       selectWith (fixedW 150) ["Low", "Medium", "High"] priority
       sliderWith (fixedW 190) 0 100 volume
     rowWith (tight . gap 12 . fillW) $ do
       panelWith (fillW . padAll 12 . gap 10) $ do
         muted "CUSTOM CONTROLS"
-        rowWith (tight . gap 16 . alignMid) $ do
+        rowWith (tight . gap 16 . alignMiddle) $ do
           toggleSwitch enabled
           knob 0 100 volume
           circularProgress 0.62

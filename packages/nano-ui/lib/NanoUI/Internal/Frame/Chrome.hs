@@ -33,7 +33,7 @@ import qualified Data.Text as T
 import Data.Word (Word64)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (DrawArena, pushRect, pushRoundedRect, pushRoundedStroke, withClip)
-import NanoUI.Internal.Layout.ScrollGeometry (ScrollBarLayout (..), ScrollConfig (..), ScrollPolicy (..), defaultScrollConfig)
+import NanoUI.Internal.Layout.ScrollGeometry (ScrollBarLayout (..), ScrollConfig (..), ScrollPolicy (..), scroll2DConfig)
 import NanoUI.Internal.Id (WidgetId, hashWidgetId)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Store (fieldInt, fieldText, findSlot)
@@ -479,7 +479,7 @@ paintMenuAccent da theme (Rect x y _ h) =
 -- thumb in 'scrollBarThumbHoverColor'.
 paintScrollBars ::
   Context -> DrawArena -> Theme -> Style -> WidgetId -> Maybe ScrollBarLayout -> Maybe ScrollBarLayout -> IO ()
-paintScrollBars ctx da theme base = paintScrollBarsConfigured ctx da theme base defaultScrollConfig
+paintScrollBars ctx da theme base = paintScrollBarsConfigured ctx da theme base scroll2DConfig
 
 -- | 'paintScrollBars' honouring 'ScrollOverlay' per axis (painting the thumb
 -- without an opaque track pill).

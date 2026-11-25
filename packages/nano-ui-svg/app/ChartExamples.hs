@@ -143,7 +143,7 @@ pipelineDiagram = void $ diagram (fixedWH 360 72) . stages =<< uiTheme
 
 -- ANCHOR: sparkline
 sparklines :: [Float] -> NanoUI ()
-sparklines samples = rowWith (gap 16 . alignMid) $ do
+sparklines samples = rowWith (gap 16 . alignMiddle) $ do
   sparkline samples
   sparklineWith (fixedWH 120 32) 120 32 samples
 -- ANCHOR_END: sparkline

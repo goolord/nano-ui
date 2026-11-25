@@ -4,8 +4,8 @@ module NanoUI.Internal.Widgets.Select
   , select'
   , selectWith
   , selectWith'
-  , boundedSelect
-  , boundedSelect'
+  , enumSelectBy
+  , enumSelectBy'
   , enumSelect
   , enumSelect'
   , dropdownPopup
@@ -29,9 +29,9 @@ import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input (Input, MouseButton (..), Pressable (..), UiCursorKind (..), inputMousePos, inputWindowSize)
 import NanoUI.Internal.Layout.Arena (NodeType (..), addNodeFromLayout)
-import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askInput, freshWidget, liftIO, nextId)
+import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askDefaultLayout, askInput, freshWidget, liftIO, nextId)
 import NanoUI.Internal.Store (fieldInt, insertSlot)
-import NanoUI.Internal.Style (AlignX (..), AlignY (..), Layout (..), Theme (..), defaultLayout, fillW, fixedH, tight)
+import NanoUI.Internal.Style (AlignX (..), AlignY (..), Layout (..), Theme (..), defaultLayout, fillW, fixedH, inheritFont, tight)
 import NanoUI.Internal.Types (Rect (..), Size (..), V2 (..), clamp, rectIntersect)
 import NanoUI.Internal.Var (Binding (..), bindVar, bindVarBy)
 import NanoUI.Internal.Var.Types (Var)
@@ -84,7 +84,8 @@ selectCore f options index = do
   let
     current = clamp 0 (n - 1) stored
     open = isSelectOpen store0 key
-  resp <- addWidgetWithOptions wid NodeSelect "" opts 0 (f defaultLayout)
+  amb <- askDefaultLayout
+  resp <- addWidgetWithOptions wid NodeSelect "" opts 0 (f (inheritFont amb defaultLayout))
   inp <- askInput
   let rect = respRect resp
   -- Ignore presses where layers or a pinned node cover the widget, or where
@@ -186,22 +187,22 @@ paintDropdownRows cdc rows =
   where
     fm = cdcFont cdc
 
--- | Select over every value of a bounded enum, labelled by @encode@.
-{-# INLINE boundedSelect #-}
-boundedSelect :: (Bounded a, Enum a) => (a -> Text) -> Var a -> NanoUI ()
-boundedSelect encode v = void (boundedSelect' encode v)
+-- | Select over every value of a bounded enum, labeled by @encode@.
+{-# INLINE enumSelectBy #-}
+enumSelectBy :: (Bounded a, Enum a) => (a -> Text) -> Var a -> NanoUI ()
+enumSelectBy encode v = void (enumSelectBy' encode v)
 
--- | 'boundedSelect' returning its 'Response'.
-{-# INLINE boundedSelect' #-}
-boundedSelect' :: (Bounded a, Enum a) => (a -> Text) -> Var a -> NanoUI Response
-boundedSelect' encode v = bindVarBy sameEnum RenderFinal v (\value -> withBoundedIndex encode value (selectCore id))
+-- | 'enumSelectBy' returning its 'Response'.
+{-# INLINE enumSelectBy' #-}
+enumSelectBy' :: (Bounded a, Enum a) => (a -> Text) -> Var a -> NanoUI Response
+enumSelectBy' encode v = bindVarBy sameEnum RenderFinal v (\value -> withBoundedIndex encode value (selectCore id))
 
--- | 'boundedSelect' labelled with 'show'.
+-- | 'enumSelectBy' labeled with 'show'.
 {-# INLINE enumSelect #-}
 enumSelect :: (Bounded a, Enum a, Show a) => Var a -> NanoUI ()
-enumSelect = boundedSelect (T.pack . show)
+enumSelect = enumSelectBy (T.pack . show)
 
 -- | 'enumSelect' returning its 'Response'.
 {-# INLINE enumSelect' #-}
 enumSelect' :: (Bounded a, Enum a, Show a) => Var a -> NanoUI Response
-enumSelect' = boundedSelect' (T.pack . show)
+enumSelect' = enumSelectBy' (T.pack . show)

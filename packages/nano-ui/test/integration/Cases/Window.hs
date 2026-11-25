@@ -21,7 +21,7 @@ tests =
   , spec "window-overlay" runWindowOverlayTest
   , spec "overlay-sibling-state" runOverlaySiblingStateTest
   , spec "window-damage" runWindowDamageTest
-  , simSpec "window-drag" 640 400 (fst <$> window' (constVar True) "Debug" (label "Body")) windowDrag
+  , simSpec "window-drag" 640 400 (fst <$> floatingWindow' (constVar True) "Debug" (label "Body")) windowDrag
   , simSpec "window-resize" 640 400 resizeUi windowResize
   , simSpec "window-resize-halo-scrolled" 640 400 haloUi haloScrolled
   , spec "window-layout-reuse" runWindowLayoutReuseTest
@@ -46,7 +46,7 @@ numbered :: Int -> NanoUI ()
 numbered n = forM_ [1 .. n] $ \i -> label (T.pack ("line " <> show i))
 
 openWindow :: Text -> NanoUI a -> NanoUI (Response, Maybe a)
-openWindow = window' (constVar True)
+openWindow = floatingWindow' (constVar True)
 
 -- | A fit-height header keeps its height when a scroller below takes the rest.
 runFitHeaderNoShrinkTest :: Context -> IORef Int -> IO ()
@@ -64,7 +64,7 @@ gutterUi = openWindow "GutterWin" $ do
   kv "Key" (T.replicate 48 "M")
   wide <$ numbered 24
 
--- | A scrolling window's body keeps the window's side padding before the bar.
+-- | A scrolling floatingWindow's body keeps the floatingWindow's side padding before the bar.
 windowScrollGutter :: Sim (Response, Maybe Response) ()
 windowScrollGutter = do
   (win, mwide) <- result
@@ -128,7 +128,7 @@ runWindowOverlayTest ctx failed = do
   let ui = do
         outside <- button' "Outside"
         open <- liftIO (readIORef openRef)
-        (win, body) <- window' (constVar open) "Debug" (label "Body")
+        (win, body) <- floatingWindow' (constVar open) "Debug" (label "Body")
         pure (outside, win, body)
   runSim ctx failed (withInput 640 400) ui $ do
     (_, closed, noBody) <- result
@@ -169,7 +169,7 @@ runOverlaySiblingStateTest _ failed = do
         txtVar <- useVar ("start" :: Text)
         when edit (writeVar txtVar "edited")
         readVar txtVar
-  forM_ [modal, window] $ \overlay -> do
+  forM_ [modal, floatingWindow] $ \overlay -> do
     ctx <- newContext
     _ <- runFrame ctx inp (ui overlay False True)
     forM_ [False, True] $ \open -> assertEq failed "edited" =<< warmup2 ctx inp (ui overlay open False)
@@ -179,7 +179,7 @@ runOverlaySiblingStateTest _ failed = do
 runWindowDamageTest :: Context -> IORef Int -> IO ()
 runWindowDamageTest _ failed = do
   let inp = withInputOff 640 400
-      debug open body = fst <$> window' (constVar open) "Debug" body
+      debug open body = fst <$> floatingWindow' (constVar open) "Debug" body
       about = void (modal' (constVar True) "About" (label "body"))
       fresh ui = newContext >>= \ctx -> (,) ctx <$> warmup2 ctx inp ui
       damageOf ctx i ui = runFrame ctx i ui >> takeDamage ctx
@@ -225,7 +225,7 @@ windowDrag = do
 resizeUi :: NanoUI (Response, Response)
 resizeUi = (,) <$> button' "Hit" <*> (fst <$> openWindow "Resize" (label "Body"))
 
--- | A window's margins, out to a halo and in to its edges, show resize cursors and
+-- | A floatingWindow's margins, out to a halo and in to its edges, show resize cursors and
 -- drag to resize it, down to its title bar. A page button in the halo keeps its cursor.
 windowResize :: Sim (Response, Response) ()
 windowResize = do
@@ -267,14 +267,14 @@ haloUi = do
   (page, ()) <- scrollArea (fillW . fillH) . columnWith fillW $ do
     spacer Fit (Fixed 400)
     replicateM_ 10 (buttonWith (fillW . fixedH 100) "Page")
-  page <$ window (constVar True) "Tool" (label "Body")
+  page <$ floatingWindow (constVar True) "Tool" (label "Body")
 
--- | A page button in a window's halo keeps the press, hit where the scrolled page draws it.
+-- | A page button in a floatingWindow's halo keeps the press, hit where the scrolled page draws it.
 haloScrolled :: Sim WidgetId ()
 haloScrolled = do
   let windows = map snd <$> onContext (nodesOfType NodeWindow)
   page <- result
-  onContext (\c -> setScrollOffset c page 400)
+  onContext (\c -> setScrollOffsetIO c page 400)
   before <- settle >> windows
   checkJust (listToMaybe before) $ \(Rect x y _ h) -> do
     _ <- drag (at (x - 6) (y + h / 2)) (at (x - 60) (y + h / 2)) 1
@@ -291,7 +291,7 @@ runWindowLayoutReuseTest ctx failed = do
         win <- fmap fst $ openWindow "Tools" $ columnWith (maxW 260) $ do
           forM_ [1 .. 12 :: Int] $ \i -> labelWith fillW (T.replicate i "wrapping words ")
           void (button "ok")
-          let cfg = (defaultPopupConfig (AnchorPoint anchor)) {cfgDismissable = False}
+          let cfg = (defaultPopupConfig (AnchorPoint anchor)) {popupDismissable = False}
           void (popup' (constVar True) cfg (label "tip"))
         void (modal' (constVar modalOpen) "Note" (label (T.replicate 12 "a note that wraps ")))
         pure win
@@ -319,7 +319,7 @@ runWindowLayoutReuseTest ctx failed = do
   let small = withInput 520 360
   forM_ [(small, still), (small, ui True (V2 100 100))] $ \(i, u) -> replicateM_ 3 (same i u)
 
--- | A custom widget's measure changing only at a window's inner width reuses the root
+-- | A custom widget's measure changing only at a floatingWindow's inner width reuses the root
 -- solve and re-places the window instead of keeping its cached placement.
 runWindowCustomMeasurePlacementTest :: Context -> IORef Int -> IO ()
 runWindowCustomMeasurePlacementTest ctx failed = do
@@ -328,7 +328,7 @@ runWindowCustomMeasurePlacementTest ctx failed = do
         spacer (Fixed 240) (Fixed 1)
         fst <$> customWidget defaultCustomWidgetSpec
           { widgetMeasure = Just (\_ (w, _) -> if w >= 1e8 then (100, 20) else (w, h))
-          , widgetLayout = fillW defaultLayout
+          , widgetLayout = fillW
           }
       heightOf = maybe 0 (rectH . respRect)
       cacheName = readIORef (ctxLayoutCache ctx) >>= evaluate >>= makeStableName
@@ -370,7 +370,7 @@ runSpanBesideWindowTest ctx failed = do
   let inp = withInput 640 400
       ui open = do
         columnWith (padXY 20 320) (void (withValue "" textInput))
-        void (window' (constVar open) "Elsewhere" (label "Body"))
+        void (floatingWindow' (constVar open) "Elsewhere" (label "Body"))
       emptySpans = (\ss -> [(r, clip) | (r, t, _, _, clip) <- ss, T.null t]) <$> collectTextSpans ctx
   closed <- warmup2 ctx inp (ui False) >> emptySpans
   opened <- warmup2 ctx inp (ui True) >> emptySpans

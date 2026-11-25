@@ -14,6 +14,7 @@ import Ditto.Core qualified as Ditto
 import Ditto.Types qualified as Ditto
 import NanoUI
 import NanoUI qualified as NUI
+import NanoUI.Widgets.Custom (setSubmitted)
 import NanoUI.Backend (runNanoUI)
 import NanoUI.Form
 import NanoUI.Form.Internal.Backend
@@ -145,7 +146,7 @@ testCommitOnly = do
             value <- peekVar v
             submitted <- liftIO (writeIORef shown value >> readIORef commitNow)
             NUI.modifyVar v (\x -> if x == "a" then "ab" else x)
-            pure (NUI.setSubmitted submitted mempty)
+            pure (setSubmitted submitted mempty)
         )
         "a"
     runCommit = runForm owner ctx "commit" commitForm

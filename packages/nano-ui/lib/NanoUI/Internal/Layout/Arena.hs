@@ -193,7 +193,7 @@ import NanoUI.Internal.Layout.Arena.Cache
 import NanoUI.Internal.Layout.Arena.Query
 import NanoUI.Internal.Layout.Arena.Types
 import NanoUI.Internal.Store (ptrEq)
-import NanoUI.Internal.Style (Direction (..), Flow (..), Layout (..), Padding (..), PointerMode (..))
+import NanoUI.Internal.Style (Direction (..), Flow (..), ItemsAlign (..), Layout (..), Padding (..), PointerMode (..))
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), newZeroedPrimArray)
 
 -- | An empty arena. It starts with room for 256 nodes (@initialCapacity@), 64
@@ -360,8 +360,8 @@ addNode :: NodeArena -> NodeType -> Int -> Layout -> IO NodeIdx
 addNode na nt parent Layout {..} = do
   idx <- readIORef (naCount na)
   ensureCapacity na (idx + 1)
-  let (wTag, wVal) = sizingTag layoutWidth
-      (hTag, hVal) = sizingTag layoutHeight
+  let (wTag0, wVal0) = sizingTag layoutWidth
+      (hTag0, hVal0) = sizingTag layoutHeight
       pad = layoutPadding
       -- Scroll containers and grids have their own layout, and paint and hit
       -- tests visit their children in line order.
@@ -373,7 +373,35 @@ addNode na nt parent Layout {..} = do
       -- pin to.
       !pinned = isJust layoutPin && parent >= 0 && not (isFloatingNode nt)
       !(V2 pinX pinY) = fromMaybe (V2 0 0) layoutPin
+      !axByte =
+        fromIntegral (fromEnum layoutAlignX)
+          .|. (if layoutAlignExplicit .&. 1 /= 0 then 0x80 else 0 :: Word8)
+      !ayByte =
+        fromIntegral (fromEnum layoutAlignY)
+          .|. (if layoutAlignExplicit .&. 2 /= 0 then 0x80 else 0 :: Word8)
   a <- arenaArrays na
+  -- 'ItemsStretch' promotes an unaligned fit-sized flow child to grow along
+  -- its parent's cross axis (width in a column, height in a row or grid row).
+  ((!wTag, !wVal), (!hTag, !hVal)) <-
+    if parent >= 0 && not pinned && not (isFloatingNode nt)
+      then do
+        pItems <- readTagEnum a parent TagItemsAlign
+        if pItems /= ItemsStretch
+          then pure ((wTag0, wVal0), (hTag0, hVal0))
+          else do
+            pFlow <- readTagEnum a parent TagFlow
+            if pFlow == Layered
+              then pure ((wTag0, wVal0), (hTag0, hVal0))
+              else do
+                pDir <- readTagEnum a parent TagDirection
+                pGridCols <- readTree a parent TreeGridCols
+                pMinColW <- readStyle a parent StyleGridMinColW
+                let pIsGrid = pGridCols > 0 || pMinColW > 0
+                    stretchY = pIsGrid || pDir == DirRow
+                    wPair = if not stretchY && wTag0 == SizingFit && axByte == 0 then (SizingGrow, 1) else (wTag0, wVal0)
+                    hPair = if stretchY && hTag0 == SizingFit && ayByte == 0 then (SizingGrow, 1) else (hTag0, hVal0)
+                pure (wPair, hPair)
+      else pure ((wTag0, wVal0), (hTag0, hVal0))
   -- 'PointerPass' is inherited by all descendants.
   !pointerMode <-
     if parent < 0 || layoutPointer == PointerPass
@@ -409,15 +437,10 @@ addNode na nt parent Layout {..} = do
     _ -> DirColumn
   writeTagEnum a idx TagWSizing wTag
   writeTagEnum a idx TagHSizing hTag
-  let !axByte =
-        fromIntegral (fromEnum layoutAlignX)
-          .|. (if layoutAlignExplicit .&. 1 /= 0 then 0x80 else 0 :: Word8)
-      !ayByte =
-        fromIntegral (fromEnum layoutAlignY)
-          .|. (if layoutAlignExplicit .&. 2 /= 0 then 0x80 else 0 :: Word8)
   writePrimArray (naArrTags a) (idx * tagStride + fromEnum TagAlignX) axByte
   writePrimArray (naArrTags a) (idx * tagStride + fromEnum TagAlignY) ayByte
   writeTagEnum a idx TagItemsAlign layoutItemsAlign
+  writeTagEnum a idx TagJustify layoutJustify
   writeTagEnum a idx TagFlow flow
   writeTagEnum a idx TagPinned pinned
   writeTagEnum a idx TagPointer pointerMode
@@ -458,7 +481,7 @@ addNode na nt parent Layout {..} = do
           , (0x4648, fromIntegral (castFloatToWord32 layoutFontSize))
           , (0x4158, fromIntegral axByte)
           , (0x4159, fromIntegral ayByte)
-          , (0x4941, fromIntegral (fromEnum layoutItemsAlign))
+          , (0x4941, fromIntegral (fromEnum layoutItemsAlign) .|. fromIntegral (fromEnum layoutJustify) `shiftL` 8)
           , (0x464c, fromIntegral (fromEnum flow))
           , (0x4c47, fromIntegral (castFloatToWord32 lineGap))
           , (0x5049, fromIntegral (fromEnum pinned))

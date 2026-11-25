@@ -7,6 +7,7 @@ module Cases.ViewApi (tests) where
 import Spec
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
+import Data.Text qualified as T
 import Control.Exception (ErrorCall (..), throwIO)
 import NanoUI.Monad (catchView, focusedWidget, releaseFocus)
 import NanoUI.Testing.Sim
@@ -21,6 +22,7 @@ tests =
   , spec "scroll-ui" runScrollUiTest
   , simSpec "take-escape" 400 300 escapeUi takeEscapeOnce
   , simSpec "catch-view-restores-build" 400 300 catchUi catchRestores
+  , spec "disclosure-and-scroll-prime" runDisclosureAndScrollPrimeTest
   ]
 
 -- | After a part of the view throws from inside a row, the handler and what
@@ -44,7 +46,7 @@ catchRestores = do
 -- | A custom widget of a fixed size, focusable or not.
 sizedWidget :: Float -> Float -> Bool -> CustomWidgetSpec ()
 sizedWidget w h focusable =
-  defaultCustomWidgetSpec {widgetLayout = fixedWH w h defaultLayout, widgetFocusable = focusable}
+  defaultCustomWidgetSpec {widgetLayout = fixedWH w h, widgetFocusable = focusable}
 
 data FocusMode = Holding | Free | Releasing
   deriving (Eq)
@@ -130,7 +132,7 @@ runLayoutVariantsTest :: Context -> IORef Int -> IO ()
 runLayoutVariantsTest _ failed = do
   let sim :: Float -> Float -> NanoUI a -> Sim a () -> IO ()
       sim w h ui script = newContext >>= \c -> runSim c failed (withInput w h) ui script
-      filler = respRect . fst <$> customWidget defaultCustomWidgetSpec {widgetLayout = fillW (fillH defaultLayout)}
+      filler = respRect . fst <$> customWidget defaultCustomWidgetSpec {widgetLayout = fillW . fillH}
   sim 800 600 (modalWith' (fixedWH 500 400) (constVar True) "Sized" (columnWith (fillW . fillH . tight) filler)) $ do
     result >>= \(_, inside) -> checkJust inside $ \(Rect x _ w h) -> do
       -- Inside the panel's padding and title bar, and most of it.
@@ -165,7 +167,7 @@ runPaneGridInitialTest ctx failed = do
                 body <- nextId
                 laid <- lastRect body
                 liftIO (forM_ laid (modifyIORef' firstLaid . IM.insertWith (\_ old -> old) (fromIntegral pid)))
-                _ <- customWidgetWithId body defaultCustomWidgetSpec {widgetLayout = fillW (fillH defaultLayout)}
+                _ <- customWidgetWithId body defaultCustomWidgetSpec {widgetLayout = fillW . fillH}
                 wantSplit <- liftIO (readIORef splitIt)
                 when (wantSplit && pid == 20) $ do
                   liftIO (writeIORef splitIt False)
@@ -224,24 +226,23 @@ runScrollUiTest ctx failed = do
         (sid, bottomId) <- scrollArea (fixedWH 200 200 . tight . gap 0) $ do
           tall
           respId <$> button' "Bottom"
-        (sid, bottomId,) <$> getScrollMetricsUi sid
+        (sid, bottomId,) <$> getScrollMetrics sid
   runSim ctx failed inp ui $ do
     (sid, bottomId, m0) <- result
     checkEq (Just 0) (v2Y . scrollOffset <$> m0)
-    (_, _, m) <- afterView (setScrollOffsetUi sid (V2 0 5000)) >> settle
+    (_, _, m) <- afterView (setScrollOffset sid (V2 0 5000)) >> settle
     checkJust m $ \m' -> checkEq (v2Y (scrollRange m')) (v2Y (scrollOffset m'))
-    (_, _, mStart) <- afterView (scrollToStartUi sid ScrollInstant) >> settle
+    (_, _, mStart) <- afterView (scrollToStart sid ScrollInstant) >> settle
     checkEq (Just 0) (v2Y . scrollOffset <$> mStart)
-    (_, _, mEnd) <- afterView (scrollToEndUi sid ScrollInstant) >> settle
+    (_, _, mEnd) <- afterView (scrollToEnd sid ScrollInstant) >> settle
     checkJust mEnd $ \m' -> checkEq (v2Y (scrollRange m')) (v2Y (scrollOffset m'))
-    _ <- afterView (scrollToStartUi sid ScrollInstant) >> settle
-    (_, _, mInto) <- afterView (scrollIntoViewUi sid bottomId ScrollNearest ScrollInstant) >> settle
+    _ <- afterView (scrollToStart sid ScrollInstant) >> settle
+    (_, _, mInto) <- afterView (scrollIntoView sid bottomId ScrollNearest ScrollInstant) >> settle
     checkJust mInto $ \m' -> checkGt (v2Y (scrollOffset m')) 700
   reader <- newContext
   let rows = do
         sid <- currentId
-        c <- askContext
-        m <- liftIO (getScrollMetrics c sid)
+        m <- getScrollMetrics sid
         _ <- scrollArea (fillW . fillH) tall
         pure (fmap (rectH . scrollViewport) m)
       dirtyAfter h = (\(_, _, d) -> d) <$> runFrame reader (withInput 400 h) rows
@@ -264,3 +265,64 @@ takeEscapeOnce = do
   _ <- rightClick (On field) >> frame
   (_, forMenu, _) <- pressKey KeyEscape
   check (not forMenu)
+
+-- | 'selectableRow*' clicks on background/label without stealing child button
+-- clicks; 'collapsing*' toggles on header and chevron clicks while keeping
+-- sibling state intact; 'scrollWith''/'scroll2DWith''/'scrollConfigured'' and
+-- 'floatingWindowWith'' return valid geometry and ids.
+runDisclosureAndScrollPrimeTest :: Context -> IORef Int -> IO ()
+runDisclosureAndScrollPrimeTest ctx failed = do
+  rowClicks <- newIORef (0 :: Int)
+  btnClicks <- newIORef (0 :: Int)
+  openVar <- newVar False
+  let disclosureUi = columnWith (tight . gap 6 . fixedW 260) $ do
+        (btnResp, rowResp) <- selectableRow' True $ do
+          label "RowLabel"
+          flex
+          button' "RowAction"
+        when (respClicked rowResp) (liftIO (modifyIORef' rowClicks (+ 1)))
+        when (respClicked btnResp) (liftIO (modifyIORef' btnClicks (+ 1)))
+        collapsing "Details" openVar $
+          label "HiddenBody"
+        sib <- useVar (0 :: Int)
+        whenM (button "BumpSib") (modifyVar sib (+ 1))
+        n <- readVar sib
+        label ("Sib=" <> T.pack (show n))
+        pure (rowResp, btnResp)
+  runSim ctx failed (withInput 400 300) disclosureUi $ do
+    (rowResp, btnResp) <- result
+    -- Clicking the row label clicks the row, not the child button.
+    _ <- click "RowLabel" >> settle
+    checkEq (1, 0) =<< liftIO ((,) <$> readIORef rowClicks <*> readIORef btnClicks)
+    -- Clicking the child button fires the button and NOT the enclosing row.
+    _ <- click (On btnResp) >> settle
+    checkEq (1, 1) =<< liftIO ((,) <$> readIORef rowClicks <*> readIORef btnClicks)
+    -- Pointer hover over the row reports UiCursorPointer.
+    checkEq UiCursorPointer =<< cursorAt (At (V2 (rectX (respRect rowResp) + 12) (rectY (respRect rowResp) + rectH (respRect rowResp) / 2)))
+    -- Sibling state persists across collapsing toggles; clicking title opens, clicking chevron closes.
+    _ <- click "BumpSib" >> settle
+    expect "Sib=1"
+    expectNot "HiddenBody"
+    _ <- click "Details" >> settle
+    expect "HiddenBody"
+    expect "Sib=1"
+    -- Click the chevron area just left of the "Details" title text.
+    detR <- rectOf "Details"
+    _ <- click (at (rectX detR - 10) (rectY detR + rectH detR / 2)) >> settle
+    expectNot "HiddenBody"
+    expect "Sib=1"
+  -- scrollWith', scroll2DWith', scrollConfigured', and floatingWindowWith'
+  c2 <- newContext
+  let primeUi = columnWith (tight . gap 4) $ do
+        (v1, sr1) <- scrollWith' (fixedWH 120 60) (label "S1" >> pure (1 :: Int))
+        (v2, sr2) <- scroll2DWith' (fixedWH 140 70) (label "S2" >> pure (2 :: Int))
+        (v3, sr3) <- scrollConfigured' defaultScrollConfig (fixedWH 160 80) (label "S3" >> pure (3 :: Int))
+        (winR, _) <- floatingWindowWith' (fixedWH 320 200) (constVar True) "SizedWin" (label "WinBody")
+        pure (v1, sr1, v2, sr2, v3, sr3, winR)
+  (v1, sr1, v2, sr2, v3, sr3, winR) <- warmup2 c2 (withInput 600 400) primeUi
+  assertEq failed (1, 2, 3) (v1, v2, v3)
+  assertEq failed (120, 60) (rectW (respRect sr1), rectH (respRect sr1))
+  assertEq failed (140, 70) (rectW (respRect sr2), rectH (respRect sr2))
+  assertEq failed (160, 80) (rectW (respRect sr3), rectH (respRect sr3))
+  assertEq failed (320, 200) (rectW (respRect winR), rectH (respRect winR))
+  assert failed (all ((/= WidgetId 0) . respId) [sr1, sr2, sr3, winR])

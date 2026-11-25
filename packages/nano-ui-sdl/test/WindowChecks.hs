@@ -23,11 +23,12 @@ import Foreign.Ptr (castPtr)
 import Foreign.Storable (Storable, peek, poke)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
-import NanoUI.Backend (emptyInput, runNanoUI)
+import NanoUI.Backend (colorToWord32, emptyInput, runNanoUI, withTheme)
 import NanoUI.Emit (emit)
 import NanoUI.Sdl.Internal.DialogState qualified as Dialog
 import NanoUI.Testing (Context, isDirty, newPixelContext)
 import NanoUI.Testing.Assert (require, requireEq)
+import NanoUI.Widgets.Custom (DrawOp (FillRect), drawing, drawingVersioned)
 import SDL3.Sys.Blendmode qualified as Blend
 import SDL3.Sys.Bindgen.Events
   ( SDL_MouseButtonEvent (SDL_MouseButtonEvent), SDL_QuitEvent (SDL_QuitEvent), SDL_RenderEvent (SDL_RenderEvent)
@@ -114,7 +115,7 @@ reducerEnvironmentCheck = do
       live <- askSdlEnv
       title <- liftIO (traverse windowTitle live)
       liftIO (modifyIORef' observed ((model, title) :))
-      if model == 0 then emit 1 else quitUi
+      if model == 0 then emit 1 else quit
   require "reducer terminates" (completed == Just ())
   seen <- readIORef observed
   require "reducer sees both models and its session's native title"
@@ -166,7 +167,7 @@ openingFramesCheck = do
     when (n == 2) $ do
       shot
       liftIO (pushPress sDL_BUTTON_X1 >> push (SDL_RenderEvent Events.SDL_EVENT_RENDER_DEVICE_RESET 0 0 0))
-    when (n == 3) $ shot >> liftIO (writeIORef redrawn (inputWindowRedraw inp)) >> quitUi
+    when (n == 3) $ shot >> liftIO (writeIORef redrawn (inputWindowRedraw inp)) >> quit
   readIORef seen >>= requireEq "presses during the opening frames, each seen once" [MouseBack, MouseMiddle]
   readIORef redrawn >>= require "a device reset repaints the window"
   readIORef shots >>= \case
@@ -188,7 +189,7 @@ openingCloseCheck = do
       Nothing -> liftIO $ do
         writeIORef firstAt (Just now)
         push (SDL_QuitEvent Events.SDL_EVENT_QUIT 0 0)
-      Just t0 -> when (now > t0 + 0.5) $ liftIO (writeIORef lost True) >> quitUi
+      Just t0 -> when (now > t0 + 0.5) $ liftIO (writeIORef lost True) >> quit
   readIORef lost >>= require "a close request during the opening frames closes the window" . not
 
 -- | A view's 'nativeWindow' opens a window with a view of its own, which
@@ -222,7 +223,7 @@ childWindowCheck = do
         push (SDL_WindowEvent Events.SDL_EVENT_WINDOW_CLOSE_REQUESTED 0 0 wid 0 0)
     stillOpen <- readVar open
     when (n > 1 && not stillOpen) $ liftIO (getMonotonicTime >>= writeIORef noticedAt . Just)
-    when (n > 1 && not stillOpen) quitUi
+    when (n > 1 && not stillOpen) quit
   readIORef childPasses >>= require "the second window runs its view" . (>= 4)
   readIORef seen >>= require "a Var the second window writes reaches the first" . elem 7
   readVarIO open >>= require "the close request writes False" . not
@@ -242,7 +243,7 @@ childScaleCheck = do
     n <- countPass passes
     when (n == 1) $ askWake >>= \wake -> liftIO (void (forkIO (threadDelay 5000000 >> wake)))
     scale <- askSdlEnv >>= liftIO . traverse (readIORef . sdlScaleRef)
-    when (scale == Just 2) $ liftIO (getMonotonicTime >>= writeIORef seenAt . Just) >> quitUi
+    when (scale == Just 2) $ liftIO (getMonotonicTime >>= writeIORef seenAt . Just) >> quit
     nativeWindow open (sdlWindowSettings options) {wsTitle = "second"} $ do
       sent <- liftIO (readIORef setAt)
       when (isNothing sent) $ liftIO (getMonotonicTime >>= writeIORef setAt . Just) >> setSdlUiScale 2
@@ -280,7 +281,7 @@ fakeVsyncCheck = do
     now <- liftIO getMonotonicTime
     t0 <- liftIO $ readIORef started >>= maybe (now <$ writeIORef started (Just now)) pure
     keepAnimating =<< label' (fromString (show n))
-    when (now - t0 > 0.5) quitUi
+    when (now - t0 > 0.5) quit
   n <- readIORef passes
   require ("an animation whose presents do not wait is paced by time: " ++ show n ++ " frames in half a second") (n < 150)
 
@@ -306,7 +307,7 @@ resizeFailureCheck = do
         writeIORef (sdlUiScaleRef env) 2
         push (SDL_WindowEvent Events.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED 0 0 0 200 100)
       -- The wake's frame: nothing drew the resize.
-      when (n >= 3) quitUi
+      when (n >= 3) quit
     require "the resize frame's exception leaves the session" $
       either (\(e :: IOException) -> "too narrow" `isInfixOf` show e) (const False) outcome
 
@@ -363,25 +364,25 @@ optionChecks gpu zoom =
           askedWindow = frame ctx env True askWindow
       minimal "minimum size at creation" (pure ()) (150, 80)
       maximal "maximum size at creation" (pure ()) (900, 700)
-      minimal "minimum size from a view" (ui (setWindowMinSizeUi (Just (Size 170 90)))) (170, 90)
-      minimal "minimum size taken off from a view" (ui (setWindowMinSizeUi Nothing)) (0, 0)
-      maximal "maximum width alone from a view" (ui (setWindowMaxSizeUi (Just (Size 600 0)))) (600, 0)
-      after "the title from a view" (ui (setWindowTitleUi "renamed")) title "renamed"
+      minimal "minimum size from a view" (ui (setWindowMinSize (Just (Size 170 90)))) (170, 90)
+      minimal "minimum size taken off from a view" (ui (setWindowMinSize Nothing)) (0, 0)
+      maximal "maximum width alone from a view" (ui (setWindowMaxSize (Just (Size 600 0)))) (600, 0)
+      after "the title from a view" (ui (setWindowTitle "renamed")) title "renamed"
       after "the scale a view reads" (pure ()) (winScale <$> askedWindow) (fromIntegral zoom)
       -- X11 resizes asynchronously; sync before reading the size.
       let size = SDL.syncWindowSafe (sdlWindow env) >> pair getWindowSize
-      after "a resize from a view" (ui (resizeWindowUi (Size 300 150))) size (zoomed (300, 150))
+      after "a resize from a view" (ui (resizeWindow (Size 300 150))) size (zoomed (300, 150))
       after "a hidden window" (pure ()) hidden True
-      after "shown from a view" (ui (setWindowModeUi Windowed)) hidden False
-      after "hidden from a view" (ui (setWindowModeUi Hidden)) hidden True
+      after "shown from a view" (ui (setWindowMode Windowed)) hidden False
+      after "hidden from a view" (ui (setWindowMode Hidden)) hidden True
       when gpu $ do
         let opacity = round . (* 100) <$> getWindowOpacity (sdlWindow env) :: IO Int
             moved name act at = after name act (winPosition <$> askedWindow) (Just at)
         after "the opacity at creation" (pure ()) opacity 50
-        after "the opacity from a view" (ui (setWindowOpacityUi 0.75)) opacity 75
-        ui (setWindowIconUi (fromJust (rgbaPixels 2 2 (BS.pack (concat (replicate 4 [200, 30, 60, 255]))))))
+        after "the opacity from a view" (ui (setWindowOpacity 0.75)) opacity 75
+        ui (setWindowIcon (fromJust (rgbaPixels 2 2 (BS.pack (concat (replicate 4 [200, 30, 60, 255]))))))
         moved "the position at creation" (pure ()) (30, 20)
-        moved "the position from a view" (ui (moveWindowUi 60 70)) (60, 70)
+        moved "the position from a view" (ui (moveWindow 60 70)) (60, 70)
   where
     limits w =
       w

@@ -49,10 +49,10 @@ import NanoUI.Internal.Uniforms
   , uniformLayout
   , uniformSize
   )
-import NanoUI.Shader.Emit.Glsl (emitGlsl150, emitGlslEs300)
-import NanoUI.Shader.Emit.Msl (emitMsl)
-import NanoUI.Shader.Emit.Spirv (emitSpirv)
-import NanoUI.Shader.Eval.Cpu (evalShaderIRColor)
+import NanoUI.Shader.Internal.Emit.Glsl (emitGlsl150, emitGlslEs300)
+import NanoUI.Shader.Internal.Emit.Msl (emitMsl)
+import NanoUI.Shader.Internal.Emit.Spirv (emitSpirv)
+import NanoUI.Shader.Internal.Eval.Cpu (evalShaderIRColor)
 import NanoUI.Shader.Expr
   ( Expr
   , ExprU (..)
@@ -66,7 +66,7 @@ import NanoUI.Shader.Expr
   , sampleLayer
   , sampleLayerUv
   )
-import NanoUI.Shader.IR (ShaderIR (..), emptyIRBuilder, hashShaderIR, runIRBuilder)
+import NanoUI.Shader.Internal.IR (ShaderIR (..), emptyIRBuilder, hashShaderIR, runIRBuilder)
 import System.IO.Unsafe (unsafeDupablePerformIO)
 
 -- | Monomorphic EDSL bodies stored in 'shaderFusion' so compatible effects

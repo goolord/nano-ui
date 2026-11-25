@@ -12,7 +12,6 @@ module NanoUI.Testing
   , floatingPanelActive
   , floatingPanelRects
   , floatingWindowOpen
-  , debugPanelOpen
   , widgetNodeCount
   , NodeType (..)
   , pointerCursorWanted
@@ -57,8 +56,9 @@ module NanoUI.Testing
   , wrapMeasureCache
   , enableMeasureCache
   , withTheme
-  , setTheme
-  , getTheme
+  , setThemeIO
+  , getThemeIO
+  , followSystemThemeIO
   , markDirty
   , clearDirty
   , clearMeasureCache
@@ -80,8 +80,23 @@ module NanoUI.Testing
   , getPrevRect
   , getPrevClipRect
   , getStore
-  , getScrollOffset
-  , setScrollOffset
+  , getScrollOffsetIO
+  , setScrollOffsetIO
+  , getScrollOffset2DIO
+  , setScrollOffset2DIO
+  , getScrollMetricsIO
+  , getScrollTuningIO
+  , setScrollTuningIO
+  , getScrollStepIO
+  , setScrollStepIO
+  , scrollToIO
+  , scrollByIO
+  , scrollPagesIO
+  , scrollToStartIO
+  , scrollToEndIO
+  , scrollIntoViewIO
+  , scrollRectIntoViewIO
+  , scrollGlidingIO
   , textInputEditActive
   , modalActive
   , overlayConsumesQuit
@@ -136,6 +151,8 @@ module NanoUI.Testing
   , wrapTextLinesIO
   , caretX
   , selectionSpans
+  , alignedTextPen
+  , textInkEnd
   , textNodeFontVariant
   , textNodeFontTone
   , textNodeFontWeight
@@ -143,11 +160,13 @@ module NanoUI.Testing
   , textNodeTextDecoration
   ) where
 
-import NanoUI.Internal.Context
+import NanoUI.Backend (followSystemThemeIO, getThemeIO, setThemeIO)
+import NanoUI.Internal.Context qualified as Ctx
+import NanoUI.Internal.Context hiding (followSystemTheme, getScrollMetrics, getScrollOffset, getScrollOffset2D, getScrollStep, getScrollTuning, getTheme, scrollBy, scrollGliding, scrollIntoView, scrollPages, scrollRectIntoView, scrollTo, scrollToEnd, scrollToStart, setScrollOffset, setScrollOffset2D, setScrollStep, setScrollTuning, setTheme)
 import NanoUI.Internal.Frame.SpanArena (SpanArena, foldSpanArena, spanArenaCount)
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Damage (clipPixelEdges, damagePieces, floatingPanelRects)
-import NanoUI.Internal.Font (ScrollBarSlot (..), WrapResult (..), caretX, lineWidth, selectionSpans, sliderTrackBounds, textIndexAtX, wrapTextIO, wrapTextLinesIO)
+import NanoUI.Internal.Font (ScrollBarSlot (..), WrapResult (..), alignedTextPen, caretX, lineWidth, selectionSpans, sliderTrackBounds, textIndexAtX, textInkEnd, wrapTextIO, wrapTextLinesIO)
 import NanoUI.Internal.Widgets.ColorPicker
 import NanoUI.Internal.Frame (runFrame)
 import NanoUI.Internal.Frame.Cursor (UiCursorKind (..), cursorKindIs, pointerCursorWanted, uiCursorKind)
@@ -157,7 +176,76 @@ import NanoUI.Internal.Frame.Scroll (ScrollBarLayout (..), scrollBarLayout)
 import NanoUI.Internal.Frame.TextArea (TextInputArea (..), textInputArea)
 import NanoUI.Internal.Layout.Arena (DirTag (..), NodeType (..))
 import NanoUI.Internal.Layout.Solve (computePopupPosition)
+import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Monad (askContext, askHost, askInput, liftIO)
 import NanoUI.Internal.WidgetText (textNodeFontStyle, textNodeFontTone, textNodeFontVariant, textNodeFontWeight, textNodeTextDecoration)
-import NanoUI.Internal.Types (Damage (..), damageIsEmpty)
+import NanoUI.Internal.Types (Damage (..), Rect, V2, damageIsEmpty)
 import NanoUI.Internal.Var (lastFramePasses)
+
+-- | Read the main-axis scroll offset of a scroller from outside a view.
+getScrollOffsetIO :: Context -> WidgetId -> IO Float
+getScrollOffsetIO = Ctx.getScrollOffset
+
+-- | Set the main-axis scroll offset of a scroller from outside a view.
+setScrollOffsetIO :: Context -> WidgetId -> Float -> IO ()
+setScrollOffsetIO = Ctx.setScrollOffset
+
+-- | Read both axes of a scroller's stored offset from outside a view.
+getScrollOffset2DIO :: Context -> WidgetId -> IO V2
+getScrollOffset2DIO = Ctx.getScrollOffset2D
+
+-- | Set both axes of a scroller's stored offset from outside a view.
+setScrollOffset2DIO :: Context -> WidgetId -> V2 -> IO ()
+setScrollOffset2DIO = Ctx.setScrollOffset2D
+
+-- | Read a scroller's cached metrics from outside a view.
+getScrollMetricsIO :: Context -> WidgetId -> IO (Maybe ScrollMetrics)
+getScrollMetricsIO = Ctx.getScrollMetrics
+
+-- | Read the context's global scroll tuning from outside a view.
+getScrollTuningIO :: Context -> IO ScrollTuning
+getScrollTuningIO = Ctx.getScrollTuning
+
+-- | Set the context's global scroll tuning from outside a view.
+setScrollTuningIO :: Context -> ScrollTuning -> IO ()
+setScrollTuningIO = Ctx.setScrollTuning
+
+-- | Read a scroller's wheel step override from outside a view.
+getScrollStepIO :: Context -> WidgetId -> IO Float
+getScrollStepIO = Ctx.getScrollStep
+
+-- | Set a scroller's wheel step override from outside a view.
+setScrollStepIO :: Context -> WidgetId -> Float -> IO ()
+setScrollStepIO = Ctx.setScrollStep
+
+-- | Scroll to an offset from outside a view.
+scrollToIO :: Context -> WidgetId -> V2 -> ScrollBehavior -> IO ()
+scrollToIO = Ctx.scrollTo
+
+-- | Scroll by a pixel delta from outside a view.
+scrollByIO :: Context -> WidgetId -> V2 -> ScrollBehavior -> IO ()
+scrollByIO = Ctx.scrollBy
+
+-- | Scroll by viewport fractions from outside a view.
+scrollPagesIO :: Context -> WidgetId -> V2 -> ScrollBehavior -> IO ()
+scrollPagesIO = Ctx.scrollPages
+
+-- | Scroll to the start from outside a view.
+scrollToStartIO :: Context -> WidgetId -> ScrollBehavior -> IO ()
+scrollToStartIO = Ctx.scrollToStart
+
+-- | Scroll to the end from outside a view.
+scrollToEndIO :: Context -> WidgetId -> ScrollBehavior -> IO ()
+scrollToEndIO = Ctx.scrollToEnd
+
+-- | Scroll a target widget into a scroller's viewport from outside a view.
+scrollIntoViewIO :: Context -> WidgetId -> WidgetId -> ScrollAlign -> ScrollBehavior -> IO ()
+scrollIntoViewIO = Ctx.scrollIntoView
+
+-- | Scroll a content rectangle into a scroller's viewport from outside a view.
+scrollRectIntoViewIO :: Context -> WidgetId -> Rect -> ScrollAlign -> ScrollBehavior -> IO ()
+scrollRectIntoViewIO = Ctx.scrollRectIntoView
+
+-- | Whether a scroller has a smooth-scroll glide in flight.
+scrollGlidingIO :: Context -> WidgetId -> IO Bool
+scrollGlidingIO = Ctx.scrollGliding

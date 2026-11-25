@@ -195,7 +195,7 @@ textNodeSpanEntry ctx@Context {ctxNodeArena = arena} idx x y w h = do
   let rect = Rect x y w h
       !laidW = if laid > 0 then laid else w
       mStripe = tableStripeColor theme si
-      fg = fromMaybe (textToneColor theme (textNodeFontVariant si) (textNodeFontTone si)) mCustomCol
+      fg = fromMaybe (textToneColor theme (textNodeFontTone si)) mCustomCol
       bg = fromMaybe (styleBg (themePanel theme)) mStripe
       !ix = tableStripeInset si
       -- What the lines depend on: everything but where the node is and
@@ -259,10 +259,11 @@ nodeTextLines ctx raw si fontSize wTag maxW effMaxW isRowChild ix w
       (fm, _, measure) <- resolveFontFor ctx NodeText fontSize si
       let measureW = fmap fst . measure
           contentW = max 0 (w - 2 * ix)
-          -- A row child wraps only at its newlines, where it was measured.
-          wrapCap = if isRowChild then effMaxW else textWrapCap effMaxW wTag w
+          noWrap = isRowChild || textNodeSingleLine si
+          -- A row child or single-line text wraps only at explicit newlines.
+          wrapCap = if noWrap then effMaxW else textWrapCap effMaxW wTag w
       tw <- measureW raw
-      if T.any (== '\n') raw || (not isRowChild && isBounded wrapCap && wrapCap + 0.5 < tw)
+      if T.any (== '\n') raw || (not noWrap && isBounded wrapCap && wrapCap + 0.5 < tw)
         then do
           let !resolvedSize = resolveFontSize (ctxFontSize ctx) fontSize
           wrap <- cachedWrapText ctx (textNodeFontKey resolvedSize si) measureW raw (max 0 (wrapCap - 2 * ix))
@@ -272,7 +273,7 @@ nodeTextLines ctx raw si fontSize wTag maxW effMaxW isRowChild ix w
           -- Half a pixel over the width is no reason to cut, as it is none
           -- to wrap.
           shown <-
-            if tw > contentW + 0.5 && contentW > 0 && (wTag == SizingGrow || isBounded maxW)
+            if tw > contentW + 0.5 && contentW > 0 && (wTag == SizingGrow || isBounded maxW || textNodeSingleLine si)
               then truncateTextWithIO (textNodeEllipsis si) measureW contentW raw
               else pure raw
           (,) fm . SpanSingle shown <$> prepareFontMetrics fm shown

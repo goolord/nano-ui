@@ -45,10 +45,10 @@ module NanoUI.Monad
   , resolveFontUi
   , lineWidthUi
   , truncateTextUi
-  , truncateTextMiddleUi
   , truncateTextWithUi
   , uiTheme
-  , setUiTheme
+  , setTheme
+  , followSystemTheme
   , styled
   , themed
   , disabledWhen
@@ -76,16 +76,18 @@ module NanoUI.Monad
   , askHost
 
     -- * Scrolling
-  , getScrollMetricsUi
-  , setScrollOffsetUi
-  , scrollToUi
-  , scrollByUi
-  , scrollPagesUi
-  , scrollToStartUi
-  , scrollToEndUi
-  , scrollIntoViewUi
-  , scrollRectIntoViewUi
-  , setScrollStepUi
+  , getScrollTuning
+  , setScrollTuning
+  , getScrollMetrics
+  , setScrollOffset
+  , scrollTo
+  , scrollBy
+  , scrollPages
+  , scrollToStart
+  , scrollToEnd
+  , scrollIntoView
+  , scrollRectIntoView
+  , setScrollStep
 
     -- * Redraw and damage
   , requestFrame

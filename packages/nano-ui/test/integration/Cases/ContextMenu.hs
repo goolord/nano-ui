@@ -139,7 +139,7 @@ dropDownUi = column $ do
   open <- readVar openVar
   btn <- menuButton' "File" open
   when (respClicked btn) (writeVar openVar (not open))
-  let cfg = (defaultPopupConfig (AnchorRect (respRect btn))) {cfgPlacement = PlacementBelow, cfgOffset = 0}
+  let cfg = (defaultPopupConfig (AnchorRect (respRect btn))) {popupPlacement = PlacementBelow, popupOffset = 0}
   (popR, _) <- popup' (constVar open) cfg (menuItem "New")
   when (respClicked popR) (writeVar openVar False)
   pure (btn, open)
@@ -174,7 +174,7 @@ runPopupAnchorMovedTest ctx failed = do
   status <- newIORef ("Loading" :: T.Text)
   let ui = do
         r <- row (liftIO (readIORef status) >>= label >> button' "Filter")
-        popup (constVar True) (defaultPopupConfig (AnchorRect (respRect r))) {cfgDismissable = False} (label "menu")
+        popup (constVar True) (defaultPopupConfig (AnchorRect (respRect r))) {popupDismissable = False} (label "menu")
         pure r
       popupX = maybe 0 rectX . listToMaybe . IM.elems <$> liftIO (floatingPanelRects ctx)
   runSim ctx failed (withInputOff 640 300) ui $ do

@@ -178,13 +178,13 @@ clipped r@(Rect x y _ h) = do
   drawCircle (centre r) 34 rose
   drawText (V2 (x - 6) (y + h / 2)) AlignStart AlignMiddle "text past the edge" ink
 
-clipBox :: Rect -> Rect
-clipBox (Rect x y w h) = Rect (x + 10) (y + 8) (w - 20) (h - 16)
+clipRect :: Rect -> Rect
+clipRect (Rect x y w h) = Rect (x + 10) (y + 8) (w - 20) (h - 16)
 
 clips :: [(Text, Rect -> CanvasM ())]
 clips =
   [ ("no clip", clipped)
-  , ("withClip box", \r -> withClip (clipBox r) (clipped r))
+  , ("withClip box", \r -> withClip (clipRect r) (clipped r))
   ]
 -- ANCHOR_END: clip
 
@@ -312,7 +312,7 @@ canvasExamples =
   , cellGrid "joins" 4 170 120 (annotate (\r -> guideStroke (zigzag r) >> pathPoints (zigzag r)) joins)
   , cellGrid "dashes" 4 160 120 dashes
   , cellGrid "transforms" 4 170 130 (annotate (dashedGuide . arrowPath) transforms)
-  , cellGrid "clip" 2 200 130 (annotate (\r -> dashedGuide (P.rect (clipBox r))) clips)
+  , cellGrid "clip" 2 200 130 (annotate (\r -> dashedGuide (P.rect (clipRect r))) clips)
   , cellGrid "text" 4 150 100 (annotate (\r -> crosshair (centre r)) textAnchors)
   , cellGrid "borders" 2 200 130 (annotate (guideStroke . P.rect) borders)
   ]

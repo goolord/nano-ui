@@ -176,7 +176,7 @@ runImeTextAreaTest ctx failed =
 runImeAreaPaintTest :: Context -> IORef Int -> IO ()
 runImeAreaPaintTest ctx failed = do
   setDrawSquareGeometry ctx True
-  t <- getTheme ctx
+  t <- getThemeIO ctx
   ref <- newVar "abcd"
   areaRef <- newVar "one\ntwo"
   let cell = 16
@@ -226,7 +226,7 @@ runImeAreaPaintTest ctx failed = do
 -- view, and scrolls back when the caret returns to the start.
 runImeScrollTest :: Context -> IORef Int -> IO ()
 runImeScrollTest ctx failed = do
-  let narrow = textInputConfigured' defaultTextInputConfig {ticLayout = fixedW 120 defaultLayout}
+  let narrow = textInputConfigured' defaultTextInputConfig {ticLayout = fixedW 120}
   field ctx failed "abc" 0 narrow $ do
     (resp, _) <- compose "0123456789" 10
     let Rect fx _ fw _ = respRect resp
@@ -332,7 +332,7 @@ runImeCustomWidgetTest :: Context -> IORef Int -> IO ()
 runImeCustomWidgetTest ctx failed = do
   seen <- newIORef ([] :: [T.Text])
   let caret = Rect 40 20 2 16
-      size = fixedWH 100 40 defaultLayout
+      size = fixedWH 100 40
       spec' = defaultCustomWidgetSpec {widgetFocusable = True, widgetKeys = KeysAll, widgetLayout = size}
       ui = column $ do
         wid <- nextId

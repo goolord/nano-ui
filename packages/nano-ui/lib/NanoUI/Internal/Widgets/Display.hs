@@ -56,17 +56,17 @@ import NanoUI.Internal.Widgets.Node (Response, addWidgetStyled)
 heading :: Text -> NanoUI ()
 heading = labelWith (tight . fontHeading)
 
--- | Full-width label in the theme's muted colour.
+-- | Label in the theme's muted color.
 muted :: Text -> NanoUI ()
-muted = labelWith (fillW . fontMuted)
+muted = labelWith fontMuted
 
 -- | Label using the backend's monospace font variant.
 mono :: Text -> NanoUI ()
 mono = labelWith fontMono
 
--- | Full-width label in the theme's danger colour.
+-- | Label in the theme's danger color.
 danger :: Text -> NanoUI ()
-danger = labelWith (fillW . fontDanger)
+danger = labelWith fontDanger
 
 -- | Label requesting bold weight.
 bold :: Text -> NanoUI ()

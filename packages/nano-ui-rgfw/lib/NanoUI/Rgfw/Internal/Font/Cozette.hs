@@ -42,8 +42,7 @@ import qualified Data.Text as T
 import Data.Word (Word16, Word32, Word8)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peekElemOff, pokeElemOff)
-import NanoUI (roundHalfUp)
-import NanoUI.Backend (FontMetrics (..))
+import NanoUI.Backend (FontMetrics (..), roundHalfUp)
 
 -- | Horizontal character advance: 6 logical pixels at unit scale.
 cozetteCharAdvance :: Float

@@ -1,6 +1,6 @@
 -- | Theming: switch themes, restyle subtrees, and read theme colors for custom drawing.
 --
--- The context holds one base theme for the entire app. Here 'setUiTheme' runs
+-- The context holds one base theme for the entire app. Here 'setTheme' runs
 -- every frame from the radio selection, which is free because an unchanged
 -- theme is a no-op and only actual changes repaint the window. "Follow system"
 -- queries the desktop's light/dark setting via 'systemAppearance' and selects
@@ -20,6 +20,7 @@ module Main (main) where
 import Control.Monad (forM_)
 import NanoUI
 import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlApp)
+import NanoUI.Themes
 import qualified Data.Text as T
 
 main :: IO ()
@@ -111,9 +112,9 @@ view = do
       rowWith (tight . gap 24 . fillW) $ do
         columnWith (tight . gap 8) $ do
           heading "Theme"
-          boundedRadio choiceName choice
+          enumRadioBy choiceName choice
           -- Every frame; a no-op unless the choice (or the system) changed.
-          setUiTheme =<< choiceTheme =<< readVar choice
+          setTheme =<< choiceTheme =<< readVar choice
 
         columnWith (tight . gap 10 . fillW) $ do
           heading "Button modifiers"

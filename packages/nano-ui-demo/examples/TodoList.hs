@@ -100,7 +100,7 @@ todoApp app = do
 
 -- ANCHOR: new_item_row
 newItemRow :: Var Todos -> Var Text -> NanoUI ()
-newItemRow todosVar draft = rowWith (tight . gap 8 . alignMid . fillW) $ do
+newItemRow todosVar draft = rowWith (tight . gap 8 . alignMiddle . fillW) $ do
   inputR <-
     textInputConfigured'
       defaultTextInputConfig {ticPlaceholder = "What needs doing?"}
@@ -123,9 +123,9 @@ matches Active t = not (todoDone t)
 matches Done t = todoDone t
 
 filterRow :: Var [Todo] -> Var Filter -> NanoUI ()
-filterRow items filt = rowWith (tight . gap 12 . alignMid . fillW) $ do
+filterRow items filt = rowWith (tight . gap 12 . alignMiddle . fillW) $ do
   -- A header for every filter, as a segmented control.
-  boundedTabBarConfigured
+  enumTabBarByConfigured
     defaultTabsConfig {tabsStyle = TabSegmented}
     (T.pack . show)
     filt
@@ -134,7 +134,7 @@ filterRow items filt = rowWith (tight . gap 12 . alignMid . fillW) $ do
   let
     left = length (filter (not . todoDone) todos)
   labelWith
-    (tight . alignMid . fontMuted)
+    (tight . alignMiddle . fontMuted)
     (T.pack (show left) <> if left == 1 then " item left" else " items left")
   disabledWhen (left == length todos) $
     whenM (button "Clear completed") (modifyVar items (filter (not . todoDone)))
@@ -172,8 +172,8 @@ todoRow items todo above below = do
   -- ANCHOR: take_escape
   when isEditing (whenM takeEscape (writeVar editing False))
   -- ANCHOR_END: take_escape
-  rowWith (tight . gap 8 . alignMid . fillW) $ do
-    checkboxWith alignMid "" todo.todoDone
+  rowWith (tight . gap 8 . alignMiddle . fillW) $ do
+    checkboxWith alignMiddle "" todo.todoDone
     -- The label and the field swap places, so they share a scope.
     scope $
       if isEditing
@@ -188,7 +188,7 @@ todoRow items todo above below = do
           when (respSubmitted fieldR) save
         else
           labelWith
-            (fillW . alignMid . (if todoDone t then fontStrike . fontMuted else id))
+            (fillW . alignMiddle . (if todoDone t then fontStrike . fontMuted else id))
             (todoText t)
     whenM (button (if isEditing then "Save" else "Edit")) $
       if isEditing

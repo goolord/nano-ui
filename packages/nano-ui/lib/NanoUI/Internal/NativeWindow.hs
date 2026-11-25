@@ -34,20 +34,20 @@ module NanoUI.Internal.NativeWindow
   , askWindowCapabilities
 
     -- * From a view
-  , setWindowTitleUi
-  , setWindowIconUi
-  , setWindowMinSizeUi
-  , setWindowMaxSizeUi
-  , setWindowOpacityUi
-  , setWindowModeUi
-  , moveWindowUi
-  , centerWindowUi
-  , resizeWindowUi
-  , minimizeWindowUi
-  , maximizeWindowUi
-  , restoreWindowUi
-  , toggleMaximizedUi
-  , quitUi
+  , setWindowTitle
+  , setWindowIcon
+  , setWindowMinSize
+  , setWindowMaxSize
+  , setWindowOpacity
+  , setWindowMode
+  , moveWindow
+  , centerWindow
+  , resizeWindow
+  , minimizeWindow
+  , maximizeWindow
+  , restoreWindow
+  , toggleMaximized
+  , quit
   , requestScreenshot
   , askScreenshot
   , useScreenshot
@@ -264,7 +264,7 @@ requestWindowClose ctx =
 clearWindowClose :: Context -> IO ()
 clearWindowClose ctx = withHost ctx $ \nw -> modifyIORef' (nwState nw) (\s -> s {winCloseRequested = False})
 
--- | Whether a view called 'quitUi'. The session loop checks after each
+-- | Whether a view called 'quit'. The session loop checks after each
 -- frame.
 quitRequested :: Context -> IO Bool
 quitRequested ctx = maybe (pure False) (readIORef . nwQuit) =<< askHostIO (ctxNativeWindow ctx)
@@ -325,31 +325,31 @@ setOpacity nw v
 --
 -- This and the setters below do nothing when the value matches the last one
 -- set, so calling them every frame costs only a comparison.
-setWindowTitleUi :: Text -> NanoUI ()
-setWindowTitleUi t = withNativeWindow (\nw -> setting wsTitle (\v s -> s {wsTitle = v}) hostSetTitle nw t)
+setWindowTitle :: Text -> NanoUI ()
+setWindowTitle t = withNativeWindow (\nw -> setting wsTitle (\v s -> s {wsTitle = v}) hostSetTitle nw t)
 
 -- | Set the window icon ('wsIcon').
-setWindowIconUi :: RgbaPixels -> NanoUI ()
-setWindowIconUi icon = withNativeWindow (`setIcon` icon)
+setWindowIcon :: RgbaPixels -> NanoUI ()
+setWindowIcon icon = withNativeWindow (`setIcon` icon)
 
 -- | Set the smallest size, in layout units, the user can resize the window
 -- to, or remove the limit with 'Nothing'. A zero axis is unlimited. The size
 -- is converted at the UI scale when the limit is set, and not again if the
 -- scale changes later. Where it passes the maximum size, the maximum is
--- raised to it; 'setWindowMaxSizeUi' likewise lowers a minimum above it.
-setWindowMinSizeUi :: Maybe Size -> NanoUI ()
-setWindowMinSizeUi s = withNativeWindow (`setMinSize` s)
+-- raised to it; 'setWindowMaxSize' likewise lowers a minimum above it.
+setWindowMinSize :: Maybe Size -> NanoUI ()
+setWindowMinSize s = withNativeWindow (`setMinSize` s)
 
 -- | Set the largest size the user can resize the window to, as for
--- 'setWindowMinSizeUi'.
-setWindowMaxSizeUi :: Maybe Size -> NanoUI ()
-setWindowMaxSizeUi s = withNativeWindow (`setMaxSize` s)
+-- 'setWindowMinSize'.
+setWindowMaxSize :: Maybe Size -> NanoUI ()
+setWindowMaxSize s = withNativeWindow (`setMaxSize` s)
 
 -- | Set the opacity of the whole window, decorations included, from 0
 -- (invisible) to 1 (opaque), clamped, where the backend and desktop support
 -- it ('wsOpacity'). For a see-through background use 'wsTransparent'.
-setWindowOpacityUi :: Float -> NanoUI ()
-setWindowOpacityUi o = withNativeWindow (`setOpacity` o)
+setWindowOpacity :: Float -> NanoUI ()
+setWindowOpacity o = withNativeWindow (`setOpacity` o)
 
 -- | Make the window windowed, fullscreen or hidden ('wsMode'). The desktop
 -- can change the mode too (with its own fullscreen control, say), which
@@ -359,9 +359,9 @@ setWindowOpacityUi o = withNativeWindow (`setOpacity` o)
 -- > fullscreen <- useVar False
 -- > whenM (shortcut (key (KeyF 11))) (modifyVar fullscreen not)
 -- > full <- readVar fullscreen
--- > setWindowModeUi (if full then Fullscreen else Windowed)
-setWindowModeUi :: WindowMode -> NanoUI ()
-setWindowModeUi m = withNativeWindow (\nw -> setting wsMode (\v s -> s {wsMode = v}) hostSetMode nw m)
+-- > setWindowMode (if full then Fullscreen else Windowed)
+setWindowMode :: WindowMode -> NanoUI ()
+setWindowMode m = withNativeWindow (\nw -> setting wsMode (\v s -> s {wsMode = v}) hostSetMode nw m)
 
 -- | Move the window's top-left corner to a desktop point: window coordinates
 -- on SDL, pixels on RGFW.
@@ -370,43 +370,43 @@ setWindowModeUi m = withNativeWindow (\nw -> setting wsMode (\v s -> s {wsMode =
 -- move, resize, maximize and restore the window. Call them from an event,
 -- not every frame. Some desktops ignore placement (Wayland does), and a
 -- maximized or fullscreen window stays put.
-moveWindowUi :: Int -> Int -> NanoUI ()
-moveWindowUi x y = hostAction (\h -> hostMove h x y)
+moveWindow :: Int -> Int -> NanoUI ()
+moveWindow x y = hostAction (\h -> hostMove h x y)
 
--- | Centre the window on its display.
-centerWindowUi :: NanoUI ()
-centerWindowUi = hostAction hostCenter
+-- | Center the window on its display.
+centerWindow :: NanoUI ()
+centerWindow = hostAction hostCenter
 
 -- | Resize the view to a size in layout units, excluding the desktop's
 -- decorations.
-resizeWindowUi :: Size -> NanoUI ()
-resizeWindowUi s = hostAction (`hostResize` s)
+resizeWindow :: Size -> NanoUI ()
+resizeWindow s = hostAction (`hostResize` s)
 
 -- | Minimize the window to the taskbar.
-minimizeWindowUi :: NanoUI ()
-minimizeWindowUi = hostAction hostMinimize
+minimizeWindow :: NanoUI ()
+minimizeWindow = hostAction hostMinimize
 
 -- | Maximize the window, leaving the desktop's panels visible.
-maximizeWindowUi :: NanoUI ()
-maximizeWindowUi = hostAction hostMaximize
+maximizeWindow :: NanoUI ()
+maximizeWindow = hostAction hostMaximize
 
 -- | Return a maximized or minimized window to its previous size.
-restoreWindowUi :: NanoUI ()
-restoreWindowUi = hostAction hostRestore
+restoreWindow :: NanoUI ()
+restoreWindow = hostAction hostRestore
 
 -- | Maximize the window, or restore it if it is maximized. Reads
 -- 'winMaximized', since the desktop can maximize the window itself (on a
 -- title bar double-click, say).
-toggleMaximizedUi :: NanoUI ()
-toggleMaximizedUi = withNativeWindow $ \nw -> do
+toggleMaximized :: NanoUI ()
+toggleMaximized = withNativeWindow $ \nw -> do
   maxed <- winMaximized <$> readIORef (nwState nw)
   (if maxed then hostRestore else hostMaximize) (nwHost nw)
 
 -- | End the session after this frame is drawn; the backend's runner closes
 -- the window and returns. With 'wsExitOnCloseRequest' off, this is how the
 -- window closes.
-quitUi :: NanoUI ()
-quitUi = withNativeWindow (\nw -> writeIORef (nwQuit nw) True)
+quit :: NanoUI ()
+quit = withNativeWindow (\nw -> writeIORef (nwQuit nw) True)
 
 -- | Request a screenshot of the frame this view is building. The action runs
 -- on the UI thread after that frame is presented and before the next one

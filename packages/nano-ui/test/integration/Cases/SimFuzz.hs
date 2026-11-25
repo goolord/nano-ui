@@ -93,7 +93,7 @@ views =
         m <- readVar menuOpen
         file <- menuButton' "File" m
         when (respClicked file) (writeVar menuOpen (not m))
-        let cfg = (defaultPopupConfig (AnchorRect (respRect file))) {cfgPlacement = PlacementBelow}
+        let cfg = (defaultPopupConfig (AnchorRect (respRect file))) {popupPlacement = PlacementBelow}
         (pop, _) <- popup' (constVar m) cfg (void (menuItem "New") >> void (menuItem "Open"))
         when (respClicked pop) (writeVar menuOpen False)
         b <- button' "Open dialog"

@@ -32,8 +32,8 @@ module NanoUI.Form
   , inputRadio
   , inputEnumRadio
   , inputColor
-  , label
-  , separator
+  , formLabel
+  , formSeparator
   , errors
   , childErrors
   , withErrors
@@ -85,9 +85,9 @@ import NanoUI.Form.Input
   , inputText
   , inputTextArea
   , inputTextWithPlaceholder
-  , label
+  , formLabel
   , named
-  , separator
+  , formSeparator
   , unnamed
   , withChildErrors
   , withErrors

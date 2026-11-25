@@ -21,7 +21,7 @@ import NanoUI
   , fillW
   , flex
   , gap
-  , getScrollMetricsUi
+  , getScrollMetrics
   , heading
   , label
   , maxW
@@ -31,8 +31,8 @@ import NanoUI
   , panelStyle
   , panelWith
   , rowWith
-  , scrollArea
-  , setScrollOffsetUi
+  , scrollWith
+  , setScrollOffset
   , styled
   , tight
   , toolbar
@@ -84,12 +84,12 @@ chatDemoUi stream cache = do
       muted (if streaming then "Receiving..." else T.pack (show (length tokens)) <> " tokens")
       whenM (button "Replay") (modifyVar replays (+ 1))
     sid <- currentId
-    metrics <- getScrollMetricsUi sid
+    metrics <- getScrollMetrics sid
     -- Stick to the bottom as text arrives, unless scrolled up.
     for_ metrics $ \m ->
       when (grew && v2Y (scrollOffset m) >= v2Y (scrollRange m) - 24) $
-        setScrollOffsetUi sid (V2 0 1e9)
-    _ <- scrollArea (fillW . fillH) $
+        setScrollOffset sid (V2 0 1e9)
+    scrollWith (fillW . fillH) $
       columnWith (fillW . padAll 4 . gap 12) $ do
         styled (panelStyle (background (colorRGBA 58 64 86 255))) $
           rowWith (fillW . tight) $ do

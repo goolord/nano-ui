@@ -71,6 +71,7 @@ module NanoUI.Internal.StyleBits
   , textTabular
   , textTone
   , textEllipsis
+  , textSingleLine
   , textFontFields
   , textFontKeyMask
   -- * Text field flags
@@ -204,6 +205,11 @@ textTone = BitField 18 3
 textEllipsis :: BitField
 textEllipsis = BitField 21 2
 
+-- | Whether a text node stays on one line and truncates instead of wrapping in a column.
+{-# INLINE textSingleLine #-}
+textSingleLine :: BitField
+textSingleLine = BitField 23 1
+
 -- | Every field of a text font packing, which 'labelFont' must hold.
 textFontFields :: [(String, BitField)]
 textFontFields =
@@ -215,6 +221,7 @@ textFontFields =
   , ("textTabular", textTabular)
   , ("textTone", textTone)
   , ("textEllipsis", textEllipsis)
+  , ("textSingleLine", textSingleLine)
   ]
 
 -- | The fields that pick the font a text node is measured in: face, weight,

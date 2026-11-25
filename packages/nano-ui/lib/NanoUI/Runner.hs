@@ -328,7 +328,7 @@ debugHudTimeout :: Int
 debugHudTimeout = round (debugRefreshSec * 1000)
 
 -- | Run an event-driven session loop until the window is closed, a view
--- calls 'NanoUI.quitUi', or 'sdShouldQuit' returns 'True'. Ctrl+C closes the
+-- calls 'NanoUI.quit', or 'sdShouldQuit' returns 'True'. Ctrl+C closes the
 -- window too, after its frame, unless a shortcut took it or the focused
 -- widget uses it, as a text field does to copy. Background tasks started by
 -- the view are cancelled on exit.
@@ -449,6 +449,6 @@ runSessionLoop drv ctx0 inp0 = do
   -- This thread's dirty marks need no wake action ('markDirty').
   myThreadId >>= writeIORef loopThread . Just
   -- An opening frame the backend drew before the loop may have called
-  -- 'NanoUI.quitUi' already; waiting first could block for good.
+  -- 'NanoUI.quit' already; waiting first could block for good.
   (quitRequested ctx0 >>= \quit -> unless quit (loop ctx0 inp0 [] startT False False))
     `finally` (closeWindowSlot window `finally` cancelTasksOf wake held `finally` writeIORef loopThread Nothing)

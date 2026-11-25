@@ -38,7 +38,8 @@ import Data.Word (Word8)
 import Foreign.ForeignPtr (newForeignPtr_)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (peekByteOff, pokeByteOff, pokeElemOff)
-import NanoUI (NanoUI, Rect (..), Shader, ShaderKind (..), UiCursorKind (..), V2 (..), askInput, box, button, column, colorRGB, emptyShaderProgram, fixedWH, label, rawLayerShader, rawShader, shaderBox, withShader)
+import NanoUI (NanoUI, Rect (..), Shader, ShaderKind (..), UiCursorKind (..), V2 (..), askInput, box, button, column, colorRGB, fixedWH, label, shaderBox, withShader)
+import NanoUI.Shader.Raw (emptyShaderProgram, rawLayerShader, rawShader)
 import NanoUI.Backend
   ( Composition (..), Damage (..), DrawCmd (..), DrawData (..), Input (..), Key (..), Layer (..), ShaderProgram (..), glyphAtlasPages
   , emptyEffectSpans, emptyShaderCalls, emptyUniformBytes

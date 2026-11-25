@@ -4,7 +4,7 @@
 module Book.Signatures where
 
 import Data.Text (Text)
-import NanoUI hiding (button, button', buttonContent, buttonWith, iconButton, modal, popup, window)
+import NanoUI hiding (button, button', buttonContent, buttonWith, floatingWindow, iconButton, modal, popup)
 import NanoUI qualified as N
 
 -- ANCHOR: buttons
@@ -22,11 +22,11 @@ buttonContent = N.buttonContent
 iconButton = N.iconButton
 
 -- ANCHOR: overlays
-modal  :: Var Bool -> Text -> NanoUI () -> NanoUI ()
-window :: Var Bool -> Text -> NanoUI () -> NanoUI ()
-popup  :: Var Bool -> PopupConfig -> NanoUI () -> NanoUI ()
+modal          :: Var Bool -> Text -> NanoUI () -> NanoUI ()
+floatingWindow :: Var Bool -> Text -> NanoUI () -> NanoUI ()
+popup          :: Var Bool -> PopupConfig -> NanoUI () -> NanoUI ()
 -- ANCHOR_END: overlays
 
 modal = N.modal
-window = N.window
+floatingWindow = N.floatingWindow
 popup = N.popup

@@ -44,7 +44,6 @@ import Data.Word (Word32, Word64)
 import Numeric (showHex)
 import NanoUI
   ( Color (..)
-  , DrawOp (..)
   , FontVariant (..)
   , Input (..)
   , Rect (..)
@@ -52,6 +51,7 @@ import NanoUI
   , colorA
   , rectIntersect
   )
+import NanoUI.Widgets.Custom (DrawOp (..))
 import NanoUI.Backend
   ( DrawData (..)
   , FontMetrics (..)

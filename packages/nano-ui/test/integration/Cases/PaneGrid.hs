@@ -10,6 +10,7 @@ import Data.Map.Strict qualified as M
 import Data.Maybe (isJust, listToMaybe)
 import Data.Text qualified as T
 import Data.Word (Word64)
+import NanoUI.Internal.Context (setDrawExternalText)
 import NanoUI.Internal.Widgets.SplitPane
   ( DropPreview (..)
   , PaneDrop (..)
@@ -719,7 +720,7 @@ runClippedControlTest ctx failed = do
     hr <- prevRect headerId
     br <- prevRect targetId
     -- Scroll the button's centre to the header's.
-    onContext (\c -> setScrollOffset c sid (rectY br + rectH br / 2 - (rectY hr + rectH hr / 2)))
+    onContext (\c -> setScrollOffsetIO c sid (rectY br + rectH br / 2 - (rectY hr + rectH hr / 2)))
     grab <- settle >> targetPoint (OnWidget targetId)
     check (rectContains hr grab)
     _ <- press (At grab)
@@ -787,3 +788,42 @@ runNativeTabsTest ctx failed = do
     _ <- click "Beta" >> settle
     check =<< textShown "* Beta"
     check =<< textShown "body-Beta"
+  -- pgcInTabs is True inside PaneTabs and False for standalone or maximized panes;
+  -- dragging a tab whose PaneView title is empty falls back to pgTabTitle.
+  inTabsRef <- newIORef (IM.empty :: IM.IntMap Bool)
+  tabDragTree <- newVar (Just (Split 300 AxisV 0.5 (PaneTabs 200 [10, 20] 10) (Pane 30)))
+  let inTabsUi =
+        paneGrid
+          defaultPaneGridConfig
+            { pgLayout = fillW . fillH
+            , pgTree = ControlledTree tabDragTree
+            , pgCenterDrop = CenterTab
+            , pgTabTitle = \pid -> "Tab-" <> T.pack (show pid)
+            , pgViewPane = \pid pctx -> do
+                liftIO (modifyIORef' inTabsRef (IM.insert (fromIntegral pid) (pgcInTabs pctx)))
+                label ("body-" <> T.pack (show pid))
+                pure (PaneView "" True)
+            }
+  inTabsCtx <- newContext
+  setDrawExternalText inTabsCtx True
+  runSim inTabsCtx failed (withInput 600 300) inTabsUi $ do
+    m <- liftIO (readIORef inTabsRef)
+    checkEq (Just True) (IM.lookup 10 m)
+    checkEq (Just False) (IM.lookup 30 m)
+    -- Drag standalone pane 30 whose pvTitle is ""; its ghost label falls back to pgTabTitle ("Tab-30").
+    bodyR <- rectOf "body-30"
+    let start = V2 (rectX bodyR + rectW bodyR / 2) (rectY bodyR + rectH bodyR / 2)
+    _ <- press (At start) >> moveTo (At (V2 (rectX bodyR - 120) (rectY bodyR + 80)))
+    check =<< textShown "Tab-30"
+    _ <- release >> settle
+    pure ()
+  -- Pure GridNode tree helpers round-trip cleanly.
+  let t0 = Pane 1
+      t1 = treeSplit 1 100 AxisV False 2 t0
+      t2 = treeAddTab 1 200 Nothing 3 t1
+      t3 = treeSelectTab 1 t2
+  assertEq failed [1, 3, 2] (treePanes t2)
+  assertEq failed (Just (Split 100 AxisV 0.5 (PaneTabs 200 [1, 3] 1) (Pane 2))) (Just t3)
+  assertEq failed (Just (Split 100 AxisV 0.5 (Pane 1) (Pane 2))) (treeRemovePane 3 t3)
+  assertEq failed (Just (Pane 2)) (treeRemovePane 1 (Split 100 AxisV 0.5 (Pane 1) (Pane 2)))
+  assertEq failed Nothing (treeRemovePane 1 (Pane 1))

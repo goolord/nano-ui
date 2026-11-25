@@ -28,7 +28,7 @@ import Data.Word (Word64)
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Layout.Arena (NodeType (..), addNodeFromLayout, flowChildEnds, foldFlowChildrenM, mixNodePaintHash, setStyleIdx)
 import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, uiTheme, withContext)
-import NanoUI.Internal.Style (Direction (..), Layout (..), Style (..), Theme (..), defaultLayout, gap, tight)
+import NanoUI.Internal.Style (Direction (..), Layout (..), LayoutModifier, Style (..), Theme (..), defaultLayout, gap, inheritFont, tight)
 import NanoUI.Internal.Types (Color)
 import NanoUI.Internal.WidgetText (buttonFlagContent, containerFlagButtonGroup)
 import NanoUI.Internal.Widgets.Adornment (Adornments, adornButton, adornmentRow, icon, leading)
@@ -64,22 +64,23 @@ buttonWith f txt = respClicked <$> buttonWith' f txt
 {-# INLINE buttonWith' #-}
 -- | 'buttonWith' returning the full response; activation is in @respClicked@.
 buttonWith' :: (Layout -> Layout) -> Text -> NanoUI Response
-buttonWith' f txt = buttonStyledEx True txt 0 (f defaultLayout) 0
+buttonWith' f txt = do
+  amb <- askDefaultLayout
+  buttonStyledEx True txt 0 (f (inheritFont amb defaultLayout)) 0
 
--- | A button's layout, and the adornments ("NanoUI.Adornment") it draws
+-- | A button's layout modifier, and the adornments ("NanoUI.Adornment") it draws
 -- beside its label. The label and its adornments sit together in the middle
 -- of the button, the layout's gap apart.
 data ButtonConfig = ButtonConfig
-  { bcLayout :: !Layout
+  { bcLayout :: !LayoutModifier
   , bcAdornments :: !Adornments
   }
-  deriving (Show)
 
 -- | The default layout and no adornments: a plain 'button'.
 defaultButtonConfig :: ButtonConfig
-defaultButtonConfig = ButtonConfig {bcLayout = defaultLayout, bcAdornments = mempty}
+defaultButtonConfig = ButtonConfig {bcLayout = id, bcAdornments = mempty}
 
--- | 'button' with its own layout or adornments, drawn in the label's colour.
+-- | 'button' with its own layout or adornments, drawn in the label's color.
 --
 -- > whenM (buttonConfigured defaultButtonConfig {bcAdornments = A.trailing (A.icon chevron)} "Next") next
 {-# INLINE buttonConfigured #-}
@@ -88,7 +89,9 @@ buttonConfigured cfg txt = respClicked <$> buttonConfigured' cfg txt
 
 -- | 'buttonConfigured' returning its 'Response'.
 buttonConfigured' :: ButtonConfig -> Text -> NanoUI Response
-buttonConfigured' (ButtonConfig lay adorns) txt = do
+buttonConfigured' (ButtonConfig f adorns) txt = do
+  amb <- askDefaultLayout
+  let lay = f (inheritFont amb defaultLayout)
   resp <- buttonStyledEx True txt 0 lay 0
   adornButton resp lay (labelColor lay) adorns
 
@@ -133,7 +136,9 @@ buttonContentWith f content = respClicked <$> buttonContentWith' f content
 
 -- | 'buttonContentWith' returning its 'Response'.
 buttonContentWith' :: (Layout -> Layout) -> NanoUI () -> NanoUI Response
-buttonContentWith' f = buttonContentStyled 0 0 (f defaultLayout)
+buttonContentWith' f content = do
+  amb <- askDefaultLayout
+  buttonContentStyled 0 0 (f (inheritFont amb defaultLayout)) content
 
 -- | A content button with style index @styleIx@ and the extra button
 -- @flags@, as a table's header passes them.

@@ -332,7 +332,7 @@ runScrolledPopupDamageTest _ failed = forM_ [False, True] $ \nested -> do
         (sc, anchor) <- scrollArea (fixedWH 200 200) . columnWith fillW $ do
           if nested then void (scrollArea (fillW . fixedH 40) (rows [1 .. 6])) else rows [1 .. 4]
           labelWith' fillW "anchor" <* rows [(if nested then 7 else 5) .. 30]
-        popup (constVar True) (defaultPopupConfig (AnchorRect (respRect anchor))) {cfgPlacement = PlacementRight, cfgDismissable = False} (label "tip")
+        popup (constVar True) (defaultPopupConfig (AnchorRect (respRect anchor))) {popupPlacement = PlacementRight, popupDismissable = False} (label "tip")
         pure sc
   sc <- warmup2 ctx inp ui
   assertJustM failed (getPrevRect ctx sc) $ \r -> do

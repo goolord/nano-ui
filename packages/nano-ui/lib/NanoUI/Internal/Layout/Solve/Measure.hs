@@ -209,9 +209,11 @@ textHeightAt env !idx (AxisSizing hTag _ minH maxH) !w allowed !fallback = do
   if T.null txt
     then pure fallback
     else do
+      si <- getStyleIdx (seArena env) idx
+      let allow = allowed && not (textNodeSingleLine si)
       TextBox {tbWrapped, tbH, tbLineH} <-
-        measureTextNodeAt env idx txt w (\wrapW lineW -> allowed && wrapW + 0.5 < lineW && wrapW > 0)
-      pure (if tbWrapped || (allowed && hTag == SizingFit && w > 0) then clamp minH maxH (max tbLineH tbH) else fallback)
+        measureTextNodeAt env idx txt w (\wrapW lineW -> allow && wrapW + 0.5 < lineW && wrapW > 0)
+      pure (if tbWrapped || (allow && hTag == SizingFit && w > 0) then clamp minH maxH (max tbLineH tbH) else fallback)
 
 measurePass :: SolveEnv -> Int -> IO ()
 measurePass env count = do
@@ -478,6 +480,7 @@ measureTextNode env@SolveEnv {seArena = na} idx = do
   hAx <- getHeightSizing na idx
   parentAssigns <- growParent na idx
   txt <- getText na idx
+  si <- getStyleIdx na idx
   isRowChild <- parentIsRow na idx
   -- A fixed width wraps at itself within its limits, as placement does
   -- ('textWrapCap').
@@ -487,7 +490,7 @@ measureTextNode env@SolveEnv {seArena = na} idx = do
       else if isBounded maxW
         then pure maxW
         else findAncestorMaxW na idx
-  let canWrap = not isRowChild && isBounded effMaxW
+  let canWrap = not isRowChild && not (textNodeSingleLine si) && isBounded effMaxW
   TextBox {tbW = tw, tbH = th, tbLineH = lineH} <-
     measureTextNodeAt env idx txt effMaxW (\_ lineW -> canWrap && effMaxW + 0.5 < lineW)
   let reportedW = sizeWithin wAx (if wTag == SizingGrow && parentAssigns then 0 else tw)
@@ -1270,9 +1273,10 @@ markSteadyHeight env@SolveEnv {seArena = na, seArrays = a} idx = do
         else case nt of
           NodeText -> do
             txt <- getText na idx
+            si <- getStyleIdx na idx
             wTag <- readTagEnum a idx TagWSizing
             rowChild <- parentIsRow na idx
-            pure (T.null txt || (not (T.any (== '\n') txt) && (wTag == SizingFit || rowChild)))
+            pure (T.null txt || (not (T.any (== '\n') txt) && (wTag == SizingFit || rowChild || textNodeSingleLine si)))
           NodeDrawing -> not . isJust <$> (msLookupMeasure (seMs env) =<< getWidgetId na idx)
           NodeContainer -> container
           NodePanel -> container
@@ -1403,7 +1407,7 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a} ci h = do
           rowChild <- parentIsRow na ci
           let newline = T.any (== '\n') raw
           wrapped <-
-            if newline || rowChild
+            if newline || rowChild || textNodeSingleLine si
               then pure newline
               else do
                 AxisSizing wTag _ _ maxW <- getWidthSizing na ci

@@ -15,7 +15,7 @@ data Page = Overview | Logs | Settings
 
 pages = do
   page <- useEnumVar Overview
-  boundedTabs (T.pack . show) page $ \case
+  enumTabsBy (T.pack . show) page $ \case
     Overview -> overviewView
     Logs     -> logsView
     Settings -> settingsView

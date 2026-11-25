@@ -17,6 +17,7 @@ module NanoUI.Internal.Widgets.Behavior
   , KeyNav (..)
   , navStep
   , ListNav (..)
+  , ListNavScroll (..)
   , useListNav
   , useListNavWith
   , useDismissable
@@ -306,24 +307,33 @@ navStep nav = fromEnum (knRight nav || knUp nav) - fromEnum (knLeft nav || knDow
 
 -- | Result of one frame of keyboard list navigation ('useListNav').
 data ListNav = ListNav
-  { lnIndex :: !Int
-  -- ^ Selection index after applying this frame's keys, or @-1@ when empty or
-  -- unselected.
+  { lnIndex :: !(Maybe Int)
+  -- ^ Selected zero-based row index after applying this frame's keys, or
+  -- 'Nothing' when the list is empty or nothing is selected.
   , lnChanged :: !Bool
-  -- ^ 'True' on the frame the index moved via keyboard navigation.
+  -- ^ 'True' on the frame the selection moved via keyboard navigation.
   , lnActivated :: !Bool
   -- ^ 'True' when Enter or Space was pressed while the list held focus and
-  -- had a valid selection (@lnIndex >= 0@).
+  -- had a selection ('Just' index).
   }
   deriving (Eq, Show)
+
+-- | How 'useListNavWith' scrolls a newly selected row into view.
+data ListNavScroll
+  = NavNoScroll
+  -- ^ Do not scroll automatically; caller handles scrolling.
+  | NavUniformRow !Float
+  -- ^ Uniform row step in logical pixels (row height plus gap).
+  | NavRowRect !(Int -> Rect)
+  -- ^ Content-space rectangle for row @i@ (variable-height rows or lists with
+  -- a header above row 0).
 
 -- | Keyboard list navigation for a scrolled list of @count@ uniform-height
 -- rows (@rowStep@ logical pixels per row, including gap). While @scrollId@
 -- holds keyboard focus (see 'NanoUI.scrollFocusable'), handles Up, Down,
 -- PageUp, PageDown, Home, End, Enter, and Space, and scrolls the newly
--- selected row into view via 'NanoUI.scrollRectIntoViewUi' when @rowStep > 0@.
--- Pass @0@ for @rowStep@ to skip automatic scrolling and scroll manually
--- (for example with 'NanoUI.scrollIntoViewUi').
+-- selected row into view when @rowStep > 0@. Pass @0@ or use 'useListNavWith'
+-- with 'NavNoScroll' to scroll manually.
 --
 -- Call before 'NanoUI.scrollConfigured' using 'NanoUI.currentId' so the new
 -- selection highlights on the same frame:
@@ -332,22 +342,19 @@ data ListNav = ListNav
 -- > sel <- readVar selVar
 -- > nav <- useListNav sid (length items) sel 28
 -- > when (lnChanged nav) (writeVar selVar (lnIndex nav))
--- > scrollConfigured defaultScrollConfig {scrollPolicyX = ScrollNone, scrollFocusable = True} (fixedWH 240 180) $ ...
-useListNav :: WidgetId -> Int -> Int -> Float -> NanoUI ListNav
+-- > scrollConfigured defaultScrollConfig {scrollFocusable = True} (fixedWH 240 180) $ ...
+useListNav :: WidgetId -> Int -> Maybe Int -> Float -> NanoUI ListNav
 useListNav scrollId count current rowStep =
-  useListNavCore scrollId count current (if rowStep > 0 then Just (\i -> Rect 0 (fromIntegral i * rowStep) 1 rowStep) else Nothing) rowStep
+  useListNavWith scrollId count current (if rowStep > 0 then NavUniformRow rowStep else NavNoScroll)
 
--- | Like 'useListNav', computing each row's content-space rectangle with
--- @rowRect@ (for variable-height rows or lists with a header above row 0).
-useListNavWith :: (Int -> Rect) -> WidgetId -> Int -> Int -> NanoUI ListNav
-useListNavWith rowRect scrollId count current =
-  useListNavCore scrollId count current (Just rowRect) 0
-
-useListNavCore :: WidgetId -> Int -> Int -> Maybe (Int -> Rect) -> Float -> NanoUI ListNav
-useListNavCore scrollId count current mRowRect rowStep
-  | count <= 0 = pure (ListNav (-1) False False)
+-- | Like 'useListNav', with an explicit 'ListNavScroll' strategy for
+-- variable-height rows, headers above row 0, or manual scrolling.
+useListNavWith :: WidgetId -> Int -> Maybe Int -> ListNavScroll -> NanoUI ListNav
+useListNavWith scrollId count current scrollMode
+  | count <= 0 = pure (ListNav Nothing False False)
   | otherwise = do
-      let cur = if current < 0 then -1 else min (count - 1) current
+      let cur = clampSel <$> current
+          clampSel i = if i < 0 then 0 else min (count - 1) i
           none = ListNav cur False False
       inp <- askInput
       if hashWidgetId scrollId == 0 || inputKeysNull (inputKeys inp) || not (shiftAtMost (inputModifiers inp))
@@ -364,30 +371,36 @@ useListNavCore scrollId count current mRowRect rowStep
                   up = pressedIn KeyUp inp
                   down = pressedIn KeyDown inp
                   act = pressedOnceIn KeyEnter inp || pressedOnceIn KeySpace inp
+                  mRowRect = case scrollMode of
+                    NavNoScroll -> Nothing
+                    NavUniformRow step
+                      | step > 0 -> Just (\i -> Rect 0 (fromIntegral i * step) 1 step)
+                      | otherwise -> Nothing
+                    NavRowRect f -> Just f
               pageStep <-
                 if pgUp || pgDown
                   then withContext $ \ctx -> do
                     mm <- readScrollMetrics ctx scrollId
                     let viewH = maybe 0 (rectH . scrollViewport) mm
-                        stepH
-                          | rowStep > 0 = rowStep
-                          | Just rectOf <- mRowRect = max 1 (rectH (rectOf (max 0 cur)))
-                          | otherwise = 0
+                        stepH = case scrollMode of
+                          NavUniformRow s | s > 0 -> s
+                          NavRowRect f -> max 1 (rectH (f (maybe 0 id cur)))
+                          _ -> 0
                     pure (if viewH > 0 && stepH > 0 then max 1 (floor (viewH / stepH)) else 10)
                   else pure 10
               let next
-                    | home = 0
-                    | end = count - 1
-                    | pgUp = if cur < 0 then count - 1 else max 0 (cur - pageStep)
-                    | pgDown = if cur < 0 then 0 else min (count - 1) (cur + pageStep)
-                    | up = if cur < 0 then count - 1 else max 0 (cur - 1)
-                    | down = if cur < 0 then 0 else min (count - 1) (cur + 1)
+                    | home = Just 0
+                    | end = Just (count - 1)
+                    | pgUp = Just (maybe (count - 1) (\i -> max 0 (i - pageStep)) cur)
+                    | pgDown = Just (maybe 0 (\i -> min (count - 1) (i + pageStep)) cur)
+                    | up = Just (maybe (count - 1) (\i -> max 0 (i - 1)) cur)
+                    | down = Just (maybe 0 (\i -> min (count - 1) (i + 1)) cur)
                     | otherwise = cur
                   changed = next /= cur
               when changed $
-                forM_ mRowRect $ \rectOf ->
-                  withContext (\ctx -> scrollRectIntoView ctx scrollId (rectOf next) ScrollNearest ScrollInstant)
-              pure (ListNav next changed (act && next >= 0))
+                forM_ ((,) <$> mRowRect <*> next) $ \(rectOf, idx) ->
+                  withContext (\ctx -> scrollRectIntoView ctx scrollId (rectOf idx) ScrollNearest ScrollInstant)
+              pure (ListNav next changed (act && isJust next))
 
 -- | Whether @key@ was pressed this frame, auto-repeats included, while
 -- @wid@ holds the keyboard: focused, enabled and not behind a modal. For a

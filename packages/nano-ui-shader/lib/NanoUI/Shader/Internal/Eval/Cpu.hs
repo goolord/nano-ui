@@ -5,7 +5,7 @@
 -- Evaluates the exact same lowered SSA IR emitted to GLSL, MSL, and SPIR-V,
 -- enabling headless golden testing, CPU-vs-GPU differential pixel checks, and
 -- optional SVG raster fallbacks.
-module NanoUI.Shader.Eval.Cpu
+module NanoUI.Shader.Internal.Eval.Cpu
   ( evalShaderIR
   , evalShaderIRColor
   ) where
@@ -22,7 +22,7 @@ import GHC.Float (castWord32ToFloat)
 import NanoUI.Internal.Shader (CpuFragCtx (..))
 import NanoUI (Color (..), V2 (..), colorRGBA)
 import NanoUI.Internal.Uniforms (GpuType (..), UniformField (..))
-import NanoUI.Shader.IR
+import NanoUI.Shader.Internal.IR
 
 data Val
   = VF {-# UNPACK #-} !Float

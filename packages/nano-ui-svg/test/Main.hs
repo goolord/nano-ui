@@ -11,14 +11,15 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import NanoUI
-import NanoUI.Backend (monospaceMetrics)
+import NanoUI.Backend (colorToWord32, monospaceMetrics)
 import NanoUI.Draw.FrameSvg (FrameSvgConfig (..), defaultFrameSvgConfig, enableSvgExport, frameToSvg)
 import NanoUI.Draw.Svg
 import NanoUI.Internal.Path (Shade (Shaded))
-import NanoUI.Internal.Shader (Shader (..))
+import NanoUI.Internal.Shader (Shader (..), emptyShaderProgram, rawLayerShader)
 import NanoUI.Path (LineCap (ButtCap), LineJoin (MiterJoin))
 import NanoUI.Path qualified as P
 import NanoUI.Testing (newPixelContext)
+import NanoUI.Widgets.Custom (DrawOp (..), runCanvasFor)
 import NanoUI.Testing.Assert (require, run2Frames, withInput)
 import System.Environment (lookupEnv)
 
@@ -243,7 +244,7 @@ testFrameToSvg = do
       _ <- circle
       -- Text longer than its field overhangs the field's clip.
       textInputConfigured
-        defaultTextInputConfig {ticLayout = fixedW 80 defaultLayout}
+        defaultTextInputConfig {ticLayout = fixedW 80}
         (constVar ("A value far too long for its field " <> T.pack (show n)))
     exportOf ctx cfg view = run2Frames ctx inp view >>= \(_, dd, _) -> frameToSvg cfg ctx inp dd
   bare <- newPixelContext

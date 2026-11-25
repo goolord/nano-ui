@@ -4,6 +4,7 @@ import Control.Monad (forM_, replicateM_, void, when)
 import GHC.Conc (getAllocationCounter)
 import NanoUI
 import NanoUI.Backend (burstNextIds, emptyInput)
+import NanoUI.Monad (nextId)
 import NanoUI.Testing (Context, newContext, runFrame)
 import System.Exit (exitFailure)
 import System.Mem (performGC)

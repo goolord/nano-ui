@@ -59,7 +59,7 @@ runSvgRasterTest _ failed = do
 runSvgRasterCacheTest :: Context -> IORef Int -> IO ()
 runSvgRasterCacheTest ctx failed = do
   doc <- square
-  theme <- getTheme ctx
+  theme <- getThemeIO ctx
   let inp = withInputOff 200 120
       red = colorRGBA 220 40 40 255
       icons = column (svgIcon 24 doc >> svgIconWith (fixedWH 16 16 . fontColor red) doc)

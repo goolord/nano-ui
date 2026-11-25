@@ -40,11 +40,11 @@ module NanoUI.Internal.Monad
   , resolveFontUi
   , lineWidthUi
   , truncateTextUi
-  , truncateTextMiddleUi
   , truncateTextWithUi
   , uiTime
   , uiTheme
-  , setUiTheme
+  , setTheme
+  , followSystemTheme
   , systemAppearance
   , styled
   , themed
@@ -75,16 +75,18 @@ module NanoUI.Internal.Monad
   , explainScope
   , withArenaRange
   , inArenaRange
-  , getScrollMetricsUi
-  , setScrollOffsetUi
-  , scrollToUi
-  , scrollByUi
-  , scrollPagesUi
-  , scrollToStartUi
-  , scrollToEndUi
-  , scrollIntoViewUi
-  , scrollRectIntoViewUi
-  , setScrollStepUi
+  , getScrollTuning
+  , setScrollTuning
+  , getScrollMetrics
+  , setScrollOffset
+  , scrollTo
+  , scrollBy
+  , scrollPages
+  , scrollToStart
+  , scrollToEnd
+  , scrollIntoView
+  , scrollRectIntoView
+  , setScrollStep
   , damageWidgetNow
   , damageKeyNow
   , damageRectNow

@@ -8,30 +8,31 @@ import Data.Primitive.SmallArray (SmallArray)
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Svg (rasterizeSvg)
+import NanoUI.Widgets.Custom
 
 -- ANCHOR: with_forms
 controls :: Var Float -> Float -> [Float] -> NanoUI ()
 controls volume progress samples = do
-  knobWith alignMid 48 0 100 volume
+  knobWith alignMiddle 48 0 100 volume
   progressBarWith fillW 6 progress
   sparklineWith (fixedWH 120 32) 120 32 samples
 -- ANCHOR_END: with_forms
 
 -- ANCHOR: settings_row
 settingsRow :: Var Bool -> Var Float -> NanoUI ()
-settingsRow enabled volume = rowWith (gap 12 . alignMid) $ do
+settingsRow enabled volume = rowWith (gap 12 . alignMiddle) $ do
   toggleSwitch enabled
-  labelWith (alignMid . fixedW 64) "Enabled"
+  labelWith (alignMiddle . fixedW 64) "Enabled"
   knob 0 100 volume
   v <- readVar volume
-  labelWith (alignMid . fontMono . fixedW 48) (T.pack (show (round v :: Int)))
+  labelWith (alignMiddle . fontMono . fixedW 48) (T.pack (show (round v :: Int)))
 -- ANCHOR_END: settings_row
 
 -- ANCHOR: custom_widget
 dot :: Float -> Float -> NanoUI Response
 dot angle volume = do
   (resp, ()) <- customWidget defaultCustomWidgetSpec
-    { widgetLayout = fixedWH 48 48 defaultLayout
+    { widgetLayout = fixedWH 48 48
     , widgetContent = contentKey [angle, volume]
     , widgetDraw = \cdc (Rect x y w h) -> runCanvasFor cdc $ do
         drawCircle (V2 (x + w / 2) (y + h / 2)) 16 (themeAccent (cdcTheme cdc))
@@ -44,7 +45,7 @@ dot angle volume = do
 gauge :: Float -> Float -> Float -> NanoUI Response
 gauge angle volume scrollY = do
   (resp, ()) <- customWidget defaultCustomWidgetSpec
-    { widgetLayout = fixedWH 48 48 defaultLayout
+    { widgetLayout = fixedWH 48 48
     , widgetContent = contentKey [angle, volume, fromIntegral (round scrollY :: Int)]
     , widgetDraw = \cdc rect -> runCanvasFor cdc (drawGauge rect)
     }

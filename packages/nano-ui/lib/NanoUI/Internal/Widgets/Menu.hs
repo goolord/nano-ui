@@ -78,7 +78,7 @@ runContextMenu (wid, ctx) rightClick child = do
   let key = intKey wid
       mouse = inputMousePos inp
       pos = if rightClick then mouse else findSpec slotMenuPos (V2 0 0) key store
-      cfg = (defaultPopupConfig (AnchorPoint pos)) {cfgPlacement = PlacementAtCursor, cfgOffset = 0}
+      cfg = (defaultPopupConfig (AnchorPoint pos)) {popupPlacement = PlacementAtCursor, popupOffset = 0}
       -- A menu taller than the window is held inside it, as a modal is, and
       -- its rows scroll.
       Size _ winH = inputWindowSize inp

@@ -26,12 +26,6 @@ module NanoUI.Input
   , anyButtonReleased
   , applyMouseButton
   , applyPointerLeave
-  , inputMouseDown
-  , inputMousePressed
-  , inputMouseReleased
-  , inputMouseRightDown
-  , inputMouseRightPressed
-  , inputMouseRightReleased
 
     -- * Keys
   , Key (..)

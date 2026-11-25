@@ -8,8 +8,10 @@ module NanoUI.Internal.Widgets.Overlay
   , modalPanel'
   , modalPanelWith
   , modalPanelWith'
-  , window
-  , window'
+  , floatingWindow
+  , floatingWindow'
+  , floatingWindowWith
+  , floatingWindowWith'
   , windowTitleBarH
   , windowChromeSepH
   )
@@ -107,16 +109,25 @@ modalPanelWith shape open body = void (modalPanelWith' shape open body)
 modalPanelWith' :: (Layout -> Layout) -> Var Bool -> NanoUI a -> NanoUI (Response, Maybe a)
 modalPanelWith' shape open body = bindOpen open (\shown -> overlay True False shape shown "" body)
 
--- | A draggable, resizable in-app window with a scrolling body, shown while
--- the Var holds 'True'. Its close button writes 'False'. Other windows and
--- the page remain interactive outside its bounds.
-window :: Var Bool -> Text -> NanoUI () -> NanoUI ()
-window open title body = void (window' open title body)
+-- | A draggable, resizable in-app floating window with a scrolling body, shown
+-- while the Var holds 'True'. Its close button writes 'False'. Other windows
+-- and the page remain interactive outside its bounds.
+floatingWindow :: Var Bool -> Text -> NanoUI () -> NanoUI ()
+floatingWindow = floatingWindowWith id
 
--- | 'window' returning the body's result while open, and a 'Response' that
--- reports a close request as a click.
-window' :: Var Bool -> Text -> NanoUI a -> NanoUI (Response, Maybe a)
-window' open title body = bindOpen open (\shown -> overlay False True id shown title body)
+-- | 'floatingWindow' returning the body's result while open, and a 'Response'
+-- that reports a close request as a click.
+floatingWindow' :: Var Bool -> Text -> NanoUI a -> NanoUI (Response, Maybe a)
+floatingWindow' = floatingWindowWith' id
+
+-- | 'floatingWindow' with a layout modifier for its panel (for example,
+-- 'fixedWH' or 'minW').
+floatingWindowWith :: LayoutModifier -> Var Bool -> Text -> NanoUI () -> NanoUI ()
+floatingWindowWith f open title body = void (floatingWindowWith' f open title body)
+
+-- | 'floatingWindowWith' returning the body's result and the 'Response'.
+floatingWindowWith' :: LayoutModifier -> Var Bool -> Text -> NanoUI a -> NanoUI (Response, Maybe a)
+floatingWindowWith' f open title body = bindOpen open (\shown -> overlay False True f shown title body)
 
 overlay ::
   Bool -> Bool -> (Layout -> Layout) -> Bool -> Text -> NanoUI a -> NanoUI (Response, Maybe a)
@@ -188,7 +199,7 @@ overlay isModal hasChrome shape open title child = do
           }
     enter = when isModal (beginModal ctx)
     titleLayout =
-      (fixedH barH . alignMid . tight) defaultLayout {layoutMinH = barH, layoutMaxH = barH}
+      (fixedH barH . alignMiddle . tight) defaultLayout {layoutMinH = barH, layoutMaxH = barH}
   floatingOverlay open (if isModal then Just (Rect 0 0 0 0) else Nothing) addOverlayNode enter $ do
     closed <-
       if hasChrome
@@ -199,7 +210,7 @@ overlay isModal hasChrome shape open title child = do
                 (if isModal then id else withKey title) (void (labelEx titleLayout title))
               flex
               withKey ("close" :: Text) $
-                buttonStyledEx True "" 0 (tight . fixedWH 24 24 . alignMid $ defaultLayout) $
+                buttonStyledEx True "" 0 (tight . fixedWH 24 24 . alignMiddle $ defaultLayout) $
                   buttonFlagClose .|. buttonCloseTrailing
           when (isModal && not (T.null title)) separator
           pure (respClicked close)

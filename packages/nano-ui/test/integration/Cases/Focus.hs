@@ -258,7 +258,7 @@ runFocusRevealsTest ctx failed = do
       ui = (mapM_ requestFocus =<< liftIO (readIORef target)) >> buttons
       showsIn c sid = do
         rect <- getPrevRect c =<< getFocusId c
-        metrics <- getScrollMetrics c sid
+        metrics <- getScrollMetricsIO c sid
         pure $ case (rect, scrollViewport <$> metrics) of
           (Just (Rect _ y _ h), Just (Rect _ vy _ vh)) -> y >= vy - 0.5 && y + h <= vy + vh + 0.5
           _ -> False
@@ -290,7 +290,7 @@ runFocusTabClaimedTest _ failed = do
       ctx <- newContext
       let ui = column $ do
             let custom = defaultCustomWidgetSpec {widgetFocusable = True, widgetKeys = claim}
-            (r, _) <- customWidget custom {widgetLayout = fixedWH 100 30 defaultLayout}
+            (r, _) <- customWidget custom {widgetLayout = fixedWH 100 30}
             tabbed <- focusedKeyPressed (respId r) KeyTab
             _ <- button' "Next"
             pure (respId r, tabbed)
@@ -371,7 +371,7 @@ canvasFocusUi = column $ do
   where
     canvasOf focusable = canvasConfigured (config focusable) (\_ -> pure ())
     config focusable = defaultCanvasConfig {canvasLayout = size, canvasFocusable = focusable}
-    size = fixedWH 100 40 defaultLayout
+    size = fixedWH 100 40
 
 canvasFocusClick :: Sim (Response, Response, WidgetId, Bool) ()
 canvasFocusClick = do

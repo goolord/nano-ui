@@ -35,7 +35,6 @@ import Data.Text.Lazy.Builder qualified as TB
 import Data.Word (Word32)
 import NanoUI
   ( Color (..)
-  , DrawOp (..)
   , FontVariant (..)
   , Rect (..)
   , TextFont (..)
@@ -46,6 +45,7 @@ import NanoUI
   , colorToHex
   , lerpColor
   )
+import NanoUI.Widgets.Custom (DrawOp (..))
 import NanoUI.Draw.Svg.Attr
   ( attr
   , escapeXml

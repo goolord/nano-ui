@@ -44,6 +44,7 @@ tests =
   , spec "covered-widget-no-pointer" runCoveredWidgetNoPointerTest
   , spec "container-queries" runContainerQueryTest
   , pixelSpec "items-align" runItemsAlignTest
+  , pixelSpec "items-stretch-and-justify" runItemsStretchAndJustifyTest
   ]
 
 red, green, blue, yellow :: Color
@@ -96,7 +97,7 @@ runLayoutFlowRectsTest ctx failed =
       [ ( columnWith tight $ layersWith (padAll 4) $ do
             box (fixedWH 100 60) red
             box (alignEnd . alignBottom . fixedWH 20 10) blue
-            box (alignCenter . alignMid . fixedWH 10 10) blue
+            box (alignCenter . alignMiddle . fixedWH 10 10) blue
             box (fillW . fixedH 6) green
             box (alignEnd . percent 50 . fixedH 6) green
             box (fillH . fixedW 5) yellow
@@ -141,7 +142,7 @@ runLayoutFlowRectsTest ctx failed =
             box (pinAt (-16) (-16) . alignEnd . alignBottom . fixedWH 40 40) red
             box (pinAt 6 (-6) . alignEnd . alignTop . fixedWH 12 12) blue
             box (pinAt (-10) 0 . alignEnd . fillW . fixedH 4) green
-            box (pinAt 10 0 . alignCenter . alignMid . fixedWH 20 10) yellow
+            box (pinAt 10 0 . alignCenter . alignMiddle . fixedWH 20 10) yellow
         , [Rect 0 0 200 100, Rect 144 44 40 40, Rect 194 (-6) 12 12, Rect 0 0 190 4, Rect 100 45 20 10] )
       , (in300 (box (fillW . aspect 2) red), [Rect 0 0 300 150])
       , (in300 (box (fixedW 80 . aspect 4) red), [Rect 0 0 80 20])
@@ -182,8 +183,8 @@ runTextSizesTest ctx failed = do
     assertEq failed want rs
     assertJust failed (lookup idx (zip [0 :: Int ..] rs)) (assertPaintedLines failed ctx others)
   let narrow l = l {layoutWidth = Fixed 100, layoutHeight = Fixed 28}
-      field f = textInputConfigured' defaultTextInputConfig {ticLayout = f (ticLayout defaultTextInputConfig)}
-      custom = defaultCustomWidgetSpec {widgetLayout = narrow (minW 160 defaultLayout), widgetMeasure = Just (\_ _ -> (100, 28))}
+      field f = textInputConfigured' defaultTextInputConfig {ticLayout = f}
+      custom = defaultCustomWidgetSpec {widgetLayout = narrow . minW 160, widgetMeasure = Just (\_ _ -> (100, 28))}
       limits = rowWith tight $ do
         (a, _) <- withValue "" (field narrow)
         b <- button' "Go"
@@ -236,7 +237,7 @@ runWrapRefitInColumnTest ctx failed = do
 runFlowInScrollerTest :: Context -> IORef Int -> IO ()
 runFlowInScrollerTest ctx failed = do
   let scrolled w h body = columnWith tight (scrollArea (fixedWH w h . tight) body)
-      rangeOf sid want = assertJustM failed (getScrollMetrics ctx sid) (assertEq failed want . v2Y . scrollRange)
+      rangeOf sid want = assertJustM failed (getScrollMetricsIO ctx sid) (assertEq failed want . v2Y . scrollRange)
       bottom b = rectY b + rectH b
       wrapped = scrolled 120 50 $ rowWith (wrap . fillW . tight . gap 0) (replicateM_ 12 (box (fixedWH 40 20) red))
   (sid, _) <- warmup2 ctx input0 wrapped
@@ -245,13 +246,13 @@ runFlowInScrollerTest ctx failed = do
   assert failed (all (\b -> rectX b + rectW b <= 120) boxes && rectH r >= 80)
   assertEq failed (bottom r) (maximum (map bottom boxes))
   rangeOf sid (rectH r - 50)
-  setScrollOffset ctx sid (rectH r - 50)
+  setScrollOffsetIO ctx sid (rectH r - 50)
   warmup ctx input0 wrapped
   arenaRects ctx >>= assertEq failed 50 . bottom . last
   let pinned = scrolled 100 50 (box (fixedWH 80 20) red >> box (pinAt 0 200 . fixedWH 30 30) blue)
   (pid, _) <- warmup2 ctx input0 pinned
   rangeOf pid 180
-  setScrollOffset ctx pid 180
+  setScrollOffsetIO ctx pid 180
   warmup ctx input0 pinned
   rectsAt ctx [2, 3] >>= assertEq failed [Rect 0 (-180) 80 20, Rect 0 20 30 30]
   assertJustM failed (getClipRect (ctxNodeArena ctx) 3) (assert failed . covers (Rect 0 0 100 50))
@@ -260,7 +261,7 @@ runFlowInScrollerTest ctx failed = do
     (fid, _) <- warmup2 fresh input0 . columnWith tight . scrollArea2D (flow . fixedWH 100 50 . tight . gap 0) $
       replicateM_ 3 (box (fixedWH 40 20) red)
     arenaRects fresh >>= assertEq failed [0, 20, 40] . map rectY . drop 2
-    assertJustM failed (getScrollMetrics fresh fid) (assertEq failed 10 . v2Y . scrollRange)
+    assertJustM failed (getScrollMetricsIO fresh fid) (assertEq failed 10 . v2Y . scrollRange)
 
 -- | Each case's first colour is painted before its second. A pinned child
 -- outside its parent is still painted, also on a frame that repaints only it.
@@ -370,7 +371,7 @@ runPointerOwnerTest ctx failed =
 -- field over a button or another field takes it.
 runCoveredFieldFocusTest :: Context -> IORef Int -> IO ()
 runCoveredFieldFocusTest ctx failed = do
-  let field f t = fst <$> withValue t (textInputConfigured' defaultTextInputConfig {ticLayout = f (ticLayout defaultTextInputConfig)})
+  let field f t = fst <$> withValue t (textInputConfigured' defaultTextInputConfig {ticLayout = f})
       onLeft r = At (V2 (rectX (respRect r) + 20) (rectY (respRect r) + rectH (respRect r) / 2))
       focusAfter t = click t >> focusedId
       layeredUi = column $ do
@@ -636,6 +637,110 @@ runContainerQueryTest ctx failed = do
     wb <- rectOf "wide-B"
     checkGt (rectY nb) (rectY na + 4)
     checkGt (rectX wb) (rectX wa + 4)
+  -- withContainerQuery schedules a follow-up frame only when its projected
+  -- discrete bucket changes, not on pixel resizes within the same bucket.
+  let bucketUi =
+        withContainerQuery (fillW . fillH) (\(Size w _) -> if w >= 300 then (2 :: Int) else 1) $ \cols ->
+          gridWith cols (fillW . tight) $ do
+            label "Q1"
+            label "Q2"
+  c <- newContext
+  _ <- warmup2 c (withInput 400 200) bucketUi
+  (_, _, followSameBucket) <- runFrame c (withInput 360 200) bucketUi
+  assertEq failed False followSameBucket
+  (_, _, followCrossBucket) <- runFrame c (withInput 250 200) bucketUi
+  assertEq failed True followCrossBucket
+  -- Check layout convenience modifiers: direction, fitW, fitH, growW, growH,
+  -- percentH, spacerW, spacerH, clipBox.
+  c2 <- newContext
+  let helperUi =
+        columnWith (fixedWH 200 100 . tight . gap 0) $ do
+          rowWith (direction Row . fitW . fitH . tight . gap 0) $ do
+            box (fixedWH 20 10) red
+            spacerW 15
+            box (fixedWH 20 10) green
+          spacerH 10
+          clipBox (fixedWH 80 30) $
+            box (fixedWH 120 50) blue
+          rowWith (fillW . percentH 50 . tight . gap 0) $ do
+            box (growW 1 . growH 1) yellow
+            box (growW 3 . growH 1) red
+  _ <- warmup2 c2 (withInput 400 300) helperUi
+  arenaRects c2 >>= \case
+    [_, _, r1, _, r2, _, clipR, _, _, g1, g2] -> do
+      assertEq failed 35 (rectX r2 - rectX r1)
+      assertEq failed (Rect 0 20 80 30) clipR
+      assertEq failed 50 (rectH g1)
+      assertEq failed 50 (rectW g1)
+      assertEq failed 150 (rectW g2)
+    rs -> assertEq failed 11 (length rs)
+
+-- | 'itemsStretch' stretches unaligned Fit cross-axis children while preserving
+-- explicit alignment and fixed sizes; 'justify*' distributes leftover main-axis
+-- slack in both Row and Column.
+runItemsStretchAndJustifyTest :: Context -> IORef Int -> IO ()
+runItemsStretchAndJustifyTest ctx failed = do
+  let inp = withInput 500 400
+  -- Column with itemsStretch: unaligned Fit child stretches to 200; explicit
+  -- alignStart and fixedW children keep their own width.
+  let colStretch = columnWith (tight . gap 4 . fixedW 200 . itemsStretch) $ do
+        panelWith (tight . fixedH 20) (label "stretch")
+        panelWith (tight . fixedH 20 . alignStart) (label "explicit")
+        box (fixedWH 40 20) green
+  _ <- warmup2 ctx inp colStretch
+  arenaRects ctx >>= \case
+    [_, pStretch, _, pExplicit, _, fixedBox] -> do
+      assertEq failed 200 (rectW pStretch)
+      assertLt failed (rectW pExplicit) 150
+      assertEq failed 40 (rectW fixedBox)
+    rs -> assertEq failed 6 (length rs)
+  -- Row with itemsStretch: unaligned Fit child stretches to row height 60;
+  -- explicit alignTop keeps its own height.
+  let rowStretch = rowWith (tight . gap 4 . fixedWH 200 60 . itemsStretch) $ do
+        panelWith (tight . fixedW 40) (label "s")
+        panelWith (tight . fixedW 40 . alignTop) (label "t")
+  _ <- warmup2 ctx inp rowStretch
+  arenaRects ctx >>= \case
+    [_, pStretch, _, pTop, _] -> do
+      assertEq failed 60 (rectH pStretch)
+      assertLt failed (rectH pTop) 40
+    rs -> assertEq failed 5 (length rs)
+  -- Justify in Row (width 200, three 20px boxes, gap 10 -> content 80, slack 120):
+  let rowJ j = rowWith (tight . gap 10 . fixedWH 200 30 . j) $ do
+        box (fixedWH 20 20) red
+        box (fixedWH 20 20) green
+        box (fixedWH 20 20) blue
+  forM_
+    [ (justifyStart, [0, 30, 60])
+    , (justifyCenter, [60, 90, 120])
+    , (justifyEnd, [120, 150, 180])
+    , (justifyBetween, [0, 90, 180])
+    ]
+    $ \(j, wantXs) -> do
+      _ <- warmup2 ctx inp (rowJ j)
+      arenaRects ctx >>= \case
+        [_, a, b, c] -> assertEq failed wantXs (map rectX [a, b, c])
+        rs -> assertEq failed 4 (length rs)
+  -- Single child under justifyBetween starts at 0 (no division by zero).
+  _ <- warmup2 ctx inp (rowWith (tight . fixedWH 200 30 . justifyBetween) (box (fixedWH 20 20) red))
+  arenaRects ctx >>= \case
+    [_, a] -> assertEq failed 0 (rectX a)
+    rs -> assertEq failed 2 (length rs)
+  -- Justify in Column (height 200, two 20px boxes, gap 10 -> content 50, slack 150):
+  let colJ j = columnWith (tight . gap 10 . fixedWH 60 200 . j) $ do
+        box (fixedWH 20 20) red
+        box (fixedWH 20 20) green
+  forM_
+    [ (justifyStart, [0, 30])
+    , (justifyCenter, [75, 105])
+    , (justifyEnd, [150, 180])
+    , (justifyBetween, [0, 180])
+    ]
+    $ \(j, wantYs) -> do
+      _ <- warmup2 ctx inp (colJ j)
+      arenaRects ctx >>= \case
+        [_, a, b] -> assertEq failed wantYs (map rectY [a, b])
+        rs -> assertEq failed 3 (length rs)
 
 -- | Container cross-axis alignment ('itemsCenter', 'itemsEnd', 'itemsBaseline')
 -- applies to children without explicit alignment, lets explicit child modifiers

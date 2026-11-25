@@ -433,12 +433,12 @@ channelField :: Float -> Text -> Int -> Int -> NanoUI Int
 channelField pct label hi value =
   container NodeContainer (colorPickerFieldGroupLayout pct) $ do
     labelWid <- nextId
-    void (addWidget labelWid NodeText label 0 (tight (alignMid defaultLayout)))
+    void (addWidget labelWid NodeText label 0 (tight (alignMiddle defaultLayout)))
     -- Room for three digits beside the stepper.
     round
       . snd
       <$> numericInputCore
-        defaultNumericInputConfig {nicMin = 0, nicMax = fromIntegral hi, nicLayout = minW 60 colorPickerFieldLayout}
+        defaultNumericInputConfig {nicMin = 0, nicMax = fromIntegral hi, nicLayout = const (minW 60 colorPickerFieldLayout)}
         (fromIntegral value)
 
 -- | Adopt the caller's colour as 'adoptSlot' does. A new

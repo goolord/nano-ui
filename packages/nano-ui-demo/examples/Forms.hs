@@ -111,7 +111,7 @@ signUp app = do
       checkbox "I agree to the terms" form.formAgreed
       agreed <- readVar form.formAgreed
       clicked <-
-        rowWith (tight . gap 10 . alignMid . fillW) $ do
+        rowWith (tight . gap 10 . alignMiddle . fillW) $ do
           c <- disabledWhen (not agreed) (styled primary (button "Sign up"))
           -- The hint comes and goes, so it sits in a scope.
           scope (unless agreed (muted "Tick the agreement to sign up."))

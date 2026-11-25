@@ -105,7 +105,7 @@ runModalNestedDismissTest ctx failed = do
 
 innerWindowUi :: NanoUI (Maybe (Response, Maybe Response))
 innerWindowUi = fmap snd . modalWith' (fixedWH 460 380) (constVar True) "Settings" $ do
-  (_, hidden) <- window' (constVar True) "Inspector" (buttonWith' (fixedWH 420 200) "Hidden")
+  (_, hidden) <- floatingWindow' (constVar True) "Inspector" (buttonWith' (fixedWH 420 200) "Hidden")
   ok <- button' "OK"
   pure (ok, hidden)
 
@@ -129,7 +129,7 @@ modalOverInnerWindow = do
 -- modal without accumulating rounding error through nested containers.
 runModalFractionalScaleNoScrollTest :: Context -> IORef Int -> IO ()
 runModalFractionalScaleNoScrollTest _ failed = forM_ cases $ \(s, n, nested) -> do
-  let field i = rowWith (fillW . fixedH 30 . alignMid) (label (T.pack ("Field " <> show i)))
+  let field i = rowWith (fillW . fixedH 30 . alignMiddle) (label (T.pack ("Field " <> show i)))
       section = columnWith (fillW . gap 6) $ do
         label "Section"
         columnWith (fillW . gap 0) (spacer Fit (Fixed 3) >> forM_ [1 .. n] field >> spacer Fit (Fixed 3))
@@ -180,7 +180,7 @@ runModalFillLabelFitsTest _ failed = forM_ [12, 17] $ \base -> do
         labelWith (tight . fillW . fontSize 14) $
           "Kept in memory for this session only. The password goes to cabal on its standard input."
         separator
-        ok <- rowWith (fillW . gap 8 . alignMid . tight) (flex >> button "Cancel" >> button' "Use this login")
+        ok <- rowWith (fillW . gap 8 . alignMiddle . tight) (flex >> button "Cancel" >> button' "Use this login")
         void (buttonWith' (\l -> l {layoutWidth = Percent 50}) "HalfFit")
         pure ok
   runSim ctx failed (withInput 2000 800) (modal' (constVar True) "Hackage login" body) $ do

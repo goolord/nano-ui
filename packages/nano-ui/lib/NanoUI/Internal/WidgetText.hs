@@ -62,6 +62,7 @@ module NanoUI.Internal.WidgetText
   , textNodeTextDecoration
   , textNodeFontTabular
   , textNodeEllipsis
+  , textNodeSingleLine
   , tableSortMarkOf
   , buttonVisualStyle
   , labelFontStyle
@@ -77,7 +78,6 @@ module NanoUI.Internal.WidgetText
   , tabChromeDecode
   ) where
 
-import Control.Applicative ((<|>))
 import Data.Bits ((.&.), (.|.), finiteBitSize, shiftL, shiftR, xor)
 import Data.Char (digitToInt, isHexDigit)
 import Data.Maybe (fromMaybe)
@@ -90,7 +90,7 @@ import NanoUI.Internal.Font (FontMetrics (..), controlPadY, fmLineHeight, tableC
 import NanoUI.Internal.Layout.Arena (labelFontShift)
 import NanoUI.Internal.StyleBits (BitField (..))
 import qualified NanoUI.Internal.StyleBits as SB
-import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), Style (..), TextDecoration (..), TextEllipsis (..), Theme (..), Tone (..), toneColor, variantFace, variantTone)
+import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), Style (..), TextDecoration (..), TextEllipsis (..), Theme (..), Tone (..), toneColor)
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorB, colorG, colorR, colorRGBA, lerpColor)
 import qualified Data.Text as T
 
@@ -278,13 +278,14 @@ colorFromHex txt = do
 packTextNodeStyle :: Layout -> Int -> Word64
 packTextNodeStyle l stripe =
   stripeBits stripe
-    .|. SB.packField SB.textFace (fromEnum (variantFace (layoutFontVariant l)))
+    .|. SB.packField SB.textFace (fromEnum (layoutFontVariant l))
     .|. SB.packField SB.textWeight (fromEnum (layoutFontWeight l))
     .|. SB.packField SB.textSlant (fromEnum (layoutFontStyle l))
     .|. SB.packField SB.textDecoration (fromEnum (layoutTextDecoration l))
     .|. (if layoutFontTabular l then SB.fieldMask SB.textTabular else 0)
-    .|. SB.placeField SB.textTone (maybe 0 ((+ 1) . fromEnum) (layoutFontTone l <|> variantTone (layoutFontVariant l)))
+    .|. SB.placeField SB.textTone (maybe 0 ((+ 1) . fromEnum) (layoutFontTone l))
     .|. SB.packField SB.textEllipsis (fromEnum (layoutEllipsis l))
+    .|. (if layoutSingleLine l then SB.fieldMask SB.textSingleLine else 0)
 
 -- | The enum packed in field @f@ of the style bits, or @fallback@ when the
 -- field holds no constructor.
@@ -346,6 +347,11 @@ textNodeFontTabular = SB.testField SB.textTabular
 {-# INLINE textNodeEllipsis #-}
 textNodeEllipsis :: Word64 -> TextEllipsis
 textNodeEllipsis = decodeStyleEnum SB.textEllipsis EllipsisEnd
+
+-- | Whether a text node stays on one line and truncates instead of wrapping.
+{-# INLINE textNodeSingleLine #-}
+textNodeSingleLine :: Word64 -> Bool
+textNodeSingleLine = SB.testField SB.textSingleLine
 
 -- | Row fill for stripe code 1 (even rows) or 2 (odd rows); 0 is unstriped.
 {-# INLINE stripeColor #-}

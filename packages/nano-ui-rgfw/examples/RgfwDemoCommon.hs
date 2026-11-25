@@ -17,7 +17,7 @@ import NanoUI
   , Size (..)
   , Theme
   , constVar
-  , boundedRadio
+  , enumRadioBy
   , button
   , button'
   , checkbox
@@ -45,11 +45,13 @@ import NanoUI
   , tabBar
   , textArea'
   , textInput
-  , tomorrowMidnightMinDarkTheme
+  , whenM
+  , floatingWindow'
+  )
+import NanoUI.Themes
+  ( tomorrowMidnightMinDarkTheme
   , tomorrowMinLightTheme
   , tomorrowNightMinDarkTheme
-  , whenM
-  , window'
   )
 import NanoUI.Monad (askInput)
 import NanoUI.Shortcut (cmdOrCtrl, key)
@@ -235,7 +237,7 @@ appView m = do
 
     when (debugOpen m) $ do
       snap <- fromMaybe emptyRgfwDebug <$> askRgfwDebug
-      (win, _) <- window' (constVar True) "Debug" (debugWindowBody snap)
+      (win, _) <- floatingWindow' (constVar True) "Debug" (debugWindowBody snap)
       when (respClicked win) (Emit.emit (ToggleDebug False))
 
 viewControlsTab :: Model -> Emit.NanoUIE Msg ()
@@ -297,7 +299,7 @@ viewControlsTab m = do
       gridWith 1 (gap 2) $ do
         label "Preset:"
         Emit.emitChanged
-          ( boundedRadio
+          ( enumRadioBy
               ( \case
                   ProfileFast -> "Fast (Low Latency)"
                   ProfileBalanced -> "Balanced (Standard)"

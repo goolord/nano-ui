@@ -107,7 +107,7 @@ module NanoUI.Shader.Expr
   , (.&&)
   , (.||)
   , notE
-  , select
+  , selectE
     -- * Common 2D SDF, color, and noise helpers
   , sdCircle
   , sdRoundedBox
@@ -146,8 +146,8 @@ import GHC.TypeLits
   )
 import NanoUI (Color (..), Rect, Size, V2 (..))
 import NanoUI.Internal.Uniforms (GpuType (..), V3 (..), V4 (..))
-import NanoUI.Shader.IR
-import NanoUI.Shader.Swizzle (Swizzle (..))
+import NanoUI.Shader.Internal.IR
+import NanoUI.Shader.Internal.Swizzle (Swizzle (..))
 
 -- | Typed fragment shader expression lowered into 'ShaderIR' at lexical scope
 -- depth @d@.
@@ -777,7 +777,7 @@ instance Num (Expr Word32) where
   (*) = binOpE BMul
   negate = unOpE UNeg
   abs = id
-  signum u = select (u .== uintE 0) (uintE 0) (uintE 1)
+  signum u = selectE (u .== uintE 0) (uintE 0) (uintE 1)
   fromInteger = uintE . fromInteger
 
 instance Num (Expr V2) where
@@ -961,9 +961,9 @@ eqOp op a b =
 notE :: Expr Bool -> Expr Bool
 notE = unOpE UNot
 
--- | Branchless conditional selection: @select cond whenTrue whenFalse@.
-select :: GpuExpr a => Expr Bool -> Expr a -> Expr a -> Expr a
-select = triOpE TSelect
+-- | Branchless conditional selection: @selectE cond whenTrue whenFalse@.
+selectE :: GpuExpr a => Expr Bool -> Expr a -> Expr a -> Expr a
+selectE = triOpE TSelect
 
 -- ---------------------------------------------------------------------------
 -- Common 2D SDF, color, and noise helpers

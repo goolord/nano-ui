@@ -25,7 +25,7 @@ placedMeasureUi ref = columnWith (fixedW 70 . gap 0 . \l -> l {layoutPadding = P
   txt <- readVar ref
   respRect . fst <$> customWidget defaultCustomWidgetSpec
     { widgetMeasure = Just (\_ (w, _) -> (min w (charW * fromIntegral (T.length txt)), lineH * fromIntegral (linesAt w txt)))
-    , widgetLayout = fillW defaultLayout
+    , widgetLayout = fillW
     }
 
 placedMeasure :: Var T.Text -> Sim Rect ()
@@ -144,7 +144,7 @@ containerMods m inLayers =
       lo = if f 9 6 == 0 then minW (fromIntegral (20 + f 10 100)) else id
       hi = if f 11 6 == 0 then maxW (fromIntegral (100 + f 12 300)) else id
       aligned = case f 13 8 of
-        0 -> alignMid
+        0 -> alignMiddle
         1 -> alignEnd
         2 -> alignBaseline
         _ -> id
@@ -178,7 +178,7 @@ render f inLayers = \case
       KLayers -> layersWith mods (body True)
       KWrapRow -> rowWith (wrap . mods) (body False)
       KWrapCol -> columnWith (wrap . mods) (body False)
-      KWindow -> void (window' (constVar True) (T.pack ("W" <> show (m `mod` 1000))) (columnWith mods (body False)))
+      KWindow -> void (floatingWindow' (constVar True) (T.pack ("W" <> show (m `mod` 1000))) (columnWith mods (body False)))
   Leaf kind i -> do
     let v = version i f
     case kind of
@@ -193,5 +193,5 @@ render f inLayers = \case
       LMeasured ->
         void $ customWidget defaultCustomWidgetSpec
           { widgetMeasure = Just (\_ (w, _) -> (min w 90, fromIntegral (12 + pick v 20)))
-          , widgetLayout = fillW defaultLayout
+          , widgetLayout = fillW
           }

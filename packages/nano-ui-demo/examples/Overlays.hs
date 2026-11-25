@@ -20,7 +20,7 @@
 -- floats over the page but leaves it usable, and can be dragged and resized.
 --
 -- With 'wsExitOnCloseRequest' off, closing the native window only sets
--- 'winCloseRequested'; the app asks in a modal and calls 'quitUi' if the user
+-- 'winCloseRequested'; the app asks in a modal and calls 'quit' if the user
 -- agrees. Escape closes the open menu or dialog here, so it never quits. See
 -- Keyboard.hs for menu shortcuts.
 --
@@ -102,11 +102,11 @@ overlaysApp app = do
       ]
     separator
     columnWith (padAll 16 . gap 12 . fillW . fillH) $ do
-      rowWith (tight . gap 8 . alignMid . fillW) $ do
+      rowWith (tight . gap 8 . alignMiddle . fillW) $ do
         filterR <- button' "Filter"
         tooltip filterR "Choose which kinds of item to show"
         when (respClicked filterR) (modifyVar filterOpen not)
-        let below = (defaultPopupConfig (AnchorRect (respRect filterR))) {cfgPlacement = PlacementBelow}
+        let below = (defaultPopupConfig (AnchorRect (respRect filterR))) {popupPlacement = PlacementBelow}
         popup filterOpen below $ do
           menuHeader "Show"
           checkbox "Fruit" showFruit
@@ -115,7 +115,7 @@ overlaysApp app = do
         toggleButton Accent "Inspector" inspectorOpen
         flex
         void $
-          withTooltip (labelWith (tight . alignMid . fontMuted) (plural picked "item" <> " picked")) $ do
+          withTooltip (labelWith (tight . alignMiddle . fontMuted) (plural picked "item" <> " picked")) $ do
             label "Picked items are deleted together."
             muted "Edit > Pick all picks every row."
       scrollWith (grow . fillW) $
@@ -128,7 +128,7 @@ overlaysApp app = do
 
   -- Overlays float over the page wherever they are declared; keeping them
   -- together at the end reads best. Each takes its ids whether open or not.
-  window inspectorOpen "Inspector" $ do
+  floatingWindow inspectorOpen "Inspector" $ do
     kv "Items" (T.pack (show (length all')))
     kv "Showing" (T.pack (show (length (filter visible all'))))
     kv "Picked" (T.pack (show picked))
@@ -152,7 +152,7 @@ overlaysApp app = do
     rowWith (tight . gap 8 . fillW) $ do
       flex
       whenM (button "Keep working") (writeVar asking False)
-      whenM (styled destructive (button "Quit")) quitUi
+      whenM (styled destructive (button "Quit")) quit
 
 -- | One row: a checkbox across the row that edits the item's picked flag,
 -- with a context menu on it. Vars inside 'contextMenu' live under the
@@ -183,7 +183,7 @@ menuBar openMenu entries =
       btn <- menuButton' title isOpen
       when (respClicked btn) (writeVar openMenu (if isOpen then "" else title))
       when (not isOpen && not (T.null current) && respHovered btn) (writeVar openMenu title)
-      let cfg = (defaultPopupConfig (AnchorRect (respRect btn))) {cfgPlacement = PlacementBelow, cfgOffset = 0}
+      let cfg = (defaultPopupConfig (AnchorRect (respRect btn))) {popupPlacement = PlacementBelow, popupOffset = 0}
       -- The open flag is derived from the open menu's name, so the popup
       -- gets a constant and closing it is written here.
       (popR, _) <- popup' (constVar isOpen) cfg (columnWith (tight . gap 0) body)

@@ -60,7 +60,7 @@ shapeCases =
   , -- A floating panel over a scope hides its shape. A scope in a window body
     -- applies to its widgets, not the title bar.
     ( column $ do
-        (w, inner) <- window' (constVar True) "Tools" ((,) <$> label' "Body" <*> s UiCursorCrosshair (a 80))
+        (w, inner) <- floatingWindow' (constVar True) "Tools" ((,) <$> label' "Body" <*> s UiCursorCrosshair (a 80))
         d@(Rect dx dy dw dh) <- respRect <$> s UiCursorMove (plainArea 620 380)
         wr@(Rect wx wy ww _) <- rectNow w
         let inset = [V2 x y | x <- [dx + 12, dx + dw - 12], y <- [dy + 12, dy + dh - 12]]
@@ -77,7 +77,7 @@ shapeCases =
         labels <- columnWith (gap 6) . forM [1 .. 30 :: Int] $ \i ->
           row (label' (T.pack ("row " <> show i)) <* plainArea 60 8)
         (area, w) <- s UiCursorCrosshair $
-          (,) <$> plainArea 80 60 <*> (fst <$> window' (constVar True) "Tools" (label "Body"))
+          (,) <$> plainArea 80 60 <*> (fst <$> floatingWindow' (constVar True) "Tools" (label "Body"))
         wr <- rectNow w
         pure $ case [respRect r | r <- labels, isNothing (rectIntersect (rectInflate 8 wr) (respRect r))] of
           l1 : Rect x y _ h : _ -> [spanCenter l1, V2 (x + 2) (y + h + 3), centerOf area, spanCenter wr]
@@ -96,7 +96,7 @@ shapeCases =
         area <- s UiCursorCrosshair (a 120)
         let Rect ax ay aw _ = respRect area
             anchor = AnchorPoint (V2 (ax + aw / 2) (ay + 10))
-            cfg = (defaultPopupConfig anchor) {cfgPlacement = PlacementBelow, cfgDismissable = False}
+            cfg = (defaultPopupConfig anchor) {popupPlacement = PlacementBelow, popupDismissable = False}
         (area,) . snd <$> popup' (constVar True) cfg (plainArea 60 30)
       let corner = V2 (px + 8) (py + 8)
           apart area = not (rectContains (rectInflate 8 (respRect area)) corner)

@@ -29,6 +29,8 @@ import GHC.IO.Exception (IOException (..))
 import NanoUI hiding (Cell, scrollBy)
 import NanoUI.Backend (clearEphemeral, emptyInput, newPixelContext, runNanoUI)
 import NanoUI.Backend.Sdl
+import NanoUI.Monad (nextId)
+import NanoUI.Widgets.Custom (CustomWidgetSpec (..), KeyClaim (..), customWidgetWithId, defaultCustomWidgetSpec, runCanvasFor)
 import NanoUI.Sdl.Internal.Input (SdlEvent (..), applyEvent, pollEvents, waitEvent)
 import Streaming (Of (..))
 import Streaming.Prelude qualified as S
@@ -480,7 +482,7 @@ view t = do
   preedit <- useInputMethod wid InputNormal (Rect (x + 8 + fromIntegral (min 79 cx) * 10) (y + 8 + fromIntegral cy * 24) 10 24)
   void . customWidgetWithId wid $
     defaultCustomWidgetSpec
-      { widgetLayout = fontMono (grow defaultLayout)
+      { widgetLayout = fontMono . grow
       , widgetFocusable = True
       , widgetKeys = KeysAll
       , widgetDraw = \cdc rect -> runCanvasFor cdc (drawTerm t preedit rect)

@@ -133,9 +133,9 @@ runScrollDamageTest ctx failed = do
       ui = linesOf "count 1" "last"
   sid <- warmup2 ctx inp0 ui
   forM_ [24, 48] $ \off -> do
-    _ <- runFrame ctx inp0 (ui <* liftIO (setScrollOffset ctx sid off))
+    _ <- runFrame ctx inp0 (ui <* liftIO (setScrollOffsetIO ctx sid off))
     assertJustM failed (clipOf ctx) $ \r -> assert failed (painted r && rectH r <= 60 + defaultDamageSlop * 2)
-  setScrollOffset ctx sid 0
+  setScrollOffsetIO ctx sid 0
   _ <- warmup2 ctx inp0 ui
   assertJustM failed (getPrevRect ctx sid) $ \(Rect sx sy sw sh) -> do
     _ <- runFrame ctx inp0 (linesOf "count 2" "last")
@@ -143,7 +143,7 @@ runScrollDamageTest ctx failed = do
     assertJustM failed (clipOf ctx) $ \r -> assert failed (painted r && not (rectContains r lane))
   -- On the page the lines that move repaint the window whole, so make the
   -- content taller in a floating window, which clips them to its viewport.
-  let inWindow lastLine = snd <$> window' (constVar True) "Lines" (linesOf "count 1" lastLine)
+  let inWindow lastLine = snd <$> floatingWindow' (constVar True) "Lines" (linesOf "count 1" lastLine)
       winInp = withInputOff 640 400
   mWsid <- warmup2 ctx winInp (inWindow "last")
   assertJust failed mWsid $ \wsid -> assertJustM failed (getPrevRect ctx wsid) $ \(Rect wx wy ww wh) -> do
@@ -189,7 +189,7 @@ runPageBackdropTest ctx failed = do
       -- A clip frame after a scroll that repaints a few lines (a frame with
       -- nothing damaged paints nothing).
       scrolled c sid = do
-        setScrollOffset c sid 120
+        setScrollOffsetIO c sid 120
         _ <- runFrame c inp0 (page id)
         damageRect c (Rect 10 10 20 20)
   (_, fills) <- frameAfter False (page id) scrolled
@@ -212,7 +212,7 @@ runTallLabelCullTest ctx failed = do
       ui = fmap fst $ scrollArea (fillW . fixedH 100) (labelWith fillW txt)
   sid <- warmup2 ctx inp0 ui
   forM_ [0, 3333, 1000000] $ \off -> do
-    setScrollOffset ctx sid off
+    setScrollOffsetIO ctx sid off
     (_, draw, _) <- run2Frames ctx inp0 ui
     assertJustM failed (getPrevRect ctx sid) $ \(Rect rx ry rw rh) -> do
       quads <- drawQuads draw
@@ -330,7 +330,7 @@ runDisjointViewportTest ctx failed = do
       hotAt p = moveTo (At p) >> frame >> hotId
   runSim ctx failed (withInputOff 300 200) ui $ do
     (outer, inner, _) <- result
-    hidden <- buttonsAfter (setScrollOffset ctx inner 100)
+    hidden <- buttonsAfter (setScrollOffsetIO ctx inner 100)
     mapM_ expectNot ["Under", "Over", "Pin"]
     forM_ (targets hidden) $ \(_, p) -> do
       check (v2Y p > 0 && v2Y p < 100)
@@ -339,7 +339,7 @@ runDisjointViewportTest ctx failed = do
       check (not (any (\r -> respHovered r || respPressed r) pressed))
       (_, _, clicked) <- release
       check (not (any respClicked clicked))
-    shown <- buttonsAfter (setScrollOffset ctx inner 0 >> setScrollOffset ctx outer 140)
+    shown <- buttonsAfter (setScrollOffsetIO ctx inner 0 >> setScrollOffsetIO ctx outer 140)
     forM_ (targets shown) $ \(i, p) -> do
       checkEq (respId (shown !! i)) =<< hotAt p
       (_, _, clicked) <- click (At p)
@@ -364,13 +364,13 @@ runScrollLockstepProbeTest ctx failed = do
         , ("Tree", "1 visible item")
         , ("Table sort", "Name")
         ]
-      kvRow k v = rowWith (tight . gap 12 . alignMid . fillW) $ do
+      kvRow k v = rowWith (tight . gap 12 . alignMiddle . fillW) $ do
         labelWith (minW 88 . tight) k
         labelWith (tight . fillW . alignEnd) v
       ui = scrollArea (fillW . fixedH 200) (column (mapM_ (\(k, v) -> kvRow k v >> separator) rows))
   (sid, ()) <- warmup2 ctx inp0 ui
   yss <- forM [0.0, 0.3, 0.6, 1.0, 1.3, 1.7, 2.0, 2.4, 2.7, 3.1, 3.4, 3.8] $ \off -> do
-    setScrollOffset ctx sid off
+    setScrollOffsetIO ctx sid off
     (_, draw, _) <- run2Frames ctx inp0 ui
     ss <- collectTextSpans ctx
     vs <- drawnVertices draw
@@ -429,7 +429,7 @@ runScroll2DLayoutTest _ failed = do
       rangeX w ui = do
         c <- newContext
         (wid, ()) <- warmup2 c (withInput w 200) ui
-        maybe (-1) (v2X . scrollRange) <$> getScrollMetrics c wid
+        maybe (-1) (v2X . scrollRange) <$> getScrollMetricsIO c wid
       minCell m = columnWith (grow . minW m . tight) (label longName)
   -- The row's least width is 100 + 10 + 80 = 190: it fits at 400, not at 150.
   ranges <-
@@ -454,7 +454,7 @@ runScroll2DLayoutTest _ failed = do
           area = scrollArea2D (lay . tight . gap 0 . fixedWH 300 200) boxes
       (sid, ()) <- warmup2 c (withInput 400 300) (columnWith tight area)
       assertEq failed want . along . drop 2 =<< arenaRects c
-      assertJustM failed (getScrollMetrics c sid) $ \m -> assertEq failed range (scrollRange m)
+      assertJustM failed (getScrollMetricsIO c sid) $ \m -> assertEq failed range (scrollRange m)
   padded <- newPixelContext
   let inp0 = (withInput 320 240) {inputMousePos = V2 100 100}
       within (content, inner) = assert failed (content <= inner + 0.5)
@@ -463,7 +463,7 @@ runScroll2DLayoutTest _ failed = do
   (wid, ()) <- warmup2 padded inp0 fits
   assertJustM failed (scrollNodeState padded wid True) within
   _ <- runFrame padded inp0 {inputScroll = V2 5 5} fits
-  assertEq failed (V2 0 0) =<< getScrollOffset2D padded wid
+  assertEq failed (V2 0 0) =<< getScrollOffset2DIO padded wid
   (wid1, ()) <- warmup2 padded inp0 (scrollArea (padAll 6 . fixedH 80 . fillW) (labelWith tight "fits"))
   assertJustM failed (scrollNodeState padded wid1 False) within
   over <- newPixelContext
@@ -476,7 +476,7 @@ runScroll2DLayoutTest _ failed = do
     -- Far past the end, the clamp lands on content + padB - view, where the
     -- active horizontal bar takes its lane out of the view.
     replicateM_ 40 (runFrame over inp0 {inputScroll = V2 0 50} overflows)
-    V2 _ offEnd <- getScrollOffset2D over wid2
+    V2 _ offEnd <- getScrollOffset2DIO over wid2
     assert failed (abs (offEnd - (contentH + 6 - (innerH - scrollBarGutter ScrollBarList 6))) < 1.5)
 
 -- | A notch covers the context's step, or the scroller's own. With a glide
@@ -489,21 +489,21 @@ runScrollTuningTest ctx failed = do
   let ui = do
         n <- liftIO (readIORef rows)
         fst <$> scrollArea (fillW . fixedH 80) (column (replicateM_ n (label "scroll line")))
-  setScrollTuning ctx defaultScrollTuning {scrollWheelStep = 40}
+  setScrollTuningIO ctx defaultScrollTuning {scrollWheelStep = 40}
   runSim ctx failed (withInput 200 120) ui $ do
     sid <- result
     let notch = frameWith (\i -> i {inputScroll = V2 0 1})
         offset = scrollOffsetOf sid
-        gliding = liftIO (scrollGliding ctx sid)
+        gliding = liftIO (scrollGlidingIO ctx sid)
         io = liftIO
     _ <- moveTo (OnWidget sid)
     checkEq 40 =<< (notch >> offset)
-    io (setScrollStep ctx sid 12)
+    io (setScrollStepIO ctx sid 12)
     checkEq 52 =<< (notch >> offset)
-    io (setScrollStep ctx sid 0)
+    io (setScrollStepIO ctx sid 0)
     checkEq 92 =<< (notch >> offset)
-    io (setScrollTuning ctx defaultScrollTuning {scrollWheelStep = 60, scrollSmoothTime = 0.2})
-    io (setScrollOffset ctx sid 0)
+    io (setScrollTuningIO ctx defaultScrollTuning {scrollWheelStep = 60, scrollSmoothTime = 0.2})
+    io (setScrollOffsetIO ctx sid 0)
     modifyInput (\i -> i {inputDeltaTime = 1 / 60})
     partial <- notch >> offset
     check (partial > 0 && partial < 60)
@@ -515,14 +515,14 @@ runScrollTuningTest ctx failed = do
     replicateM_ 2 notch >> replicateM_ 30 frame
     checkEq 180 =<< offset
     _ <- notch
-    io (setScrollOffset ctx sid 20)
+    io (setScrollOffsetIO ctx sid 20)
     replicateM_ 5 frame
     checkEq 20 =<< offset
     _ <- frameWith (\i -> i {inputScroll = V2 0 8})
     check =<< gliding
     io (writeIORef rows 12)
     replicateM_ 40 frame
-    Just m <- io (getScrollMetrics ctx sid)
+    Just m <- io (getScrollMetricsIO ctx sid)
     checkGt (v2Y (scrollRange m)) 0
     check . (<= v2Y (scrollRange m) + 0.5) =<< offset
 
@@ -532,17 +532,17 @@ runScrollTuningTest ctx failed = do
 -- frame's rects go with the offset they were placed at.
 runScrollCommandsTest :: Context -> IORef Int -> IO ()
 runScrollCommandsTest ctx failed = do
-  setScrollTuning ctx defaultScrollTuning {scrollSmoothTime = 0}
+  setScrollTuningIO ctx defaultScrollTuning {scrollSmoothTime = 0}
   jump <- newIORef False
   let lines16 = column (forM [1 .. 16 :: Int] (\i -> label' (T.pack ("line " <> show i))))
       ui = do
         (sid, rows) <- scrollArea (fillW . fixedH 80) lines16
         go <- liftIO (readIORef jump)
-        when go $ liftIO (scrollIntoView ctx sid (respId (rows !! 11)) ScrollStart ScrollInstant)
+        when go $ liftIO (scrollIntoViewIO ctx sid (respId (rows !! 11)) ScrollStart ScrollInstant)
         pure (sid, rows)
   runSim ctx failed (withInput 200 160) ui $ do
     (sid, rows) <- result
-    Just m <- liftIO (getScrollMetrics ctx sid)
+    Just m <- liftIO (getScrollMetricsIO ctx sid)
     r <- prevRect sid
     let range = v2Y (scrollRange m)
         view = scrollViewport m
@@ -553,20 +553,20 @@ runScrollCommandsTest ctx failed = do
     checkGt range 0
     -- The viewport is the scroller's box inside its padding and bar lane.
     check (rectW view <= rectW r && rectH view <= rectH r)
-    checkEq range =<< after (scrollToEnd ctx sid ScrollInstant)
-    checkEq 0 =<< after (scrollToStart ctx sid ScrollInstant)
-    checkEq (min range (rectH view)) =<< after (scrollPages ctx sid (V2 0 1) ScrollInstant)
-    placed <- after (scrollIntoView ctx sid target ScrollStart ScrollInstant)
+    checkEq range =<< after (scrollToEndIO ctx sid ScrollInstant)
+    checkEq 0 =<< after (scrollToStartIO ctx sid ScrollInstant)
+    checkEq (min range (rectH view)) =<< after (scrollPagesIO ctx sid (V2 0 1) ScrollInstant)
+    placed <- after (scrollIntoViewIO ctx sid target ScrollStart ScrollInstant)
     atTop target
     -- Already in view: the nearest alignment leaves the offset alone.
-    checkEq placed =<< after (scrollIntoView ctx sid target ScrollNearest ScrollInstant)
+    checkEq placed =<< after (scrollIntoViewIO ctx sid target ScrollNearest ScrollInstant)
     -- A row above the viewport comes back to the top edge.
-    _ <- after (scrollIntoView ctx sid (respId (rows !! 1)) ScrollNearest ScrollInstant)
+    _ <- after (scrollIntoViewIO ctx sid (respId (rows !! 1)) ScrollNearest ScrollInstant)
     atTop (respId (rows !! 1))
     rowH <- rectH <$> prevRect target
-    off <- after (scrollRectIntoView ctx sid (Rect 0 (rowH * 8) 10 rowH) ScrollStart ScrollInstant)
+    off <- after (scrollRectIntoViewIO ctx sid (Rect 0 (rowH * 8) 10 rowH) ScrollStart ScrollInstant)
     check (abs (off - rowH * 8) < 1.5)
-    _ <- after (scrollToStart ctx sid ScrollInstant)
+    _ <- after (scrollToStartIO ctx sid ScrollInstant)
     _ <- moveTo (OnWidget sid)
     liftIO (writeIORef jump True)
     _ <- frameWith (\i -> i {inputScroll = V2 0 1})
@@ -701,8 +701,8 @@ runScrollGrowOverlayTest ctx failed = do
 -- focused list, and scroll the selected row into view.
 runScrollFocusableListNavTest :: Context -> IORef Int -> IO ()
 runScrollFocusableListNavTest ctx failed = do
-  selA <- newVar (0 :: Int)
-  selB <- newVar (0 :: Int)
+  selA <- newVar (Just 0 :: Maybe Int)
+  selB <- newVar (Nothing :: Maybe Int)
   actA <- newIORef ([] :: [Int])
   let rowH = 24 :: Float
       listCfg = defaultScrollConfig {scrollPolicyX = ScrollNone, scrollFocusable = True}
@@ -711,10 +711,10 @@ runScrollFocusableListNavTest ctx failed = do
         sel <- readVar selVar
         nav <-
           if useWith
-            then useListNavWith (\i -> Rect 0 (fromIntegral i * rowH) 1 rowH) sid 30 sel
+            then useListNavWith sid 30 sel (NavRowRect (\i -> Rect 0 (fromIntegral i * rowH) 1 rowH))
             else useListNav sid 30 sel rowH
         when (lnChanged nav) (writeVar selVar (lnIndex nav))
-        when (lnActivated nav) (liftIO (onAct (lnIndex nav)))
+        when (lnActivated nav) (forM_ (lnIndex nav) (liftIO . onAct))
         scrollConfigured listCfg (fixedWH 160 120 . tight . gap 0) $
           forM_ [0 .. 29 :: Int] $ \i ->
             void (mouseArea (fillW . fixedH rowH) (label (tag <> "-" <> T.pack (show i))))
@@ -728,28 +728,36 @@ runScrollFocusableListNavTest ctx failed = do
     -- Clicking inside List A focuses List A.
     _ <- click (At (V2 40 40)) >> settle
     checkEq sidA =<< focusedId
-    -- Down moves List A to 1 without moving List B.
+    -- Down moves List A to Just 1 without moving List B.
     _ <- pressKey KeyDown >> settle
-    checkEq (1, 0) =<< ((,) <$> readV selA <*> readV selB)
-    -- End jumps to row 29 and scrolls List A down; List B stays at 0.
+    checkEq (Just 1, Nothing) =<< ((,) <$> readV selA <*> readV selB)
+    -- End jumps to row 29 and scrolls List A down; List B stays at Nothing.
     _ <- pressKey KeyEnd >> settle
-    checkEq (29, 0) =<< ((,) <$> readV selA <*> readV selB)
-    offA <- onContext (\c -> v2Y <$> getScrollOffset2D c sidA)
-    offB <- onContext (\c -> v2Y <$> getScrollOffset2D c sidB)
+    checkEq (Just 29, Nothing) =<< ((,) <$> readV selA <*> readV selB)
+    offA <- onContext (\c -> v2Y <$> getScrollOffset2DIO c sidA)
+    offB <- onContext (\c -> v2Y <$> getScrollOffset2DIO c sidB)
     checkGt offA 400
     checkEq 0 offB
     -- PageUp steps back by viewport height / rowH (5 rows), Enter activates.
     _ <- pressKey KeyPageUp >> settle
-    checkEq 24 =<< readV selA
+    checkEq (Just 24) =<< readV selA
     _ <- pressKey KeyEnter >> settle
     checkEq [24] =<< liftIO (readIORef actA)
     -- Home jumps back to 0 and scrolls back to top.
     _ <- pressKey KeyHome >> settle
-    checkEq 0 =<< readV selA
-    offA0 <- onContext (\c -> v2Y <$> getScrollOffset2D c sidA)
+    checkEq (Just 0) =<< readV selA
+    offA0 <- onContext (\c -> v2Y <$> getScrollOffset2DIO c sidA)
     checkEq 0 offA0
-    -- Tab moves focus to List B; Down now moves List B only (via useListNavWith).
+    -- Tab moves focus to List B (Nothing selection); Down selects row 0, Down moves to row 1.
     _ <- pressKey KeyTab >> settle
     checkEq sidB =<< focusedId
     _ <- pressKey KeyDown >> settle
-    checkEq (0, 1) =<< ((,) <$> readV selA <*> readV selB)
+    checkEq (Just 0, Just 0) =<< ((,) <$> readV selA <*> readV selB)
+    _ <- pressKey KeyDown >> settle
+    checkEq (Just 0, Just 1) =<< ((,) <$> readV selA <*> readV selB)
+    -- Reset List B to Nothing; Up from Nothing selects the last row (29) and scrolls there.
+    liftIO (writeVarIO selB Nothing)
+    _ <- pressKey KeyUp >> settle
+    checkEq (Just 29) =<< readV selB
+    offB29 <- onContext (\c -> v2Y <$> getScrollOffset2DIO c sidB)
+    checkGt offB29 400

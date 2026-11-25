@@ -7,7 +7,7 @@
 --
 -- Every backend emitter (GLSL 150, GLSL ES 300, SPIR-V, MSL) and the CPU
 -- reference evaluator consume 'ShaderIR' directly.
-module NanoUI.Shader.IR
+module NanoUI.Shader.Internal.IR
   ( NodeId (..)
   , IRType (..)
   , gpuToIRType

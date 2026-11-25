@@ -3,9 +3,6 @@
 -- | Core types and emission mechanics for 'NanoUIE'.
 module NanoUI.Emit.Internal
   ( NanoUIE
-  , liftNanoUI
-  , withNanoUI
-  , withRunInNanoUIE
   , mapMessages
   , runNanoUIE
   , withSink
@@ -25,27 +22,6 @@ import NanoUI (NanoUI)
 -- shared by every pass of a frame, so a local-state rebuild cannot discard
 -- earlier messages.
 type NanoUIE msg a = (?emit :: msg -> NanoUI ()) => NanoUI a
-
--- | Use an ordinary widget or UI operation in an emitting view. No longer
--- needed: an emitting view is a 'NanoUI' action.
-{-# DEPRECATED liftNanoUI "NanoUIE views are NanoUI actions; use the action directly" #-}
-{-# INLINE liftNanoUI #-}
-liftNanoUI :: NanoUI a -> NanoUI a
-liftNanoUI = id
-
--- | Wrap a typed body in a layout, key, style, or other ordinary UI scope.
--- No longer needed: apply the scope to the body.
-{-# DEPRECATED withNanoUI "NanoUIE views are NanoUI actions; apply the scope directly" #-}
-{-# INLINE withNanoUI #-}
-withNanoUI :: (NanoUI a -> NanoUI b) -> NanoUI a -> NanoUI b
-withNanoUI = id
-
--- | Supply typed bodies to widgets taking callbacks or multiple bodies. No
--- longer needed: emitting bodies are 'NanoUI' actions.
-{-# DEPRECATED withRunInNanoUIE "NanoUIE views are NanoUI actions; pass the bodies directly" #-}
-{-# INLINE withRunInNanoUIE #-}
-withRunInNanoUIE :: ((forall r. NanoUI r -> NanoUI r) -> NanoUI a) -> NanoUI a
-withRunInNanoUIE body = body id
 
 -- | Embed a child's message type in its parent's. Messages go straight to
 -- the parent sink in traversal order, including across frame rebuilds.

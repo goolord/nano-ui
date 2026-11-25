@@ -112,11 +112,11 @@ animUi = do
       lampGlow = sin (lampT * pi)
   scrollWith (tight . grow) $
     columnWith (padAll 28 . gap 18 . fillW) $ do
-      rowWith (tight . gap 10 . alignMid . fillW) $ do
+      rowWith (tight . gap 10 . alignMiddle . fillW) $ do
         heading "16mm"
         flex
         withKey ("footage" :: String) (muted footage)
-      rowWith (tight . gap 8 . alignMid . fillW) $ do
+      rowWith (tight . gap 8 . alignMiddle . fillW) $ do
         whenM (button "Expose") (writeVar exposure True >> writeVar rewind False)
         whenM (button "Rewind") (writeVar exposure False >> writeVar rewind True)
         whenM (button (if lampOn then "Lamp off" else "Lamp on")) (modifyVar lampSwitch not)
@@ -140,7 +140,7 @@ animUi = do
         (rewinding && not exposed && abs clock < 0.001 && all ((< 0.001) . abs) laneTs)
         (writeVar rewind False)
       panelWith (padXY 12 10 . gap 8 . fixedW (220 + 180 * bellowsT)) $ do
-        rowWith (tight . gap 10 . alignMid . fillW) $ do
+        rowWith (tight . gap 10 . alignMiddle . fillW) $ do
           whenM
             (button (if bellowsOpen then "Collapse" else "Extend"))
             (modifyVar bellows not)
@@ -181,7 +181,7 @@ transport exposed rewinding throwSec time wash glow = do
 
 perfs :: NanoUI ()
 perfs =
-  rowWith (tight . gap 0 . alignMid . fillW) $ do
+  rowWith (tight . gap 0 . alignMiddle . fillW) $ do
     withKey ("perfL" :: String) (box (fixedWH 12 18) film)
     forM_ [0 .. 16 :: Int] $ \i ->
       withKey i $ do
@@ -224,11 +224,11 @@ lane exposed rewinding throwSec time name ease = do
 trackRow :: T.Text -> Float -> Color -> NanoUI ()
 trackRow name t shuttle =
   withKey name $
-    rowWith (tight . gap 12 . alignMid . fillW) $ do
+    rowWith (tight . gap 12 . alignMiddle . fillW) $ do
       labelWith (tight . fixedW 72) name
       columnWith (tight . gap 0 . fillW) $ do
         let travel = 394.0 :: Float
-        rowWith (tight . alignMid . fillW) $ do
+        rowWith (tight . alignMiddle . fillW) $ do
           box (fixedWH 4 22) film
           spacer (Fixed (max 0 (t * travel))) Fit
           box (fixedWH 16 16) shuttle

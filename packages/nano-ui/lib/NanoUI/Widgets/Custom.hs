@@ -44,6 +44,15 @@ module NanoUI.Widgets.Custom
   , CustomDrawContext (..)
   , CustomMeasureFn
   , CustomDrawBuild
+  , DrawOp (..)
+  , DrawingBuild
+  , shiftDrawOp
+  , drawing
+  , drawingVersioned
+  , drawingCached
+  , setChanged
+  , setClicked
+  , setSubmitted
     -- * Canvas
   , CanvasM
   , canvas
@@ -52,7 +61,6 @@ module NanoUI.Widgets.Custom
   , canvasConfigured
   , runCanvasFor
   , drawContext
-  , runCanvas
   , drawRect
   , drawRoundedRect
   , drawCircle
@@ -89,8 +97,6 @@ module NanoUI.Widgets.Custom
   , useDrag2DOn
   , Drag2D (..)
   , useWheelDeltaOn
-  , useDrag2D
-  , useWheelDelta
     -- * Reference widgets
   , knob
   , knob'
@@ -123,6 +129,8 @@ import Data.Text qualified as T
 import Data.Primitive.SmallArray (emptySmallArray)
 import NanoUI.Internal.Canvas
 import NanoUI.Internal.Context
+import NanoUI.Internal.Draw (DrawOp (..), DrawingBuild, shiftDrawOp)
+import NanoUI.Internal.Widgets.Drawing (drawing, drawingCached, drawingVersioned)
 import Data.Word (Word64)
 import Data.Hashable (Hashable, hash)
 import GHC.Float (castFloatToWord32)
@@ -130,7 +138,7 @@ import NanoUI.Internal.Font (checkboxBoxSize)
 import NanoUI.Internal.Id (WidgetId, mix64)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
-import NanoUI.Internal.Monad (NanoUI, askContext, askInput, freshWidget, nextId, liftIO, uiTime, withContext)
+import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, askInput, freshWidget, nextId, liftIO, uiTime, withContext)
 import NanoUI.Path qualified as P
 import NanoUI.Internal.Store
 import NanoUI.Internal.Store.Slots (slotDragPoint, slotDragPress)
@@ -152,9 +160,9 @@ import NanoUI.Internal.Widgets.Custom (customDrawContext)
 
 -- | Complete specification for defining a custom widget.
 data CustomWidgetSpec a = CustomWidgetSpec
-  { widgetLayout     :: !Layout
-    -- ^ Flex layout constraints (width/height sizing, min/max, alignment, padding).
-    -- A whole 'Layout', not a modifier: @fixedWH 120 24 defaultLayout@.
+  { widgetLayout     :: !LayoutModifier
+    -- ^ Flex layout modifier applied on top of 'defaultLayout' (with inherited
+    -- font defaults): for example, @fixedWH 120 24@.
   , widgetMeasure    :: !(Maybe CustomMeasureFn)
     -- ^ Optional intrinsic measurement hook for 'Fit' or dynamic sizing.
   , widgetDraw       :: !CustomDrawBuild
@@ -199,7 +207,7 @@ data CustomWidgetSpec a = CustomWidgetSpec
 -- | Default configuration for a custom widget with standard hover/press/click behavior.
 defaultCustomWidgetSpec :: CustomWidgetSpec ()
 defaultCustomWidgetSpec = CustomWidgetSpec
-  { widgetLayout     = defaultLayout
+  { widgetLayout     = id
   , widgetMeasure    = Nothing
   , widgetDraw       = \_ _ -> emptySmallArray
   , widgetContent    = 0
@@ -213,7 +221,7 @@ defaultCustomWidgetSpec = CustomWidgetSpec
 
 fixedSizeSpec :: (Layout -> Layout) -> Float -> Float -> CustomWidgetSpec ()
 fixedSizeSpec f w h =
-  defaultCustomWidgetSpec {widgetLayout = fixedWH w h (f defaultLayout), widgetMeasure = Just $ \_ _ -> (w, h)}
+  defaultCustomWidgetSpec {widgetLayout = fixedWH w h . f, widgetMeasure = Just $ \_ _ -> (w, h)}
 
 -- | A 'widgetContent' key for a drawing whose output follows these numbers.
 -- Pass every value the drawing reads; @0@ means "no key", so a hash that lands
@@ -247,8 +255,9 @@ customWidgetWithId :: WidgetId -> CustomWidgetSpec a -> NanoUI (Response, a)
 customWidgetWithId wid spec = do
   ctx <- askContext
   inp <- askInput
+  amb <- askDefaultLayout
   liftIO (when (widgetFocusable spec) $ registerFocusable ctx wid)
-  resp0 <- addWidget wid NodeDrawing T.empty 0 (widgetLayout spec)
+  resp0 <- addWidget wid NodeDrawing T.empty 0 (widgetLayout spec (inheritFont amb defaultLayout))
   -- Registered on the node just added ('NanoUI.Internal.Context.ctxNodeCustom').
   liftIO $ do
     mapM_ (registerCustomMeasure ctx wid) (widgetMeasure spec)
@@ -265,13 +274,13 @@ customWidget spec = do
 -- | Draw into a rectangle sized by the layout modifier. Curves are flattened
 -- for the current display ('runCanvasFor'). Ops are rebuilt and compared
 -- every frame; use 'canvasConfigured' for a content key or a cursor.
-canvas :: (Layout -> Layout) -> (Rect -> CanvasM ()) -> NanoUI Response
-canvas f = canvasConfigured defaultCanvasConfig {canvasLayout = f defaultLayout}
+canvas :: LayoutModifier -> (Rect -> CanvasM ()) -> NanoUI Response
+canvas f = canvasConfigured defaultCanvasConfig {canvasLayout = f}
 
 -- | Options for 'canvasConfigured'.
 data CanvasConfig = CanvasConfig
-  { canvasLayout :: !Layout
-    -- ^ As 'widgetLayout', a whole 'Layout' (default 'defaultLayout').
+  { canvasLayout :: !LayoutModifier
+    -- ^ Layout modifier applied on top of 'defaultLayout' (default 'id').
   , canvasContent :: !Int
     -- ^ As 'widgetContent'; build it with 'contentKey' or 'contentKeyOf'.
     -- Default 0 (no key): the drawing runs every frame.
@@ -287,11 +296,11 @@ data CanvasConfig = CanvasConfig
     -- ^ As 'widgetKeys' (default 'KeysNavigate').
   }
 
--- | 'defaultLayout', with no content key, cursor or pointer tracking.
+-- | Default layout modifier ('id'), with no content key, cursor or pointer tracking.
 defaultCanvasConfig :: CanvasConfig
 defaultCanvasConfig =
   CanvasConfig
-    { canvasLayout = defaultLayout
+    { canvasLayout = id
     , canvasContent = 0
     , canvasTrackPointer = False
     , canvasCursor = Nothing
@@ -302,7 +311,7 @@ defaultCanvasConfig =
 -- | 'canvas' with a 'CanvasConfig'. The drawing reads hover, press state and
 -- theme with 'drawContext':
 --
--- > canvasConfigured defaultCanvasConfig {canvasLayout = fixedWH 120 24 defaultLayout, canvasContent = contentKey [level]} $ \r -> do
+-- > canvasConfigured defaultCanvasConfig {canvasLayout = fixedWH 120 24, canvasContent = contentKey [level]} $ \r -> do
 -- >   cdc <- drawContext
 -- >   drawRoundedRect r 4 (if cdcHovered cdc then themeAccent (cdcTheme cdc) else themeMuted (cdcTheme cdc))
 canvasConfigured :: CanvasConfig -> (Rect -> CanvasM ()) -> NanoUI Response
@@ -345,12 +354,6 @@ data Drag2D = Drag2D
 useDrag2DOn :: HasResponse r => r -> NanoUI Drag2D
 useDrag2DOn r = drag2DFrom (respRect r) (respPressed r)
 
--- | 'useDrag2DOn' over a rect: a press anywhere in it starts the drag, even
--- on something drawn over it.
-useDrag2D :: Rect -> NanoUI Drag2D
-useDrag2D bounds = drag2DFrom bounds . rectContains bounds . inputMousePos =<< askInput
-{-# DEPRECATED useDrag2D "Use useDrag2DOn with the widget's Response, which respects what is drawn over it" #-}
-
 -- | A left-button drag already under way, or starting with a press this
 -- frame when @onIt@; the position is clamped to @bounds@.
 drag2DFrom :: Rect -> Bool -> NanoUI Drag2D
@@ -387,11 +390,6 @@ drag2DFrom bounds onIt = do
 -- still scroll that way moves by the same notches on the same frame.
 useWheelDeltaOn :: HasResponse r => r -> NanoUI (Float, Float)
 useWheelDeltaOn r = wheelIf (respHovered r)
-
--- | 'useWheelDeltaOn' over a rect, regardless of what is drawn over it.
-useWheelDelta :: Rect -> NanoUI (Float, Float)
-useWheelDelta bounds = wheelIf . rectContains bounds . inputMousePos =<< askInput
-{-# DEPRECATED useWheelDelta "Use useWheelDeltaOn with the widget's Response, which respects what is drawn over it" #-}
 
 wheelIf :: Bool -> NanoUI (Float, Float)
 wheelIf on = do
@@ -631,7 +629,7 @@ progressBarWith' :: (Layout -> Layout) -> Float -> Float -> NanoUI Response
 progressBarWith' f height frac =
   let !barH = max 0 height
    in fst <$> customWidget defaultCustomWidgetSpec
-        { widgetLayout = fixedH barH (f (fillW defaultLayout))
+        { widgetLayout = fixedH barH . f . fillW
         , widgetMeasure = Just $ \_ _ -> (progressBarDefaultWidth, barH)
         , widgetContent = contentKey [clamp01 frac]
         , widgetDraw = \cdc (Rect x y w h) -> runCanvasFor cdc $ do

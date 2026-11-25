@@ -15,11 +15,13 @@ import Diagrams.Prelude qualified as D
 import Diagrams.Prelude (Diagram, (#))
 import NanoUI
 import NanoUI.Backend
+import NanoUI.Widgets.Custom (DrawOp (..))
 import NanoUI.Internal.Context (Context (..), DrawingCacheState (..))
 import NanoUI.Internal.Context.Types (DrawOpCacheEntry (..))
 import NanoUI.Diagrams
 import NanoUI.Internal.Path (Shade (..))
 import NanoUI.Path qualified as P
+import NanoUI.Plot.Hit (nearestPlotHover)
 import NanoUI.Plot.Widget qualified as Plot
 import NanoUI.Testing.Assert (require)
 import Test.Hspec (describe, hspec, it)

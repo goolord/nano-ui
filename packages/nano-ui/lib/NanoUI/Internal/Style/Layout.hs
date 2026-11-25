@@ -9,20 +9,29 @@
 module NanoUI.Internal.Style.Layout
   ( Sizing (..)
   , Direction (..)
+  , direction
   , Flow (..)
   , AlignX (..)
   , AlignY (..)
-  , ItemsAlign (ItemsStart, ItemsCenter, ItemsEnd, ItemsBaseline)
+  , ItemsAlign (ItemsStart, ItemsCenter, ItemsEnd, ItemsBaseline, ItemsStretch)
   , itemsAlign
   , itemsStart
   , itemsCenter
   , itemsEnd
   , itemsBaseline
+  , itemsStretch
+  , Justify (JustifyStart, JustifyCenter, JustifyEnd, JustifyBetween)
+  , justify
+  , justifyStart
+  , justifyCenter
+  , justifyEnd
+  , justifyBetween
   , alignXFraction
   , alignYFraction
   , Padding (..)
   , Layout (..)
   , defaultLayout
+  , inheritFont
   , Tone (..)
   , windowPad
   , windowMargin
@@ -34,8 +43,12 @@ module NanoUI.Internal.Style.Layout
   , padRight
   , padLRTB
   , gap
+  , fitW
+  , fitH
   , fillW
   , fillH
+  , growW
+  , growH
   , grow
   , minW
   , maxW
@@ -45,10 +58,11 @@ module NanoUI.Internal.Style.Layout
   , maxH
   , fixedH
   , fixedWH
-  , alignMid
+  , alignMiddle
   , alignEnd
   , tight
   , percent
+  , percentH
   , gridMinColW
   , fixedAspectW
   , fixedAspectH
@@ -84,6 +98,8 @@ module NanoUI.Internal.Style.Layout
   , addUnderline
   , fontStrike
   , fontTabular
+  , fontProportional
+  , singleLine
   , alignStart
   , alignCenter
   , alignTop
@@ -190,10 +206,7 @@ windowMargin = 14
 -- | Semantic font choice. The backend selects a face.
 data FontVariant
   = FontRegular
-  | FontHeading
-  | FontMuted
   | FontMono
-  | FontDanger
   deriving (Eq, Show, Enum, Bounded, Ord)
 
 -- | A semantic theme colour ('NanoUI.Internal.Style.Theme.toneColor') for text
@@ -258,6 +271,8 @@ data Layout = Layout
   , layoutAlignY :: !AlignY
   , layoutItemsAlign :: {-# UNPACK #-} !ItemsAlign
   -- ^ Cross-axis alignment applied to children without an explicit alignment ('itemsAlign').
+  , layoutJustify :: {-# UNPACK #-} !Justify
+  -- ^ Main-axis distribution of leftover space on single-line containers ('justify').
   , layoutAlignExplicit :: {-# UNPACK #-} !Word8
   -- ^ Bit 0: 'layoutAlignX' set explicitly; bit 1: 'layoutAlignY' set explicitly.
   , layoutMinW :: {-# UNPACK #-} !Float
@@ -272,12 +287,14 @@ data Layout = Layout
   , layoutAspect :: {-# UNPACK #-} !Float
   , layoutFontColor :: !(Maybe Color)
   , layoutFontTone :: !(Maybe Tone)
-  -- ^ Text colour tone, overridden by 'layoutFontColor' ('fontTone').
+  -- ^ Text color tone, overridden by 'layoutFontColor' ('fontTone').
   , layoutFontWeight :: !FontWeight
   , layoutFontStyle :: !FontStyle
   , layoutTextDecoration :: !TextDecoration
   , layoutFontTabular :: !Bool
   -- ^ Uniform-width ASCII digits ('fontTabular').
+  , layoutSingleLine :: !Bool
+  -- ^ Keep text on one line and truncate instead of wrapping ('singleLine').
   , layoutFlow :: !Flow
   , layoutPin :: !(Maybe V2)
   }
@@ -296,6 +313,7 @@ defaultLayout =
     , layoutAlignX = AlignStart
     , layoutAlignY = AlignTop
     , layoutItemsAlign = ItemsStart
+    , layoutJustify = JustifyStart
     , layoutAlignExplicit = 0
     , layoutMinW = 0
     , layoutMinH = 0
@@ -311,6 +329,7 @@ defaultLayout =
     , layoutFontStyle = FontStyleNormal
     , layoutTextDecoration = DecorationNone
     , layoutFontTabular = False
+    , layoutSingleLine = False
     , layoutFlow = Line
     , layoutLineGap = -1
     , layoutLineAlign = LinesStart
@@ -319,6 +338,24 @@ defaultLayout =
     , layoutAspect = 0
     , layoutPin = Nothing
     , layoutPointer = PointerAuto
+    }
+
+-- | Copy typography attributes from @src@ onto @dst@, keeping @dst@'s box
+-- geometry (sizing, padding, gap, alignment, flow).
+{-# INLINE inheritFont #-}
+inheritFont :: Layout -> Layout -> Layout
+inheritFont src dst =
+  dst
+    { layoutFontVariant = layoutFontVariant src
+    , layoutFontSize = layoutFontSize src
+    , layoutFontColor = layoutFontColor src
+    , layoutFontTone = layoutFontTone src
+    , layoutFontWeight = layoutFontWeight src
+    , layoutFontStyle = layoutFontStyle src
+    , layoutTextDecoration = layoutTextDecoration src
+    , layoutFontTabular = layoutFontTabular src
+    , layoutEllipsis = layoutEllipsis src
+    , layoutSingleLine = layoutSingleLine src
     }
 
 -- | Set all four padding edges in logical pixels.
@@ -356,10 +393,27 @@ padRight n l = l {layoutPadding = (layoutPadding l) {padR = n}}
 padLRTB :: Float -> Float -> Float -> Float -> Layout -> Layout
 padLRTB left right top bottom l = l {layoutPadding = Padding left right top bottom}
 
+-- | Set the main layout direction ('Row' or 'Column'). Useful with containers
+-- whose direction is configurable, such as 'NanoUI.buttonGroupWith' or
+-- 'NanoUI.scrollWith'.
+{-# INLINE direction #-}
+direction :: Direction -> Layout -> Layout
+direction d l = l {layoutDirection = d}
+
 -- | Set the space between children in logical pixels.
 {-# INLINE gap #-}
 gap :: Float -> Layout -> Layout
 gap n l = l {layoutGap = n}
+
+-- | Size width to content ('Fit'), overriding an inherited 'fillW' or 'fixedW'.
+{-# INLINE fitW #-}
+fitW :: Layout -> Layout
+fitW l = l {layoutWidth = Fit}
+
+-- | Size height to content ('Fit'), overriding an inherited 'fillH' or 'fixedH'.
+{-# INLINE fitH #-}
+fitH :: Layout -> Layout
+fitH l = l {layoutHeight = Fit}
 
 -- | Share available horizontal space with grow weight 1.
 {-# INLINE fillW #-}
@@ -370,6 +424,16 @@ fillW l = l {layoutWidth = Grow 1}
 {-# INLINE fillH #-}
 fillH :: Layout -> Layout
 fillH l = l {layoutHeight = Grow 1}
+
+-- | Share available horizontal space with an explicit grow weight.
+{-# INLINE growW #-}
+growW :: Float -> Layout -> Layout
+growW w l = l {layoutWidth = Grow (max 0 w)}
+
+-- | Share available vertical space with an explicit grow weight.
+{-# INLINE growH #-}
+growH :: Float -> Layout -> Layout
+growH h l = l {layoutHeight = Grow (max 0 h)}
 
 -- | Apply 'fillW' and 'fillH'.
 {-# INLINE grow #-}
@@ -419,10 +483,10 @@ fixedH n l = l {layoutHeight = Fixed n}
 fixedWH :: Float -> Float -> Layout -> Layout
 fixedWH w h = fixedW w . fixedH h
 
--- | Centre vertically in the available space.
-{-# INLINE alignMid #-}
-alignMid :: Layout -> Layout
-alignMid l = l {layoutAlignY = AlignMiddle, layoutAlignExplicit = layoutAlignExplicit l .|. 2}
+-- | Center vertically in the available space.
+{-# INLINE alignMiddle #-}
+alignMiddle :: Layout -> Layout
+alignMiddle l = l {layoutAlignY = AlignMiddle, layoutAlignExplicit = layoutAlignExplicit l .|. 2}
 
 -- | Align to the right edge of the available space.
 {-# INLINE alignEnd #-}
@@ -438,6 +502,11 @@ tight l = l {layoutPadding = Padding 0 0 0 0}
 {-# INLINE percent #-}
 percent :: Float -> Layout -> Layout
 percent p l = l {layoutWidth = Percent p}
+
+-- | Set height as a percentage of the parent's available height: 100 means all.
+{-# INLINE percentH #-}
+percentH :: Float -> Layout -> Layout
+percentH p l = l {layoutHeight = Percent p}
 
 -- | Set the minimum column width for an adaptive grid, in logical pixels.
 {-# INLINE gridMinColW #-}
@@ -633,13 +702,13 @@ alignBaseline l = l {layoutAlignY = AlignBaseline, layoutAlignExplicit = layoutA
 -- own alignment along that axis ('itemsAlign').
 newtype ItemsAlign = ItemsAlign Word8
   deriving newtype (Eq, Ord)
-  deriving (Bounded, Enum) via BoundedByte 3
+  deriving (Bounded, Enum) via BoundedByte 4
 
 -- | Top of a row or grid row, left of a column. The default.
 pattern ItemsStart :: ItemsAlign
 pattern ItemsStart = ItemsAlign 0
 
--- | Centred across the container: vertically in a row or grid row,
+-- | Centered across the container: vertically in a row or grid row,
 -- horizontally in a column.
 pattern ItemsCenter :: ItemsAlign
 pattern ItemsCenter = ItemsAlign 1
@@ -653,13 +722,20 @@ pattern ItemsEnd = ItemsAlign 2
 pattern ItemsBaseline :: ItemsAlign
 pattern ItemsBaseline = ItemsAlign 3
 
-{-# COMPLETE ItemsStart, ItemsCenter, ItemsEnd, ItemsBaseline #-}
+-- | Stretch fit-sized children across the container's cross axis (width in a
+-- column, height in a row or grid row) unless a child sets its own cross-axis
+-- alignment or explicit sizing.
+pattern ItemsStretch :: ItemsAlign
+pattern ItemsStretch = ItemsAlign 4
+
+{-# COMPLETE ItemsStart, ItemsCenter, ItemsEnd, ItemsBaseline, ItemsStretch #-}
 
 instance Show ItemsAlign where
   show ItemsStart = "ItemsStart"
   show ItemsCenter = "ItemsCenter"
   show ItemsEnd = "ItemsEnd"
   show ItemsBaseline = "ItemsBaseline"
+  show ItemsStretch = "ItemsStretch"
 
 -- | Set cross-axis alignment for direct children that leave their own
 -- cross-axis alignment unset.
@@ -672,7 +748,7 @@ itemsAlign a l = l {layoutItemsAlign = a}
 itemsStart :: Layout -> Layout
 itemsStart = itemsAlign ItemsStart
 
--- | Centre children across the container: vertically in a row or grid row,
+-- | Center children across the container: vertically in a row or grid row,
 -- horizontally in a column.
 {-# INLINE itemsCenter #-}
 itemsCenter :: Layout -> Layout
@@ -689,6 +765,68 @@ itemsEnd = itemsAlign ItemsEnd
 {-# INLINE itemsBaseline #-}
 itemsBaseline :: Layout -> Layout
 itemsBaseline = itemsAlign ItemsBaseline
+
+-- | Stretch fit-sized children across the container's cross axis unless a child
+-- sets its own cross-axis alignment.
+{-# INLINE itemsStretch #-}
+itemsStretch :: Layout -> Layout
+itemsStretch = itemsAlign ItemsStretch
+
+-- | How a single-line row or column distributes leftover main-axis space when
+-- no child grows to fill it ('justify').
+newtype Justify = Justify Word8
+  deriving newtype (Eq, Ord)
+  deriving (Bounded, Enum) via BoundedByte 3
+
+-- | Pack children at the start of the main axis. The default.
+pattern JustifyStart :: Justify
+pattern JustifyStart = Justify 0
+
+-- | Center children along the main axis.
+pattern JustifyCenter :: Justify
+pattern JustifyCenter = Justify 1
+
+-- | Pack children at the end of the main axis.
+pattern JustifyEnd :: Justify
+pattern JustifyEnd = Justify 2
+
+-- | Distribute leftover space evenly between adjacent children, keeping the
+-- first and last flush with the container's inner edges.
+pattern JustifyBetween :: Justify
+pattern JustifyBetween = Justify 3
+
+{-# COMPLETE JustifyStart, JustifyCenter, JustifyEnd, JustifyBetween #-}
+
+instance Show Justify where
+  show JustifyStart = "JustifyStart"
+  show JustifyCenter = "JustifyCenter"
+  show JustifyEnd = "JustifyEnd"
+  show JustifyBetween = "JustifyBetween"
+
+-- | Set main-axis distribution of leftover space on a single-line container.
+{-# INLINE justify #-}
+justify :: Justify -> Layout -> Layout
+justify j l = l {layoutJustify = j}
+
+-- | Pack children at the start of the main axis.
+{-# INLINE justifyStart #-}
+justifyStart :: Layout -> Layout
+justifyStart = justify JustifyStart
+
+-- | Center children along the main axis.
+{-# INLINE justifyCenter #-}
+justifyCenter :: Layout -> Layout
+justifyCenter = justify JustifyCenter
+
+-- | Pack children at the end of the main axis.
+{-# INLINE justifyEnd #-}
+justifyEnd :: Layout -> Layout
+justifyEnd = justify JustifyEnd
+
+-- | Distribute leftover main-axis space evenly between children.
+{-# INLINE justifyBetween #-}
+justifyBetween :: Layout -> Layout
+justifyBetween = justify JustifyBetween
 
 -- | Start a new line when the next child would overflow the main axis ('Wrap').
 {-# INLINE wrap #-}
@@ -825,6 +963,17 @@ breakAnywhere = textBreak BreakAnywhere
 fontTabular :: Layout -> Layout
 fontTabular l = l {layoutFontTabular = True}
 
+-- | Use proportional digit advances, overriding an inherited 'fontTabular'.
+{-# INLINE fontProportional #-}
+fontProportional :: Layout -> Layout
+fontProportional l = l {layoutFontTabular = False}
+
+-- | Keep a text node on one line, truncating with an ellipsis when constrained
+-- instead of wrapping in a column.
+{-# INLINE singleLine #-}
+singleLine :: Layout -> Layout
+singleLine l = l {layoutSingleLine = True}
+
 -- | Where single-line text places its ellipsis (@...@) when truncated to fit.
 newtype TextEllipsis = TextEllipsis Word8
   deriving newtype (Eq, Ord)
@@ -850,10 +999,11 @@ instance Show TextEllipsis where
   show EllipsisMiddle = "EllipsisMiddle"
   show EllipsisStart = "EllipsisStart"
 
--- | Set where truncated single-line text places its ellipsis.
+-- | Set where truncated single-line text places its ellipsis. Also enables
+-- 'singleLine' so the ellipsis applies in columns as well as rows.
 {-# INLINE textEllipsis #-}
 textEllipsis :: TextEllipsis -> Layout -> Layout
-textEllipsis e l = l {layoutEllipsis = e}
+textEllipsis e l = l {layoutEllipsis = e, layoutSingleLine = True}
 
 -- | Truncate single-line text at the trailing end.
 {-# INLINE ellipsisEnd #-}

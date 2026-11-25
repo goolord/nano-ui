@@ -93,7 +93,7 @@ runGeometryGuardsTest ctx failed = do
     forM [0 .. drawIndexCount bad - 1] $ \i -> peekByteOff ip (i * indexSize) :: IO Word32
   assert failed (all ((< drawVertexCount bad) . fromIntegral) indices)
   let circles = void $ customWidget defaultCustomWidgetSpec
-        { widgetLayout = fixedWH 120 60 defaultLayout
+        { widgetLayout = fixedWH 120 60
         , widgetDraw = \cdc r -> runCanvasFor cdc $ do
             let fill = V2 (rectX r + 20.3) (rectY r + 20.3)
                 ring = V2 (rectX r + 60.7) (rectY r + 20.2)
@@ -165,11 +165,11 @@ runGlyphKerningTest base failed = do
 -- | Every text field kind, with its layout changed by the argument.
 fieldKinds :: [(Layout -> Layout) -> NanoUI ()]
 fieldKinds =
-  [ \f -> void (withValue "abc" (textInputConfigured defaultTextInputConfig {ticLayout = f (ticLayout defaultTextInputConfig)}))
+  [ \f -> void (withValue "abc" (textInputConfigured defaultTextInputConfig {ticLayout = f}))
   , \f -> selectableTextWith f "abc"
   , \f -> void (withValue "abc" (textAreaWith' f))
-  , \f -> void (withValue "abc" (searchInputConfigured defaultSearchInputConfig {sicLayout = f (sicLayout defaultSearchInputConfig)}))
-  , \f -> void (withValue 123 (numericInputConfigured defaultNumericInputConfig {nicLayout = f (nicLayout defaultNumericInputConfig)}))
+  , \f -> void (withValue "abc" (searchInputConfigured defaultSearchInputConfig {sicLayout = f}))
+  , \f -> void (withValue 123 (numericInputConfigured defaultNumericInputConfig {nicLayout = f}))
   ]
 
 -- | Fields, selectable text and text areas set in a larger font draw their
@@ -196,7 +196,7 @@ runTextInputFontTest base failed = do
 -- headless font has no bold face), underline adds a rule, muted recolours.
 runFieldFontStyleTest :: Context -> IORef Int -> IO ()
 runFieldFontStyleTest ctx failed = do
-  mutedFg <- themeMuted <$> getTheme ctx
+  mutedFg <- themeMuted <$> getThemeIO ctx
   let red = colorRGBA 255 0 0 255
       frameOf ui = snd <$> warmupDraw ctx (withInput 400 300) (column ui)
       quadsIn col f ui = length . filter ((== col) . snd) <$> (drawQuads =<< frameOf (ui f))
@@ -270,7 +270,7 @@ runExternalTextTest internal failed = do
   assert failed (null spansOver && not (hasText txt overlay))
   floating <- externalContext
   let winInp = withInput 600 300
-  _ <- warmup2 floating winInp (window' (constVar True) "W" (drawingText "floating"))
+  _ <- warmup2 floating winInp (floatingWindow' (constVar True) "W" (drawingText "floating"))
   (winBase, winOverlay) <- drawnSpans floating winInp
   assertEq failed ([], replicate 4 "floating") (winBase, textsOf winOverlay)
   nodesOfType NodeWindow floating >>= \case
@@ -304,10 +304,10 @@ runExternalTextFramesTest _ failed = do
       tall = scrollArea (fixedWH 300 200) . drawing (fixedWH 280 2000) $ \(Rect x y _ _) ->
         smallArrayFromList [DrawText x (y + 13 * fromIntegral i) 0 1 (line i) drawingInk | i <- lines']
   (sid, _) <- warmup2 culled inp tall
-  setScrollOffset culled sid 900
+  setScrollOffsetIO culled sid 900
   (_, resp) <- warmup2 culled inp tall
   (spans', _) <- drawnSpans culled inp
-  assertJustM failed (getScrollMetrics culled sid) $ \m -> do
+  assertJustM failed (getScrollMetricsIO culled sid) $ \m -> do
     let view@(Rect _ vy _ vh) = scrollViewport m
         dr@(Rect _ dy _ _) = respRect resp
         lh = fmLineHeight (ctxFontMetrics culled)

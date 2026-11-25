@@ -75,12 +75,14 @@ library
         NanoUI.Adornment
         NanoUI.Backend
         NanoUI.Bidi
+        NanoUI.Chrome
         NanoUI.Effectful
         NanoUI.Input
         NanoUI.Monad
         NanoUI.Path
         NanoUI.Runner
         NanoUI.Runner.Windows
+        NanoUI.Shader.Raw
         NanoUI.Shortcut
         NanoUI.Svg
         NanoUI.Testing
@@ -88,6 +90,7 @@ library
         NanoUI.Testing.Harness
         NanoUI.Testing.Runner
         NanoUI.Testing.Sim
+        NanoUI.Themes
         NanoUI.Var
         NanoUI.Widgets.Combo
         NanoUI.Widgets.Custom
@@ -213,6 +216,7 @@ library
         NanoUI.Internal.Widgets.Adornment
         NanoUI.Internal.Widgets.Button
         NanoUI.Internal.Widgets.Checkbox
+        NanoUI.Internal.Widgets.Disclosure
         NanoUI.Internal.Widgets.Display
         NanoUI.Internal.Widgets.Select
         NanoUI.Internal.Widgets.Slider
@@ -290,6 +294,7 @@ test-suite nano-ui-test
     other-modules:
         BackendApi
         Spec
+        TestSupport
         Cases.Animation
         Cases.Atlas
         Cases.Combo

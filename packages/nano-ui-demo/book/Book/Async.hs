@@ -10,6 +10,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
 import NanoUI
+import NanoUI.Widgets.Custom
 
 -- ANCHOR: handles
 data App = App
@@ -83,7 +84,7 @@ breathingDot :: NanoUI ()
 breathingDot = do
   t <- pulse 1.2
   (resp, ()) <- customWidget defaultCustomWidgetSpec
-    { widgetLayout = fixedWH 24 24 defaultLayout
+    { widgetLayout = fixedWH 24 24
     , widgetContent = contentKey [t * 100]
     , widgetDraw = \cdc (Rect x y w h) -> runCanvasFor cdc $
         drawCircle (V2 (x + w / 2) (y + h / 2)) (6 + 3 * t) (themeAccent (cdcTheme cdc))

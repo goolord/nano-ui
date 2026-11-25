@@ -13,8 +13,9 @@ import Foreign.Storable (peekByteOff, peekElemOff)
 import NanoUI
   ( AlignX (..), AlignY (..), NanoUI, Rect (..), Style (..), Theme (..), UiCursorKind (..), V2 (..), button
   , canvas, checkbox, colorRGBA, column, constVar, drawText, fixedWH, fontColor, fontMono, fontSize, inlineWith
-  , labelWith, richText, tomorrowNightMinDarkTheme, window'
+  , labelWith, richText, floatingWindow'
   )
+import NanoUI.Themes (tomorrowNightMinDarkTheme)
 import NanoUI.Backend (cursorFallback)
 import NanoUI.Input
   ( Input (..), Key (..), Modifiers (..), MouseButton (..), Pressable (..), buttonsToList
@@ -199,7 +200,7 @@ testWindowLayer failed = do
       text c (Rect x y _ _) = drawText (V2 x y) AlignStart AlignTop c
       page = void $ canvas (fixedWH 240 120) $ \(Rect x y w h) ->
         forM_ [0 .. 8 :: Int] $ \i -> text (T.replicate 40 "#") (Rect x (y + 13 * fromIntegral i) w h) under
-      win = window' (constVar True) "Z" (canvas (fixedWH 60 20) (\r -> text "over" r over))
+      win = floatingWindow' (constVar True) "Z" (canvas (fixedWH 60 20) (\r -> text "over" r over))
       inkAt col px = filterM (\(x, y) -> (== packColor col) <$> px x y)
   alone <- newRgfwContext theme
   pageInk <- raster alone 240 120 0 page $ \_ _ px ->

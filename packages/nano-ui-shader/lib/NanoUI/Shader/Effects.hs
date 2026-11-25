@@ -68,7 +68,7 @@ import NanoUI.Shader.Compose
   , surfaceShader
   )
 import NanoUI.Shader.Expr
-import NanoUI.Shader.Swizzle ()
+import NanoUI.Shader.Internal.Swizzle ()
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -83,7 +83,7 @@ cornerMask ctx =
       d = sdRoundedBox p halfSize r
       aa = floatE 0.75 / maxE ctx.scale (floatE 1.0)
       mask = floatE 1.0 - smoothstep (negate aa) aa d
-   in select (ctx.cornerRadius .> floatE 0.0) mask (floatE 1.0)
+   in selectE (ctx.cornerRadius .> floatE 0.0) mask (floatE 1.0)
 
 -- | Porter-Duff source-over compositing in straight-alpha RGBA.
 overStraight :: Expr V4 -> Expr V4 -> Expr V4
@@ -154,14 +154,14 @@ sdfRoundedBox :: Shader 'Surface SdfBoxParams
 sdfRoundedBox = surfaceShader $ \u ctx ->
   let halfSize = ctx.size *^ floatE 0.5
       p = ctx.pos - halfSize
-      rReq = select (u.sbRadius .> floatE 0.0) u.sbRadius ctx.cornerRadius
+      rReq = selectE (u.sbRadius .> floatE 0.0) u.sbRadius ctx.cornerRadius
       r = minE rReq (minE halfSize.x halfSize.y)
       d = sdRoundedBox p halfSize r
       aa = floatE 0.75 / maxE ctx.scale (floatE 1.0)
       outerMask = floatE 1.0 - smoothstep (negate aa) aa d
       innerMask = floatE 1.0 - smoothstep (negate aa) aa (d + u.sbBorderWidth)
       baseCol = mix u.sbBorder u.sbFill innerMask
-      col = select (u.sbBorderWidth .> floatE 0.0) baseCol u.sbFill * ctx.color
+      col = selectE (u.sbBorderWidth .> floatE 0.0) baseCol u.sbFill * ctx.color
    in withAlphaE (col.a * outerMask) col
 
 -- | Smooth HSV color wheel parameterized by value (brightness in @[0, 1]@).
@@ -215,7 +215,7 @@ checkerboard = surfaceShader $ \u ctx ->
       gx = floorE (ctx.pos.x / cell)
       gy = floorE (ctx.pos.y / cell)
       oddCell = modE (gx + gy) (floatE 2.0) .>= floatE 1.0
-      col = select oddCell u.cpColorB u.cpColorA * ctx.color
+      col = selectE oddCell u.cpColorB u.cpColorA * ctx.color
    in withAlphaE (col.a * cornerMask ctx) col
 
 -- ---------------------------------------------------------------------------

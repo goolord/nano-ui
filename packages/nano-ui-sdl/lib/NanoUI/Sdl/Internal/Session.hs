@@ -15,8 +15,8 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isNothing)
 import Foreign.Marshal.Utils (fromBool)
 import GHC.Clock (getMonotonicTime)
-import NanoUI (Size, WindowSettings (..), followSystemTheme, whenM)
-import NanoUI.Backend (Context, Input (..), clearEphemeral, emptyInput, newPixelContext, requestWindowClose, setExplainLayout, withTheme)
+import NanoUI (Size, WindowSettings (..), whenM)
+import NanoUI.Backend (Context, Input (..), clearEphemeral, emptyInput, followSystemThemeIO, newPixelContext, requestWindowClose, setExplainLayout, withTheme)
 import NanoUI.Runner
 import NanoUI.Runner.Windows (closeWindows)
 import NanoUI.Sdl.Internal.Children
@@ -79,7 +79,7 @@ runSdlSession :: SdlOptions -> DrawFn -> IO ()
 runSdlSession options drawFn = do
   base <- newPixelContext
   ctx <- maybe (pure base) (withTheme base) (sdlAppTheme options)
-  forM_ (sdlAppThemeFor options) (followSystemTheme ctx)
+  forM_ (sdlAppThemeFor options) (followSystemThemeIO ctx)
   setExplainLayout ctx (sdlExplainLayout options)
   registerAppImages options ctx
   withSdl options ctx $ \ctx0 env -> do

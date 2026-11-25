@@ -143,7 +143,7 @@ addAdornments wid lay colorOf (Adornments ls ts) = do
   let na = ctxNodeArena ctx
   inp <- askInput
   color <- colorOf <$> uiTheme
-  let inheritFont l = l {layoutFontSize = layoutFontSize lay}
+  let copyFontSize l = l {layoutFontSize = layoutFontSize lay}
       add = \case
         AdornIcon size doc -> do
           s <- case size of
@@ -152,11 +152,11 @@ addAdornments wid lay colorOf (Adornments ls ts) = do
               fm <- resolveFontUi (layoutFontSize lay) WeightNormal FontStyleNormal FontRegular
               pure (fromIntegral (round (fmLineHeight fm * 0.9) :: Int))
           Nothing <$ svgIconWith' (fixedWH s s . fontColor color) doc
-        AdornText txt -> Nothing <$ labelEx (tight . inheritFont . fontColor color $ defaultLayout) txt
+        AdornText txt -> Nothing <$ labelEx (tight . copyFontSize . fontColor color $ defaultLayout) txt
         AdornView v -> Nothing <$ adornmentRow lay color v
         AdornControl v -> do
           from <- liftIO (arenaCount na)
-          withDefaultLayout (inheritFont . fontColor color) v
+          withDefaultLayout (copyFontSize . fontColor color) v
           to <- liftIO (arenaCount na)
           pure (Just (from, to))
       side align pieces
@@ -174,7 +174,7 @@ adornmentRow lay color =
   inertContainer (adornmentRowLayout lay) . withDefaultLayout ((\l -> l {layoutFontSize = layoutFontSize lay}) . fontColor color)
 
 adornmentRowLayout :: Layout -> Layout
-adornmentRowLayout lay = tight . gap (layoutGap lay) . alignMid . itemsCenter $ defaultLayout {layoutDirection = Row}
+adornmentRowLayout lay = tight . gap (layoutGap lay) . alignMiddle . itemsCenter $ defaultLayout {layoutDirection = Row}
 
 -- | Whether an 'AdornControl' in one of the node ranges captures the pointer
 -- (either active or hovered over an enabled widget node). When @wid@ itself

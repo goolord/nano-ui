@@ -1,7 +1,4 @@
 {-# OPTIONS_GHC -O0 #-}
--- The deprecated 'runCanvas' is still tested.
-{-# OPTIONS_GHC -Wno-deprecations #-}
-
 module Cases.Paths (tests) where
 
 import Spec
@@ -134,8 +131,6 @@ runCurvesTest _ failed = do
     assert failed (closed && all (\p -> abs (dist centre p - 50) < 1e-3) pts && all (<= tol + 1e-3) sags)
     assertGt failed (maximum sags) (tol / 2)
   assert failed (count 3 > count 2 && count 2 > count 1)
-  -- 'runCanvas' has no display scale and flattens as if at scale 2.
-  assert failed (opsAt 2 (drawPath (P.circle centre 50) red) == toList (runCanvas (drawPath (P.circle centre 50) red)))
   let (p0, c1, c2, q, p3) = (V2 10 10, V2 400 (-100), V2 (-200) 300, V2 150 (-200), V2 300 300)
       samples = [fromIntegral k / 2000 | k <- [0 .. 2000 :: Int]]
   forM_ [(s, c) | s <- [1, 2], c <- [(P.cubicTo c1 c2 p3, [p0, c1, c2, p3]), (P.quadTo q p3, [p0, q, p3])]] $ \(scale, (seg, ctrl)) ->
@@ -658,7 +653,7 @@ runCanvasFramesTest ctx failed = do
             drawPath (P.roundedRect (Rect (x + 20) (y + 20) 80 80) 10) red
             drawStrokePath (P.circle (V2 (x + 60) (y + 60)) 30) 2 black
         (keyed, ()) <- customWidget defaultCustomWidgetSpec
-          { widgetLayout = fixedWH 60 60 defaultLayout
+          { widgetLayout = fixedWH 60 60
           , widgetContent = 1
           , widgetDraw = \cdc (Rect x y _ _) -> runCanvasFor cdc (drawPath (P.circle (V2 (x + 30) (y + 30)) 25) red)
           }
@@ -678,7 +673,7 @@ runCanvasFramesTest ctx failed = do
   after <- pointsIn dense
   assertEq failed (2, 2, True) (length before, length after, and (zipWith (<) before after))
   configured <- newContext
-  let cfg key = defaultCanvasConfig {canvasLayout = fixedWH 60 40 defaultLayout, canvasContent = key, canvasCursor = Just (\_ _ _ -> UiCursorPointer)}
+  let cfg key = defaultCanvasConfig {canvasLayout = fixedWH 60 40, canvasContent = key, canvasCursor = Just (\_ _ _ -> UiCursorPointer)}
       hovered key = canvasConfigured (cfg key) $ \r -> drawContext >>= \cdc -> drawRect r (if cdcHovered cdc then red else black)
   resp <- warmup2 configured (withInput 300 300) (hovered 1)
   let hoverAt = (withInput 300 300) {inputMousePos = centerOf resp}

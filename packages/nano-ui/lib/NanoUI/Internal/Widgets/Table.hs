@@ -25,12 +25,11 @@ module NanoUI.Internal.Widgets.Table
   , Cell (..)
   , textCell
   , cellWidget
-  , widgetCell
   , cellSort
   , cellSortKey
   , cellSortNum
   , cellSortInt
-  , withText
+  , cellWidthText
   )
 where
 
@@ -77,7 +76,7 @@ import NanoUI.Internal.Widgets.Button (buttonContentStyled)
 import NanoUI.Internal.Widgets.Behavior (Reorder (..), useReorder)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx, readDerived, writeDerived)
 import NanoUI.Internal.Widgets.Layout (column', panel', row', scrollAreaIdConfigured, separator, spacer)
-import NanoUI.Internal.Layout.ScrollGeometry (defaultScrollConfig, scrollHorizontalHidden, scrollVerticalAuto, scrollVerticalHidden)
+import NanoUI.Internal.Layout.ScrollGeometry (scroll2DConfig, scrollHorizontalHidden, scrollVerticalAuto, scrollVerticalHidden)
 import NanoUI.Internal.Widgets.Node
 
 -- | Size to content, share spare space, or request a fixed logical-pixel width.
@@ -212,18 +211,14 @@ textCell t = Cell (Just (SortText t)) t Nothing
 cellWidget :: NanoUI () -> Cell
 cellWidget w = Cell Nothing T.empty (Just w)
 
--- | Encode a function @a -> NanoUI ()@ into a table cell.
-widgetCell :: (a -> NanoUI ()) -> a -> Cell
-widgetCell f = cellWidget . f
-
 -- | Attach a text sort key to a cell. If the cell's 'cellText' is empty,
 -- also populates 'cellText' with the key so column width can be estimated.
 cellSort :: Text -> Cell -> Cell
 cellSort k c = c { cellKey = Just (SortText k), cellText = if T.null (cellText c) then k else cellText c }
 
--- | Alias for 'cellSort'.
-cellSortKey :: Text -> Cell -> Cell
-cellSortKey = cellSort
+-- | Attach an explicit 'SortKey' ('SortText', 'SortNum', or 'SortInt') to a cell.
+cellSortKey :: SortKey -> Cell -> Cell
+cellSortKey k c = c { cellKey = Just k }
 
 -- | Attach a floating-point numeric sort key ('SortNum') to a cell.
 cellSortNum :: RealFloat a => a -> Cell -> Cell
@@ -239,8 +234,8 @@ cellSortInt :: Integral a => a -> Cell -> Cell
 cellSortInt n c = c { cellKey = Just (SortInt (fromIntegral n)) }
 
 -- | Attach an explicit text label for column width estimation.
-withText :: Text -> Cell -> Cell
-withText t c = c { cellText = t }
+cellWidthText :: Text -> Cell -> Cell
+cellWidthText t c = c { cellText = t }
 
 -- | Stable sort by the selected column's sort key (or text).
 -- Out-of-range or unsortable column indices retain input order: an
@@ -933,7 +928,7 @@ tablePanes
         scrollAreaIdConfigured
           vWid
           (fillIf fillInner (fillH flatLayout))
-          defaultScrollConfig
+          scroll2DConfig
           (bodyBlock unfrozenIdx)
         pure hs
 

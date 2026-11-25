@@ -29,6 +29,8 @@ import Data.Text.Encoding qualified as TE
 import NanoUI
 import NanoUI.Backend.Sdl
 import NanoUI.Shortcut
+import NanoUI.Themes (tomorrowNightMinDarkTheme)
+import NanoUI.Widgets.TextDocument
 
 --------------------------------------------------------------------------------
 -- Application entry point
@@ -165,7 +167,7 @@ notepadUi NotepadState {..} = do
     -- ANCHOR: exit_app
     exitApp = do
       dirty <- readVar docDirty
-      if dirty then writeVar aboutOpen False >> writeVar confirmExit True else quitUi
+      if dirty then writeVar aboutOpen False >> writeVar confirmExit True else quit
     -- ANCHOR_END: exit_app
     exitCmd = ("Exit", cmdOrCtrl <> key 'q', exitApp)
     zoomInCmd = ("Zoom In", cmdOrCtrl <> key '=', zoomIn)
@@ -279,7 +281,7 @@ notepadUi NotepadState {..} = do
   -------------------------------------------------------------- the window ---
   -- Cheap to set every frame: the window updates only when the title changes.
   -- ANCHOR: set_title
-  setWindowTitleUi (docName <> " - nano-ui Notepad")
+  setWindowTitle (docName <> " - nano-ui Notepad")
   -- ANCHOR_END: set_title
 
   --------------------------------------------------------------- overlays ---
@@ -295,7 +297,7 @@ notepadUi NotepadState {..} = do
     label "Discard the changes to this document and exit?"
     rowWith fillW $ do
       flex
-      whenM (button "Discard") quitUi
+      whenM (button "Discard") quit
       whenM (button "Cancel") (writeVar confirmExit False)
 -- ANCHOR_END: exit_modal
 
@@ -323,8 +325,8 @@ menuBar openMenu entries = do
       let
         cfg =
           (defaultPopupConfig (AnchorRect (respRect btn)))
-            { cfgPlacement = PlacementBelow
-            , cfgOffset = 0
+            { popupPlacement = PlacementBelow
+            , popupOffset = 0
             }
       -- The open flag is derived from the open menu's name, so the popup
       -- gets a constant and closing it is written here.

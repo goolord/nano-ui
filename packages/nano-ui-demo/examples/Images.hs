@@ -87,7 +87,7 @@ view images = do
       -- 'Nothing' means the atlas refused it; the scope keeps later ids
       -- stable either way.
       scope . for_ grad $ \iid -> do
-        rowWith (tight . gap 12 . alignMid) $ do
+        rowWith (tight . gap 12 . alignMiddle) $ do
           image (fixedWH 128 64) iid
           muted "image: stretched to its rect (here, its own size)"
         rowWith (wrap . tight . gap 12 . fillW) $
@@ -108,7 +108,7 @@ view images = do
       -- skips 'useImageRgba', which releases the image too.
       scope . when shown $ do
         board <- useImageRgba (checkerHandle images) cell 64 64 (checker cell)
-        rowWith (tight . gap 12 . alignMid) $ do
+        rowWith (tight . gap 12 . alignMiddle) $ do
           for_ board (image (fixedWH 128 128))
           muted ("64x64, cells of " <> T.pack (show cell) <> " px, drawn at 2x")
 
@@ -117,11 +117,11 @@ view images = do
       case star of
         Left err -> labelWith (fillW . fontDanger) (T.pack err)
         Right icon -> do
-          rowWith (tight . gap 10 . alignMid) $ do
+          rowWith (tight . gap 10 . alignMiddle) $ do
             svgIcon 24 icon
             -- Each color and size rasterizes once and stays cached.
             forM_ (themeSeries theme) $ \c -> svgIconWith (fixedWH 32 32 . fontColor c) icon
-          rowWith (tight . gap 8 . alignMid) $ do
+          rowWith (tight . gap 8 . alignMiddle) $ do
             _ <- iconButton icon "Favorite"
             _ <- iconButton icon ""
             _ <- styled primary (iconButton icon "Starred")

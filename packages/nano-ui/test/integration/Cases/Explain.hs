@@ -57,7 +57,7 @@ windowFill theme = findIndex ((== styleBg (themeFloatingWindow theme)) . snd)
 
 -- | Draw plain quads with the overlay on, and return the theme.
 outlining :: Context -> IO Theme
-outlining ctx = setDrawSquareGeometry ctx True >> setExplainLayout ctx True >> getTheme ctx
+outlining ctx = setDrawSquareGeometry ctx True >> setExplainLayout ctx True >> getThemeIO ctx
 
 -- | Run two frames; return the second frame's result and quads.
 quadsOf :: Context -> Input -> NanoUI a -> IO (a, [(Rect, Color)])
@@ -75,7 +75,7 @@ explainedAt ctx view p = runFrame ctx inp {inputMousePos = p} view >> getExplain
 runExplainOutlinesTest :: Context -> IORef Int -> IO ()
 runExplainOutlinesTest ctx failed = do
   setDrawSquareGeometry ctx True
-  theme <- getTheme ctx
+  theme <- getThemeIO ctx
   let ui = columnWith (padAll 8 . gap 4) (label "top" >> rowWith (padAll 4 . gap 4) (button' "a" <* label "b"))
   (_, quadsOff) <- quadsOf ctx inp ui
   rectsOff <- arenaRects ctx
@@ -143,7 +143,7 @@ runExplainHoverTest :: Context -> IORef Int -> IO ()
 runExplainHoverTest ctx failed = do
   setDrawSquareGeometry ctx True
   writeIORef (ctxPaintFull ctx) False
-  theme <- getTheme ctx
+  theme <- getThemeIO ctx
   let box80 = labelWith' (fixedWH 80 20)
       ui = columnWith (padAll 10 . gap 10) ((,) <$> box80 "a" <*> box80 "b")
   (a, b) <- warmup2 ctx inp ui
@@ -177,11 +177,11 @@ runExplainHoverTest ctx failed = do
   assert failed (againB && clipCovers dmg (respRect a) && clipCovers dmg (respRect b))
   assertJustM failed (getExplainedNode ctx) $ assertEq failed (respRect b) . explainedRect
 
--- | A window's outlines draw over it, after the page's, with depths from its root.
+-- | A floatingWindow's outlines draw over it, after the page's, with depths from its root.
 runExplainWindowLayerTest :: Context -> IORef Int -> IO ()
 runExplainWindowLayerTest ctx failed = do
   theme <- outlining ctx
-  let win = window' (constVar True) "Win" (labelWith' (fixedWH 60 20) "inside")
+  let win = floatingWindow' (constVar True) "Win" (labelWith' (fixedWH 60 20) "inside")
       ui = label "page" >> snd <$> win
   assertJustM failed (warmup2 ctx inp ui) $ \inner -> do
     (_, quads) <- quadsOf ctx inp {inputMousePos = centerOf inner} ui

@@ -123,7 +123,7 @@ selectMouseAndKeys ref = do
 -- repaints the dropdown as a clip, not the window.
 selectDropdownPaint :: Sim (Response, Int) ()
 selectDropdownPaint = do
-  theme <- onContext getTheme
+  theme <- onContext getThemeIO
   (resp, _) <- click . On . fst =<< result
   modifyInput (\i -> i {inputDeltaTime = 1})
   _ <- moveTo (At (V2 600 400))

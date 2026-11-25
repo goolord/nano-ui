@@ -9,7 +9,7 @@
 -- and style modifiers ('alignStart', the border, font and padding
 -- setters), colours and themes, input predicates ('inputMouseDown',
 -- 'keyActivated'), queries ('uiTime', 'uiFontSize'), scroll commands
--- ('scrollToUi'), 'loadSvg' (a file read) and the clipboard calls, which
+-- ('scrollTo'), 'loadSvg' (a file read) and the clipboard calls, which
 -- need a backend's clipboard.
 module Cases.ApiSmoke (tests) where
 
@@ -38,12 +38,12 @@ widgets = do
       target = button' "target"
       cols = headed "Name" fst <> headed "Value" snd
   pure
-    [ ("boundedSelect", False, boundedSelect show' fruit)
-    , ("boundedSelect'", False, void (boundedSelect' show' fruit))
-    , ("boundedTabBar", False, boundedTabBar show' fruit)
-    , ("boundedTabBarConfigured", False, boundedTabBarConfigured defaultTabsConfig show' fruit)
-    , ("boundedTabs", False, boundedTabs show' fruit (label . show'))
-    , ("boundedTabsConfigured", False, boundedTabsConfigured defaultTabsConfig show' fruit (label . show'))
+    [ ("enumSelectBy", False, enumSelectBy show' fruit)
+    , ("enumSelectBy'", False, void (enumSelectBy' show' fruit))
+    , ("enumTabBarBy", False, enumTabBarBy show' fruit)
+    , ("enumTabBarByConfigured", False, enumTabBarByConfigured defaultTabsConfig show' fruit)
+    , ("enumTabsBy", False, enumTabsBy show' fruit (label . show'))
+    , ("enumTabsByConfigured", False, enumTabsByConfigured defaultTabsConfig show' fruit (label . show'))
     , ("buttonContentWith", False, void (buttonContentWith id (label "content")))
     , ("buttonContentWith'", False, void (buttonContentWith' id (label "content")))
     , ("callout", False, callout (colorRGBA 200 40 40 255) (label "note"))
@@ -59,8 +59,10 @@ widgets = do
     , ("enumSelect'", False, void (enumSelect' fruit))
     , ("enumTabBar", False, enumTabBar fruit)
     , ("enumTabs", False, enumTabs fruit (label . show'))
-    , ("hstack", False, hstack [label "a", label "b"])
-    , ("vstack", False, vstack [label "a", label "b"])
+    , ("calloutTone", False, calloutTone Warning (label "warn"))
+    , ("selectableRow", False, void (selectableRow True (label "row")))
+    , ("collapsing", False, collapsing "More" flag (label "inside"))
+    , ("clipBox", False, clipBox (fixedWH 80 40) (label "clipped"))
     , ("kvBlock", False, kvBlock [("key", "value"), ("longer key", "v")])
     , ("menuButtonWith", False, void (menuButtonWith id "File" False))
     , ("menuButtonWith'", False, void (menuButtonWith' id "File" True))

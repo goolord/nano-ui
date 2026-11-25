@@ -28,7 +28,7 @@ tests =
   , spec "drawing-lock" runDrawingLockTest
   ]
 
--- | A driver with no events, nothing to draw, and event 3 as the window's
+-- | A driver with no events, nothing to draw, and event 3 as the floatingWindow's
 -- close. Each test overrides the fields it watches.
 quietDriver :: DebugSamplerRef -> SessionDriver Int
 quietDriver debug =
@@ -89,7 +89,7 @@ closeWatcher :: IORef [Bool] -> ([Bool] -> Bool) -> NanoUI ()
 closeWatcher seen quitAfter = do
   closing <- winCloseRequested <$> askWindow
   before <- liftIO (atomicModifyIORef' seen (\s -> (s <> [closing], s)))
-  when (closing && quitAfter before) quitUi
+  when (closing && quitAfter before) quit
 
 -- | Queued edges, a dirty follow-up frame, skipped input and blocking waits,
 -- without a native window or wall-clock timing.
@@ -325,9 +325,9 @@ runSessionLoopKeysTest ctx failed = do
           }
   assertEq failed 7 =<< drawCount ctx repeats [[1], [1], [1], [1], [2], [4], [4], [3]]
 
--- | With 'wsExitOnCloseRequest' on, a close request, or 'quitUi' in a frame
+-- | With 'wsExitOnCloseRequest' on, a close request, or 'quit' in a frame
 -- drawn before the loop, ends the session. Off, each request reaches the
--- next frame only (past a pass that draws none) until one calls 'quitUi'.
+-- next frame only (past a pass that draws none) until one calls 'quit'.
 runSessionLoopCloseTest :: Context -> IORef Int -> IO ()
 runSessionLoopCloseTest _ failed = do
   let fresh exitOnClose = do
@@ -337,7 +337,7 @@ runSessionLoopCloseTest _ failed = do
   exits <- fresh True
   assertEq failed 1 =<< drawCount exits id [[], [3]]
   quitFirst <- fresh True
-  evalUi quitFirst emptyInput quitUi
+  evalUi quitFirst emptyInput quit
   assertEq failed 0 =<< drawCount quitFirst id []
   asks <- fresh False
   seen <- newIORef []

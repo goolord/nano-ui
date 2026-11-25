@@ -89,8 +89,8 @@ view state =
         -- and confirming would delete a file you never asked about.
         names <- readVar (files state)
         column . forM_ names $ \file ->
-          withKey file . rowWith (tight . gap 8 . alignMid . fillW) $ do
-            labelWith (alignMid . fillW) file
+          withKey file . rowWith (tight . gap 8 . alignMiddle . fillW) $ do
+            labelWith (alignMiddle . fillW) file
             whenM (confirmButton "Delete") (modifyVar (files state) (filter (/= file)))
         whenM (button "Restore files") (writeVar (files state) initialFiles)
 
@@ -117,7 +117,7 @@ labeledSlider' caption lo hi v =
 -- keeps its place whichever branch's widgets run.
 confirmButton :: T.Text -> NanoUI Bool
 confirmButton txt =
-  rowWith (tight . gap 6 . alignMid) $ do
+  rowWith (tight . gap 6 . alignMiddle) $ do
     asking <- useVar False
     isAsking <- readVar asking
     if not isAsking
@@ -133,9 +133,9 @@ confirmButton txt =
 -- drawn, and code elsewhere can read or reset it.
 stepper :: Var Int -> NanoUI ()
 stepper n =
-  rowWith (tight . gap 6 . alignMid) $ do
+  rowWith (tight . gap 6 . alignMiddle) $ do
     whenM (button "-") (modifyVar n (subtract 1))
-    labelWith (alignMid . fixedW 32) . T.pack . show =<< readVar n
+    labelWith (alignMiddle . fixedW 32) . T.pack . show =<< readVar n
     whenM (button "+") (modifyVar n (+ 1))
 
 -- (d) A caption above any widget, taking a layout modifier like the

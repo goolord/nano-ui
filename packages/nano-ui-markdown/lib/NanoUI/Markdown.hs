@@ -64,6 +64,7 @@ module NanoUI.Markdown
 
     -- * Drawing
   , markdown
+  , markdownWith
   , MarkdownCache
   , newMarkdownCache
   , markdownCacheSize

@@ -16,8 +16,8 @@ module NanoUI.Form.Input
   , inputRadio
   , inputEnumRadio
   , inputColor
-  , label
-  , separator
+  , formLabel
+  , formSeparator
   , errors
   , childErrors
   , withErrors
@@ -150,12 +150,12 @@ captioned name decode encode widget =
     mapM_ NUI.label (fieldLabel name) >> widget value
 
 -- | Static label inside a form.
-label :: Text -> Form err ()
-label txt = Ditto.view (FormView (NUI.label txt))
+formLabel :: Text -> Form err ()
+formLabel txt = Ditto.view (FormView (NUI.label txt))
 
 -- | Visual separator line inside a form.
-separator :: Form err ()
-separator = Ditto.view (FormView NUI.separator)
+formSeparator :: Form err ()
+formSeparator = Ditto.view (FormView NUI.separator)
 
 -- | Render error messages originating directly from this form node.
 errors :: ([err] -> FormView) -> Form err ()

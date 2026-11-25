@@ -7,6 +7,7 @@ import Data.Foldable (for_)
 import Data.Text (Text)
 import NanoUI
 import NanoUI.Backend.Sdl (SdlOptions (..), WindowDecorations (..), defaultSdlOptions, runSdlApp, windowCaption)
+import NanoUI.Chrome
 
 -- ANCHOR: settings
 main :: IO ()
@@ -32,9 +33,9 @@ editor :: Var Text -> NanoUI ()
 editor docName = column $ do
   textInput docName
   name <- readVar docName
-  setWindowTitleUi (name <> " - My App")         -- setter: every frame
-  whenM (button "Maximize") toggleMaximizedUi    -- command: on click only
-  whenM (button "Quit") quitUi
+  setWindowTitle (name <> " - My App")         -- setter: every frame
+  whenM (button "Maximize") toggleMaximized    -- command: on click only
+  whenM (button "Quit") quit
 -- ANCHOR_END: settings
 
 -- ANCHOR: close_request
@@ -53,7 +54,7 @@ appView = do
   whenM (winCloseRequested <$> askWindow) (writeVar confirming True)
   modal confirming "Quit?" $ do
     label "Unsaved changes will be lost."
-    whenM (button "Quit") quitUi
+    whenM (button "Quit") quit
     whenM (button "Cancel") (writeVar confirming False)
 -- ANCHOR_END: close_request
 
@@ -70,12 +71,12 @@ framelessView = columnWith (fillW . fillH) $ do
   mainContent
 
 titleBar :: NanoUI ()
-titleBar = rowWith (fixedH 32 . fillW . alignMid) $ do
+titleBar = rowWith (fixedH 32 . fillW . alignMiddle) $ do
   menuResp <- button' "File"          -- interactive: exclude from dragging
   label "My Application"
   spacer (Grow 1) Fit
   closeClicked <- windowCaption [respRect menuResp]
-  when closeClicked quitUi
+  when closeClicked quit
 -- ANCHOR_END: title_bar
 
 -- ANCHOR: window_frame

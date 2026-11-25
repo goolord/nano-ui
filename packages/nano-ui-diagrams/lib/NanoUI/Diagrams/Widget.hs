@@ -27,8 +27,6 @@ import Diagrams.Prelude (Any, Diagram, V2 (..), size)
 import NanoUI
   ( NanoUI
   , Color
-  , DrawOp (..)
-  , Layout (..)
   , Rect (..)
   , Response
   , Sizing (..)
@@ -37,12 +35,9 @@ import NanoUI
   , colorB
   , colorG
   , colorR
-  , colorToWord32
   , defaultLayout
   , defaultTheme
-  , drawingCached
   , lerpColor
-  , shiftDrawOp
   , styleBg
   , styleBorder
   , themeAccent
@@ -56,7 +51,8 @@ import NanoUI
   , themeYellow
   , uiTheme
   )
-import NanoUI.Backend (FontMetrics (..), drawTextBox, prepareFontMetricsMany, uiFontMetrics)
+import NanoUI.Backend (FontMetrics (..), Layout (..), colorToWord32, drawTextBox, prepareFontMetricsMany, uiFontMetrics)
+import NanoUI.Widgets.Custom (DrawOp (..), drawingCached, shiftDrawOp)
 import NanoUI.Internal.Context (lookupDrawFitEnvelope)
 import NanoUI.Internal.Monad (askContext)
 import NanoUI.Monad (currentId, liftIO)

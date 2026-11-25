@@ -9,9 +9,10 @@ import qualified Data.ByteString as BS
 import qualified Data.Text as T
 
 import NanoUI
-import NanoUI.Backend (Damage (..), applyMouseButton, emptyInput)
+import NanoUI.Backend (Damage (..), applyMouseButton, buttonsFromList, emptyInput)
 import NanoUI.Backend.Sdl (sdlDrawFrame, syncDisplay, withSdlBench)
 import NanoUI.Diagrams
+import NanoUI.Widgets.PaneGrid
 import NanoUI.Internal.Context (ctxNodeArena)
 import NanoUI.Internal.Layout.Arena (NodeType (NodeButton), findNodeRevM, getNodeType, getNodeRect, getText)
 import NanoUI.Shortcut
@@ -253,7 +254,7 @@ main = do
 churnWindowUi :: Int -> NanoUI ()
 churnWindowUi k = do
   _ <- button "Outside"
-  void $ fst <$> window' (constVar True) "Churn" (columnWith (tight . gap 4 . minW 300 . fillW) $ do
+  void $ fst <$> floatingWindow' (constVar True) "Churn" (columnWith (tight . gap 4 . minW 300 . fillW) $ do
     void $ kvMono "value" (T.pack (replicate (1 + (k `mod` 9)) 'M'))
     label "static row"
     )

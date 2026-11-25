@@ -47,15 +47,15 @@ library
     import:           warnings
     exposed-modules:
         NanoUI.Shader
-        NanoUI.Shader.IR
-        NanoUI.Shader.Swizzle
         NanoUI.Shader.Expr
         NanoUI.Shader.Compose
         NanoUI.Shader.Effects
-        NanoUI.Shader.Emit.Glsl
-        NanoUI.Shader.Emit.Msl
-        NanoUI.Shader.Emit.Spirv
-        NanoUI.Shader.Eval.Cpu
+        NanoUI.Shader.Internal.IR
+        NanoUI.Shader.Internal.Swizzle
+        NanoUI.Shader.Internal.Emit.Glsl
+        NanoUI.Shader.Internal.Emit.Msl
+        NanoUI.Shader.Internal.Emit.Spirv
+        NanoUI.Shader.Internal.Eval.Cpu
     build-depends:
         base >=4.20 && <4.23,
         bytestring ^>=0.12,

@@ -10,7 +10,7 @@
 -- Reading the chosen file is slow work, so it runs on a worker thread with
 -- 'useTaskStatus', keyed by the path (see Tasks.hs). The file's text then
 -- lives in an ordinary 'Var' that the 'textArea' edits. A flag records
--- unsaved changes, and 'setWindowTitleUi' shows it in the title bar; it does
+-- unsaved changes, and 'setWindowTitle' shows it in the title bar; it does
 -- nothing while the title is unchanged, so it runs every frame.
 --
 -- Run it with @cabal run nano-ui-example-files@.
@@ -111,10 +111,10 @@ view app = do
   saved <- readVar path
   unsaved <- readVar dirty
   let name = if T.null saved then "Untitled" else T.pack (takeFileName (T.unpack saved))
-  setWindowTitleUi (name <> (if unsaved then "*" else "") <> " - Files")
+  setWindowTitle (name <> (if unsaved then "*" else "") <> " - Files")
 
   columnWith (padAll 12 . gap 8 . grow) $ do
-    rowWith (tight . gap 8 . alignMid . fillW) $ do
+    rowWith (tight . gap 8 . alignMiddle . fillW) $ do
       whenM (button "Open…") askOpen
       whenM (button "Save As…") askSave
       scope (unless (T.null file) spinner)

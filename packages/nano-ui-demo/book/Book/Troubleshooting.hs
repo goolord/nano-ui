@@ -9,6 +9,7 @@ import Data.Text qualified as T
 import NanoUI
 import NanoUI.Backend (FontMetrics (..))
 import NanoUI.Shortcut (key)
+import NanoUI.Widgets.Custom (DrawOp, drawingVersioned)
 
 -- ANCHOR: fixed_width
 count :: Int -> NanoUI ()

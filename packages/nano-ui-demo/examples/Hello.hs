@@ -43,7 +43,7 @@ hello = columnWith (padAll 20 . gap 12 . fillW) $ do
   current <- readVar name
   label (if T.null current then "What's your name?" else "Hello, " <> current <> "!")
   clicks <- useVar (0 :: Int)
-  rowWith (tight . gap 12 . alignMid) $ do
+  rowWith (tight . gap 12 . alignMiddle) $ do
     whenM (button "Click me") (modifyVar clicks (+ 1))
     n <- readVar clicks
-    labelWith alignMid ("Clicked " <> T.pack (show n) <> " times")
+    labelWith alignMiddle ("Clicked " <> T.pack (show n) <> " times")

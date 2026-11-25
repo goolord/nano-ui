@@ -678,7 +678,7 @@ getExplainedNode ctx = fmap fst . esHover <$> readIORef (ctxExplain ctx)
 -- 'setTheme' sets a fixed theme. A view can instead pick the theme itself
 -- each frame:
 --
--- > setUiTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
+-- > setTheme . lightDark defaultLightTheme defaultTheme =<< systemAppearance
 followSystemTheme :: Context -> (Maybe Appearance -> Theme) -> IO ()
 followSystemTheme ctx pick = do
   writeIORef (ctxThemeFor ctx) (Just pick)

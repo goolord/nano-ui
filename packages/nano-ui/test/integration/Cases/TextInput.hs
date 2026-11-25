@@ -299,7 +299,7 @@ runFieldScrollTest :: Context -> IORef Int -> IO ()
 runFieldScrollTest _ failed = do
   pixel <- newPixelContext
   sized <- withMonospaceFonts 12 24 <$> newContext
-  let big = defaultTextInputConfig {ticLayout = fontSize 24 (fixedW 300 (ticLayout defaultTextInputConfig))}
+  let big = defaultTextInputConfig {ticLayout = fontSize 24 . fixedW 300 . ticLayout defaultTextInputConfig}
       -- Where the field's text starts, scrolled.
       textX = rectX <$> (rectOf . snd =<< result)
       -- End scrolls the text more than @past@ left of @x0@, Home back to it.
@@ -553,7 +553,7 @@ runCaretInViewTest base failed = do
 caretInView :: Context -> WidgetId -> IO Bool
 caretInView ctx wid = do
   st <- (`loadTextAreaState` intKey wid) <$> getStore ctx
-  V2 sx sy <- getScrollOffset2D ctx wid
+  V2 sx sy <- getScrollOffset2DIO ctx wid
   textAreaHitForWidget ctx wid >>= \case
     Nothing -> pure False
     Just (TextAreaHit idx field lineH) -> do

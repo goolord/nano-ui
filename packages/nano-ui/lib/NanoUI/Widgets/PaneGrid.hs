@@ -23,9 +23,14 @@ module NanoUI.Widgets.PaneGrid
   , GridNode (..)
   , PaneTree (..)
   , validateGridTree
+  , treePanes
+  , treeRemovePane
+  , treeSplit
+  , treeAddTab
+  , treeSelectTab
   , PaneGridConfig (..)
   , defaultPaneGridConfig
-  , PaneGridCtx (pgcPaneId, pgcRect, pgcMaximized, pgcDragging, pgcDndActive, pgcSplit, pgcClose, pgcMaximize, pgcRestore)
+  , PaneGridCtx (pgcPaneId, pgcRect, pgcMaximized, pgcInTabs, pgcDragging, pgcDndActive, pgcSplit, pgcClose, pgcMaximize, pgcRestore)
   , PaneView (..)
   , PaneGridResponse (..)
   , PaneEdge (..)
@@ -215,6 +220,9 @@ data PaneGridCtx = PaneGridCtx
     -- during a drop.
   , pgcMaximized :: !Bool
     -- ^ True when this pane currently fills the whole grid.
+  , pgcInTabs :: !Bool
+    -- ^ True when this pane is rendered inside a native 'PaneTabs' stack, so
+    -- 'pgViewPane' can omit its own title bar and avoid duplicate headers.
   , pgcDragging :: !Bool
     -- ^ True while this pane's drag is armed. Once past the drag threshold,
     -- the pane is not rendered until release.
@@ -351,7 +359,7 @@ data GridEnv = GridEnv
   , geLifted :: !Bool
     -- ^ The dragged pane is lifted out: not rendered, and its slot left
     -- empty in a drop preview.
-  , geMakeCtx :: Word64 -> Rect -> Bool -> IORef (Maybe Rect) -> PaneGridCtx
+  , geMakeCtx :: Word64 -> Rect -> Bool -> Bool -> IORef (Maybe Rect) -> PaneGridCtx
   }
 
 -- -----------------------------------------------------------------------------
@@ -475,11 +483,12 @@ paneGridCore cfg controlled given = do
           , geRegions = visibleRegions
           , geState = gs
           , geLifted = lifted
-          , geMakeCtx = \pid rect dragging handle ->
+          , geMakeCtx = \pid rect inTabs dragging handle ->
               PaneGridCtx
                 { pgcPaneId = pid
                 , pgcRect = rect
                 , pgcMaximized = maxPane == pid
+                , pgcInTabs = inTabs
                 , pgcDragging = dragging
                 , pgcDndActive = dragMoved
                 , pgcSplit = splitPane env pid
@@ -494,7 +503,7 @@ paneGridCore cfg controlled given = do
   container NodeContainer lay $ do
     tagContainer wid
     if maxPane /= 0
-      then void (renderPane env maxPane baseRect)
+      then void (renderPane env False maxPane baseRect)
       else do
         rendered <- maybe (pure []) (\t -> renderNode env (M.fromList [(diSplitId d, d) | d <- visibleDividers]) t (buildMinTree (geMinSize env) (geGutter env) t)) visibleTree
         runGestures wid env dividers rendered dragMoved dragZone
@@ -596,7 +605,7 @@ resolveExternalDrop env wid baseRect mouse end = do
 -- taken by a control inside it starts a drag, and the pointer shows a grab
 -- cursor over it. Wrap a pane's title bar in it:
 --
--- > paneDragHandle pctx (fillW . alignMid) $ do
+-- > paneDragHandle pctx (fillW . alignMiddle) $ do
 -- >   label title
 -- >   flex
 -- >   whenM (button "Close") (pgcClose pctx)
@@ -634,7 +643,6 @@ withPaneKey :: GridEnv -> Word64 -> NanoUI a -> NanoUI a
 withPaneKey env pid =
   withIdFrame (\parent -> (parent, gePaneScope env)) . withKey pid
 
--- | Render one pane's content via 'pgViewPane' under the pane's stable key.
 -- | Whether a left press landed on an enabled interactive child declared at or
 -- after arena index @start@, using previous-frame bounds.
 hitChildControl :: Context -> Input -> Int -> IO Bool
@@ -658,19 +666,21 @@ hitChildControl ctx inp start
                 if hit then pure True else hitFrom (idx + 1)
       hitFrom start
 
+-- | Render one pane's content via 'pgViewPane' under the pane's stable key.
 renderPane ::
   GridEnv ->
+  Bool ->
   Word64 ->
   Rect ->
   NanoUI [RenderedPane]
-renderPane env pid rect =
+renderPane env inTabs pid rect =
   withPaneKey env pid $ do
     inp <- askInput
     let ctx = geCtx env
         arena = ctxNodeArena ctx
     start <- liftIO (arenaCount arena)
     handleRef <- liftIO (newIORef Nothing)
-    let ctxt = geMakeCtx env pid rect (draggingPane env pid) handleRef
+    let ctxt = geMakeCtx env pid rect inTabs (draggingPane env pid) handleRef
     view <- clipContainer (paneLay (geMinSize env)) (pgViewPane (geCfg env) pid ctxt)
     controlHit <- liftIO (hitChildControl ctx inp start)
     handleRect0 <- liftIO (readIORef handleRef)
@@ -739,7 +749,7 @@ renderNode env dividers node mt = case node of
         [] <$ container NodeContainer (paneLay (geMinSize env)) (pure ())
     -- Its prev-frame rect, zero until the pane has been laid out once.
     | otherwise ->
-        renderPane env pid (M.findWithDefault (Rect 0 0 0 0) pid (geRegions env))
+        renderPane env False pid (M.findWithDefault (Rect 0 0 0 0) pid (geRegions env))
   PaneTabs gid pids active ->
     withKey gid $
       clipContainer (paneLay (geMinSize env)) $ do
@@ -756,7 +766,7 @@ renderNode env dividers node mt = case node of
         bodyRendered <-
           if geLifted env && draggingPane env active
             then [] <$ container NodeContainer fillLay (pure ())
-            else renderPane env active bodyR
+            else renderPane env True active bodyR
         pure (tabRendered <> bodyRendered)
   Split sid ax ratio a b ->
     withKey sid $ do
@@ -799,7 +809,7 @@ dividerWidget env axis =
   void $
     customWidget
       defaultCustomWidgetSpec
-        { widgetLayout = axisLay axis (Fixed (geGutter env))
+        { widgetLayout = const (axisLay axis (Fixed (geGutter env)))
         , widgetContent = contentKeyOf [keyPart (axis == AxisV), keyPart thickness, keyPart leeway, keyPart (colorToWord32 <$> color)]
         , widgetDraw = \cdc rect -> runCanvasFor cdc $ do
             let theme = cdcTheme cdc
@@ -896,7 +906,9 @@ runGestures wid env dividers rendered moved zone = do
       (_, Just pane) -> do
         liftIO (leftPress (geCtx env) >>= modifyStore (geCtx env) . insertSpec slotDragPress (geKey env))
         let pid = rpPaneId pane
-            g = Drag pid mouse False (pvTitle (rpView pane))
+            rawTitle = pvTitle (rpView pane)
+            dragTitle = if T.null rawTitle then pgTabTitle (geCfg env) pid else rawTitle
+            g = Drag pid mouse False dragTitle
         void . updateGrid env True $ \s ->
           if rpIsTab pane
             then s {gsTree = treeSelectTab pid <$> gsTree s, gsFocus = pid, gsGesture = g}

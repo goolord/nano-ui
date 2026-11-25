@@ -12,8 +12,8 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Equality (sameFloat)
 import NanoUI.Internal.Font (sliderHitBounds)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (NanoUI, freshWidget, scope, liftIO)
-import NanoUI.Internal.Style (Layout, defaultLayout, fillW)
+import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, freshWidget, scope, liftIO)
+import NanoUI.Internal.Style (Layout, defaultLayout, fillW, inheritFont)
 import NanoUI.Internal.Store (fieldFloat)
 import NanoUI.Internal.Types (Rect (..), clamp)
 import NanoUI.Internal.Var (Binding (..), bindVarBy)
@@ -67,7 +67,8 @@ sliderCore f minV maxV value = do
   let
     range = maxV - minV
     fracOf x = if range > 0 then (x - minV) / range else 0
-  resp <- addWidget wid NodeSlider "" (fracOf current) (f (fillW defaultLayout))
+  amb <- askDefaultLayout
+  resp <- addWidget wid NodeSlider "" (fracOf current) (f (inheritFont amb (fillW defaultLayout)))
   mrect <- liftIO (getPrevRect ctx wid)
   let
     track = maybe (Rect 0 0 0 0) (\(Rect x y w h) -> sliderHitBounds x y w h) mrect

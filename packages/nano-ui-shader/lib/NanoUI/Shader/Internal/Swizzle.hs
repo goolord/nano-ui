@@ -11,7 +11,7 @@
 -- | Type-level vector swizzling for 'OverloadedRecordDot' (@v.xy@, @col.bgr@,
 -- @v.xyxy@) using GHC 9.10+ 'GHC.TypeLits.UnconsSymbol' and 'HasField', with
 -- custom compile-time 'TypeError' diagnostics and zero Template Haskell.
-module NanoUI.Shader.Swizzle
+module NanoUI.Shader.Internal.Swizzle
   ( VecDim
   , SwizzleIndices
   , SwizzleResult

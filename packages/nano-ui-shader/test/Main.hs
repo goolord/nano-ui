@@ -36,10 +36,10 @@ import NanoUI.Internal.Shader
   )
 import NanoUI.Shader
 import NanoUI.Shader.Compose (compileSurfaceIR)
-import NanoUI.Shader.Emit.Glsl (emitGlsl150, emitGlslEs300)
-import NanoUI.Shader.Emit.Msl (emitMsl)
-import NanoUI.Shader.Emit.Spirv (emitSpirvWords)
-import NanoUI.Shader.IR (ShaderIR (..))
+import NanoUI.Shader.Internal.Emit.Glsl (emitGlsl150, emitGlslEs300)
+import NanoUI.Shader.Internal.Emit.Msl (emitMsl)
+import NanoUI.Shader.Internal.Emit.Spirv (emitSpirvWords)
+import NanoUI.Shader.Internal.IR (ShaderIR (..))
 import System.Exit (exitFailure)
 
 data InnerUniforms = InnerUniforms
@@ -161,7 +161,7 @@ main = do
       customSurf = surfaceShader $ \u ctx ->
         let uv = ctx.uv.xy
             flipped = uv.yx
-            cRgb = select u.duFlag u.duTint.rgb u.duTint.bgr
+            cRgb = selectE u.duFlag u.duTint.rgb u.duTint.bgr
             k = clamp01E (u.duMix + flipped.x * floatE 0.0 + u.duOffset.x * floatE 0.0 + u.duWeight.z * floatE 0.0 + intToFloat u.duSteps * floatE 0.0)
          in vec4_31 (cRgb *^ k) (floatE 1.0)
   checkAllTargets failed "customSurf" customSurf
@@ -270,7 +270,7 @@ main = do
         let scaled = u.nuInner.iuScale ^* u.nuInner.iuColor.rgb
             clamped = clampE (u.nuCount + uintE 1) (uintE 0) (uintE 10)
             hi = clamped .> uintE 2
-            rgb = select hi scaled (vec3 0 0 0)
+            rgb = selectE hi scaled (vec3 0 0 0)
          in vec4_31 rgb 1.0
   checkAllTargets failed "nested + Word32 + (^*) shader" nestedSh
   let nVal = NestedUniforms (InnerUniforms (colorRGBA 200 100 40 255) 0.5) 3

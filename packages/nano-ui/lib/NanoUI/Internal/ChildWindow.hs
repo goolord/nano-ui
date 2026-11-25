@@ -19,14 +19,14 @@ import NanoUI.Internal.Var.Types (Var)
 -- | A separate native window running @body@ as its view, open while the
 -- 'Var' holds 'True'. Call it unconditionally every frame, as for
 -- 'NanoUI.modal': a frame that skips the call closes the window. The desktop's
--- close button, and 'NanoUI.quitUi' from @body@, write 'False'; with
+-- close button, and 'NanoUI.quit' from @body@, write 'False'; with
 -- 'NanoUI.wsExitOnCloseRequest' off, the close button sets
 -- 'NanoUI.winCloseRequested' in @body@ instead.
 --
 -- The window has its own focus, widget state and positional 'NanoUI.useVar'
 -- slots, and runs its own frames. It starts with this view's theme and the
 -- settings, which take effect when it opens; set its title or theme later
--- from @body@ ('NanoUI.setWindowTitleUi', 'NanoUI.setUiTheme').
+-- from @body@ ('NanoUI.setWindowTitle', 'NanoUI.setTheme').
 --
 -- @body@ runs in the window's own frames. It may close over this view's
 -- values: the window runs it again after each frame of this view. A 'Var'

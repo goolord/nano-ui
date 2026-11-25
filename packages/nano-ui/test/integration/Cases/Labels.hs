@@ -59,7 +59,7 @@ runTruncateTest base failed = do
 runToggleButtonTest :: Context -> IORef Int -> IO ()
 runToggleButtonTest ctx failed = do
   ref <- newVar False
-  tint <- themeWarning <$> getTheme ctx
+  tint <- themeWarning <$> getThemeIO ctx
   let inp = withInputOff 300 200
       ui = column (toggleButton' Warning "M" ref)
   runSim ctx failed inp ui $ do

@@ -121,7 +121,7 @@ textEditMenuView = do
   liftIO (getsInteraction ctx isTextInputMenu) >>= mapM_ (\(TextInputMenu wid at _) ->
     whenM (liftIO (widgetOverlayAllowed ctx wid)) $ do
       theme <- liftIO (widgetTheme ctx wid)
-      let cfg = (defaultPopupConfig (AnchorPoint at)) {cfgPlacement = PlacementAtCursor, cfgOffset = 0}
+      let cfg = (defaultPopupConfig (AnchorPoint at)) {popupPlacement = PlacementAtCursor, popupOffset = 0}
       (resp, picked) <- withKey textEditMenuKey . themed theme . popupWith' (constVar True) cfg id $
         columnWith (tight . gap 0) $ fmap (listToMaybe . concat) . forM textEditMenuRows $ \case
           Nothing -> [] <$ menuSeparator

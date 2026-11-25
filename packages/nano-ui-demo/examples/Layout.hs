@@ -42,7 +42,7 @@ view =
   scrollWith (padAll 12 . grow) $
     columnWith (tight . gap 20 . fillW) $ do
       toolbar $ do
-        labelWith (alignMid . fontSize 22 . fontMedium) "Layout"
+        labelWith (alignMiddle . fontSize 22 . fontMedium) "Layout"
         flex
         -- The overlay's state lives in the context: show it in the checkbox
         -- and hand the checkbox's edit back.
@@ -74,7 +74,7 @@ view =
 
       section "Pushing things apart" "flex takes the room left in a row, so the row must be wider than its content: give it fillW, as toolbar does." $ do
         toolbar $ do
-          labelWith alignMid "report.pdf"
+          labelWith alignMiddle "report.pdf"
           flex
           btn id "Share"
           btn id "Download"
@@ -82,18 +82,18 @@ view =
         toolbar $ do
           btn id "Back"
           flex
-          labelWith alignMid "Page 2 of 5"
+          labelWith alignMiddle "Page 2 of 5"
           flex
           btn id "Next"
 
-      section "Centering" "A child aligns itself: alignCenter across a column, alignMid down a row. Layers place a child by its alignment on both axes." $ do
+      section "Centering" "A child aligns itself: alignCenter across a column, alignMiddle down a row. Layers place a child by its alignment on both axes." $ do
         columnWith (tight . fillW) $ btn alignCenter "alignCenter in a column"
         rowWith (tight . gap 8 . fillW . fixedH 56) $ do
           btn alignTop "alignTop"
-          btn alignMid "alignMid"
+          btn alignMiddle "alignMiddle"
           btn alignBottom "alignBottom"
         panelWith (layered . fillW . fixedH 80) $
-          labelWith (alignCenter . alignMid) "Centred both ways in a layered panel"
+          labelWith (alignCenter . alignMiddle) "Centred both ways in a layered panel"
 
       section "Wrapping" "wrap starts a new line when the next child would overflow. Narrow the window to see it." $
         rowWith (wrap . tight . gap 6 . fillW) $
@@ -109,7 +109,7 @@ view =
           panelWith (fillW . padAll 12) (label "Content")
 
       section "Badges" "In layers the badge is an ordinary child, inside the box. pinAt takes it out of the flow, so it neither sizes its parent nor stays inside it." $
-        rowWith (tight . gap 32 . alignMid) $ do
+        rowWith (tight . gap 32 . alignMiddle) $ do
           layersWith tight $ do
             btn (fixedWH 110 40) "Inbox"
             badge (alignEnd . alignTop) "3"

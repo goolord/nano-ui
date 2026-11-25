@@ -20,7 +20,7 @@ import NanoUI.Internal.Font (FontMetrics, isDefaultNodeFont, measureTextIO, tabu
 import NanoUI.Internal.Layout.ScrollGeometry
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (scrollBarSlotOf)
-import NanoUI.Internal.Style (FontVariant (..), TextDecoration (..), resolveFontSize, variantFace)
+import NanoUI.Internal.Style (FontVariant (..), TextDecoration (..), resolveFontSize)
 import NanoUI.Internal.Types (Rect (..))
 import NanoUI.Internal.WidgetText (containerFlagClip, hasFlag, panelSurface, textNodeFontStyle, textNodeFontTabular, textNodeFontVariant, textNodeFontWeight)
 
@@ -66,16 +66,13 @@ packedTextFont size si =
 -- metrics; everything else defers to the host resolver.
 {-# INLINE resolveTextFont #-}
 resolveTextFont :: Context -> TextFont -> IO (FontMetrics, Bool)
-resolveTextFont ctx (TextFont rawSize variant0 weight style _ tabular) = do
+resolveTextFont ctx (TextFont rawSize variant weight style _ tabular) = do
   let !size = resolveFontSize (ctxFontSize ctx) rawSize
   (fm0, native) <-
     if isDefaultNodeFont size weight style variant
       then pure (if variant == FontMono then ctxMonoFontMetrics ctx else ctxFontMetrics ctx, False)
       else ctxResolveFont ctx size weight style variant
   pure (if tabular then tabularFontMetrics fm0 else fm0, native)
-  where
-    -- A colour-only variant draws in the regular face.
-    variant = variantFace variant0
 
 -- | Metrics of the font node @idx@ is styled with.
 nodeFontMetrics :: Context -> NodeIdx -> IO FontMetrics

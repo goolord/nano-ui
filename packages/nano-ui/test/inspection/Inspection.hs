@@ -65,8 +65,8 @@ import NanoUI
   , drawCircle
   , drawRect
   , everyStyle
-  , runCanvasFor
   )
+import NanoUI.Widgets.Custom (runCanvasFor)
 import NanoUI.Backend (Input, inputInteracted)
 import NanoUI.Testing (DrawCmd (..), DrawOp (..), Layer (..))
 

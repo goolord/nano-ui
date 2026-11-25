@@ -7,6 +7,7 @@ import Data.ByteString qualified as BS
 import Data.Text (Text)
 import Data.Text.Encoding qualified as TE
 import NanoUI
+import NanoUI.Widgets.TextDocument
 
 notes :: NanoUI ()
 

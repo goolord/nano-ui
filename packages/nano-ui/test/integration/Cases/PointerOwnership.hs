@@ -86,7 +86,7 @@ overlays =
   , Overlay "select-dropdown" (fst <$> withValue 0 (selectWith' fillW options)) clickSource spanPanelRect
   , Overlay "combo-dropdown" (fst <$> withValue "" (comboBox' "pick" options)) clickSource spanPanelRect
   , Overlay "popup" popupSource alreadyOpen nodePanelRect
-  , Overlay "window" (fst <$> window' (constVar True) "Overlay window" panelBody) alreadyOpen nodePanelRect
+  , Overlay "window" (fst <$> floatingWindow' (constVar True) "Overlay window" panelBody) alreadyOpen nodePanelRect
   , Overlay "modal" (fst <$> modal' (constVar True) "Overlay modal" panelBody) alreadyOpen nodePanelRect
   ]
   where
@@ -98,7 +98,7 @@ overlays =
     popupSource = do
       anchor <- button' "popup source"
       let cfg = defaultPopupConfig (AnchorRect (respRect anchor))
-      fst <$> popup' (constVar True) cfg {cfgPlacement = PlacementBelow, cfgDismissable = False} panelBody
+      fst <$> popup' (constVar True) cfg {popupPlacement = PlacementBelow, popupDismissable = False} panelBody
     panelBody = columnWith (fixedWH 420 420) (mapM_ label (numbered "overlay line" [1 .. 6]))
     -- Overlays the frame draws itself: the panel rect rides on their spans.
     spanPanelRect _ = do
@@ -165,9 +165,9 @@ victims = do
     areaProbe ctx r = do
       st <- getStore ctx
       let s = loadTextAreaState st (intKey (respId r))
-      off <- getScrollOffset ctx (respId r)
+      off <- getScrollOffsetIO ctx (respId r)
       pure (show (getCursor (tasBuffer s), tasSelectionAnchor s, off))
-    scrollProbe ctx r = show <$> getScrollOffset ctx (respId r)
+    scrollProbe ctx r = show <$> getScrollOffsetIO ctx (respId r)
     selectProbe ctx r = (\st -> show (isSelectOpen st (intKey (respId r)))) <$> getStore ctx
 
 -- | The source on top, then the widget under test pushed right and down by
@@ -283,7 +283,7 @@ runPointerRoutingLintTest _ failed = do
       , "NanoUI/Internal/Widgets/Node.hs" -- routes a floating panel's body and a dropdown's owner
       , "NanoUI/Internal/Widgets/Behavior.hs" -- useDismissable: a press anywhere else dismisses
       , "NanoUI/Internal/Widgets/Popup.hs" -- tooltips: a press anywhere shuts one; one over its target stays
-      , "NanoUI/Internal/ChildWindow.hs" -- a further window's view starts from its frame's input, as a frame does
+      , "NanoUI/Internal/ChildWindow.hs" -- a further floatingWindow's view starts from its frame's input, as a frame does
       ]
     complain msg = putStrLn ("  " <> msg) >> bump failed
     haskellFiles dir = do
@@ -294,7 +294,7 @@ runPointerRoutingLintTest _ failed = do
 captureUi :: NanoUI ((Response, Float), Maybe Response)
 captureUi = do
   s <- columnWith (fixedW 320) (withValue 50 (slider' 0 100))
-  (_, b) <- window' (constVar True) "Capture window" (columnWith (fixedWH 300 200) (button' "inside"))
+  (_, b) <- floatingWindow' (constVar True) "Capture window" (columnWith (fixedWH 300 200) (button' "inside"))
   pure (s, b)
 
 -- | A held button stays with the layer it went down in, page or window, and

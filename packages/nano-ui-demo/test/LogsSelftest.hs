@@ -12,6 +12,7 @@ import Logs (appendEntries, logsApp, newAppState)
 import NanoUI
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Shortcut
+import NanoUI.Testing (getScrollMetricsIO)
 import NanoUI.Testing.Sim (onContext, prevRect, scrollOffset2DOf, textShown)
 
 selftest :: IO ()
@@ -32,7 +33,7 @@ selftest = withHiddenWindow 1000 700 (V2 500 350) id $ \ctx env base -> do
     expect "● PINNED"
     -- Pinned is the scroller's own end, so the last row clears the
     -- horizontal bar.
-    metrics <- onContext . flip getScrollMetrics =<< scrollerId
+    metrics <- onContext . flip getScrollMetricsIO =<< scrollerId
     check ("a PINNED view should sit at the scroller's end: " <> show metrics) $
       fmap (\m -> v2Y (scrollOffset m) == v2Y (scrollRange m)) metrics == Just True
     wheelAt (V2 500 350) (V2 0 (-15))

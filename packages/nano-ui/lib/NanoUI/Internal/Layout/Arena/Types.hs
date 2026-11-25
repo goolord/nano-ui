@@ -586,7 +586,7 @@ initialCapacity = 256
 geomStride, styleStride, tagStride, treeStride :: Int
 geomStride = 9
 styleStride = 20
-tagStride = 16
+tagStride = 17
 treeStride = 7
 
 -- | Columns of 'naArrGeom', in logical pixels and window coordinates.
@@ -678,7 +678,7 @@ data TagCol
   = TagNodeType | TagDirection | TagWSizing | TagHSizing
   | TagScrollBarSlot | TagAlignX | TagAlignY | TagIdSuperseded
   | TagFlow | TagPinned | TagPinnedBelow | TagPointer | TagLineAlign
-  | TagScrollerBelow | TagSteadyHeight | TagItemsAlign
+  | TagScrollerBelow | TagSteadyHeight | TagItemsAlign | TagJustify
   deriving (Enum, Bounded)
 
 -- | Columns of 'naArrTree'. A link that leads nowhere is -1.

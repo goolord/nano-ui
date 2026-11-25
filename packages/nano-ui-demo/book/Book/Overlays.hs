@@ -42,7 +42,7 @@ notice = do
 -- ANCHOR: window
 inspector = do
   inspectorOpen <- useVar False
-  window inspectorOpen "Inspector" $ do
+  floatingWindow inspectorOpen "Inspector" $ do
     inspectorBody
 -- ANCHOR_END: window
 

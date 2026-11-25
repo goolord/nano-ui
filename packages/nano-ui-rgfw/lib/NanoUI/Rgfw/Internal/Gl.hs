@@ -55,8 +55,8 @@ import Foreign.Marshal.Alloc (alloca, allocaBytes, callocBytes, free, reallocByt
 import Foreign.Marshal.Utils (copyBytes)
 import Foreign.Ptr (Ptr, nullPtr, plusPtr)
 import Foreign.Storable (peek, pokeByteOff)
-import NanoUI (Color (..), Rect (..), RgbaPixels, V2 (..), rectInflate, rgbaPixels, roundHalfUp)
-import NanoUI.Backend (Damage (..))
+import NanoUI (Color (..), Rect (..), RgbaPixels, V2 (..), rectInflate, rgbaPixels)
+import NanoUI.Backend (Damage (..), roundHalfUp)
 import NanoUI.Rgfw.Internal.Context (TextSpan, paintInLayerOrder)
 import NanoUI.Rgfw.Internal.Font.Cozette
   ( CozetteFont (..)

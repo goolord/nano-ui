@@ -189,7 +189,7 @@ runRichTextScrollCullTest ctx failed = do
       ui = fmap fst $ scrollArea (fillW . fixedH 100) (richTextWith fillW paragraph)
   sid <- warmup2 ctx inp ui
   forM_ [0, 3333, 1000000] $ \off -> do
-    setScrollOffset ctx sid off
+    setScrollOffsetIO ctx sid off
     (_, draw) <- warmupDraw ctx inp ui
     assertJustM failed (getPrevRect ctx sid) $ \(Rect rx ry rw rh) -> do
       quads <- drawQuads draw
@@ -229,7 +229,7 @@ runRichTextRelayoutTest ctx failed = do
   let pieces = ["kept ", strong "pieces", hyperlink "x" " here"]
       (red, blue) = (colorRGBA 200 10 10 255, colorRGBA 10 10 200 255)
       colorsOf theme f = do
-        (_, ops) <- settledOps ctx inp400 (column (setUiTheme theme >> fst <$> richTextWith' f pieces))
+        (_, ops) <- settledOps ctx inp400 (column (setTheme theme >> fst <$> richTextWith' f pieces))
         pure [c | DrawTextStyled _ _ _ "kept" c <- ops]
   assertEq failed [[red], [blue]] =<< mapM (colorsOf defaultTheme . fontColor) [red, blue]
   dark <- colorsOf defaultTheme id
@@ -240,7 +240,7 @@ runRichTextRelayoutTest ctx failed = do
 -- as a column is, up to the popup's height cap, past which it scrolls.
 runRichTextScrollPopupTest :: Context -> IORef Int -> IO ()
 runRichTextScrollPopupTest _ failed = do
-  let cfg = (defaultPopupConfig (AnchorPoint (V2 20 20))) {cfgPlacement = PlacementBelow, cfgDismissable = False}
+  let cfg = (defaultPopupConfig (AnchorPoint (V2 20 20))) {popupPlacement = PlacementBelow, popupDismissable = False}
       paragraph = [inlineText (T.replicate 60 "word ")]
       body = do
         one <- fst <$> richTextWith' (tight . fillW . fontMono) ["word"]

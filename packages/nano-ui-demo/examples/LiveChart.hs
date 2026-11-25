@@ -122,7 +122,7 @@ view app = columnWith (padAll 16 . gap 12 . grow) $ do
           update advance
         else pure saved
 
-  rowWith (tight . gap 8 . alignMid . fillW) $ do
+  rowWith (tight . gap 8 . alignMiddle . fillW) $ do
     whenM (button (if isRunning then "Pause" else "Resume")) $ do
       when isRunning (writeVar (appSaved app) feed)
       writeVar running (not isRunning)
@@ -138,7 +138,7 @@ view app = columnWith (padAll 16 . gap 12 . grow) $ do
       UiCursorCrosshair
       (plot (appPlots app) (fillW . minH 300) (walkChart points))
 
-  rowWith (tight . gap 16 . alignMid . fillW) $ do
+  rowWith (tight . gap 16 . alignMiddle . fillW) $ do
     let
       ys = fmap snd points
     -- Both parts come and go, so each sits in a scope.

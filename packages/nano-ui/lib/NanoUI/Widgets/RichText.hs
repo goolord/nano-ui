@@ -517,7 +517,7 @@ pieceFont baseSize l =
 -- colour for its tone and face, as for a label.
 pieceColor :: Theme -> Layout -> Maybe Text -> Color
 pieceColor theme l target =
-  let toneCol = textToneColor theme (layoutFontVariant l) (layoutFontTone l)
+  let toneCol = textToneColor theme (layoutFontTone l)
    in fromMaybe (maybe toneCol (const (themeLink theme)) target) (layoutFontColor l)
 
 -- | A piece's line metrics and its tokens measured in its font. A piece that

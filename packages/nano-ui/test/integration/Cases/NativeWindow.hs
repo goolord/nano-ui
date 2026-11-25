@@ -83,13 +83,13 @@ runWithoutHostTest ctx failed = do
   answers <- newIORef []
   st <- evalUi ctx inp $ do
     requestScreenshot (\shot -> modifyIORef' answers (fmap screenshotScale shot :))
-    setWindowTitleUi "title"
-    setWindowIconUi (solid 2 2)
-    setWindowMinSizeUi (Just (Size 10 10))
-    setWindowModeUi Fullscreen
-    moveWindowUi 5 6
-    toggleMaximizedUi
-    quitUi
+    setWindowTitle "title"
+    setWindowIcon (solid 2 2)
+    setWindowMinSize (Just (Size 10 10))
+    setWindowMode Fullscreen
+    moveWindow 5 6
+    toggleMaximized
+    quit
     askWindow
   assertEq failed [Nothing] =<< readIORef answers
   assertEq failed defaultWindowState {winSize = Size 200 100} st
@@ -212,7 +212,7 @@ runScreenshotLifecycleTest base failed = do
   closeWindowHost ctx
   calls <- recordingHost defaultWindowSettings ctx
   closeWindowHost ctx
-  evalUi ctx inp (setWindowTitleUi "closed")
+  evalUi ctx inp (setWindowTitle "closed")
   assertEq failed [] =<< readIORef calls
 
 -- | Installing a host applies the settings a window does not open with; setters then
@@ -229,19 +229,19 @@ runSettersTest ctx failed = do
   calls <- recordingHost opened ctx
   assertEq failed ["min " ++ sz 100 50, "icon 2", "opacity 0.5", "move (30,20)"] . reverse =<< readIORef calls
   writeIORef calls []
-  let unchanged = setWindowTitleUi "opened" >> setWindowModeUi Fullscreen >> setWindowOpacityUi 0.5
+  let unchanged = setWindowTitle "opened" >> setWindowMode Fullscreen >> setWindowOpacity 0.5
       centered = defaultWindowSettings {wsPosition = WindowPositionCentered}
   assertEq failed [] =<< asked ctx calls unchanged
   assertEq failed ["center"] =<< readIORef =<< recordingHost centered ctx
   assertEq failed [] =<< readIORef =<< recordingHost defaultWindowSettings ctx
   (c1, calls1) <- recording
   let view (title, icon, minSize, opacity, mode) = do
-        setWindowTitleUi title
-        setWindowIconUi (solid icon icon)
-        setWindowMinSizeUi minSize
-        setWindowMaxSizeUi Nothing
-        setWindowOpacityUi opacity
-        setWindowModeUi mode
+        setWindowTitle title
+        setWindowIcon (solid icon icon)
+        setWindowMinSize minSize
+        setWindowMaxSize Nothing
+        setWindowOpacity opacity
+        setWindowMode mode
       first = ("a", 2, Just (Size 100 50), 0.5, Windowed)
   forM_
     [ (first, ["title \"a\"", "icon 2", "min " ++ sz 100 50, "opacity 0.5"])
@@ -253,12 +253,12 @@ runSettersTest ctx failed = do
     $ \(v, want) -> assertEq failed want =<< asked c1 calls1 (view v)
   (c2, calls2) <- recording
   forM_
-    [ (setWindowMaxSizeUi (Just (Size 300 200)), ["max " ++ sz 300 200])
-    , (setWindowMinSizeUi (Just (Size 400 100)), ["max " ++ sz 400 200, "min " ++ sz 400 100])
-    , (setWindowMaxSizeUi (Just (Size 350 50)), ["min " ++ sz 350 50, "max " ++ sz 350 50])
-    , (setWindowMinSizeUi (Just (Size 0 80)), ["max " ++ sz 350 80, "min " ++ sz 0 80])
-    , (setWindowMaxSizeUi Nothing, ["max Nothing"])
-    , (setWindowMinSizeUi (Just (Size 500 500)), ["min " ++ sz 500 500])
+    [ (setWindowMaxSize (Just (Size 300 200)), ["max " ++ sz 300 200])
+    , (setWindowMinSize (Just (Size 400 100)), ["max " ++ sz 400 200, "min " ++ sz 400 100])
+    , (setWindowMaxSize (Just (Size 350 50)), ["min " ++ sz 350 50, "max " ++ sz 350 50])
+    , (setWindowMinSize (Just (Size 0 80)), ["max " ++ sz 350 80, "min " ++ sz 0 80])
+    , (setWindowMaxSize Nothing, ["max Nothing"])
+    , (setWindowMinSize (Just (Size 500 500)), ["min " ++ sz 500 500])
     ]
     $ \(v, want) -> assertEq failed want =<< asked c2 calls2 v
   c3 <- newContext
@@ -269,8 +269,8 @@ runSettersTest ctx failed = do
         n <- readIORef attempts
         when (n == 1) (ioError (userError "native failure"))
     }
-  assert failed =<< throws (evalUi c3 inp (setWindowTitleUi "retry"))
-  replicateM_ 2 (evalUi c3 inp (setWindowTitleUi "retry"))
+  assert failed =<< throws (evalUi c3 inp (setWindowTitle "retry"))
+  replicateM_ 2 (evalUi c3 inp (setWindowTitle "retry"))
   assertEq failed 2 =<< readIORef attempts
   -- A native limit is scaled, rounded and outset; 0, NaN or infinity is none, and a
   -- huge one stops at Int32's top.
@@ -289,14 +289,14 @@ runCommandsTest :: Context -> IORef Int -> IO ()
 runCommandsTest ctx failed = do
   calls <- recordingHost defaultWindowSettings ctx
   let commands = do
-        moveWindowUi 5 6 >> centerWindowUi >> resizeWindowUi (Size 300 200)
-        minimizeWindowUi >> maximizeWindowUi >> restoreWindowUi
+        moveWindow 5 6 >> centerWindow >> resizeWindow (Size 300 200)
+        minimizeWindow >> maximizeWindow >> restoreWindow
   replicateM_ 2 $
     assertEq failed ["move (5,6)", "center", "resize " ++ show (Size 300 200), "minimize", "maximize", "restore"]
       =<< asked ctx calls commands
-  assertEq failed ["maximize"] =<< asked ctx calls toggleMaximizedUi
+  assertEq failed ["maximize"] =<< asked ctx calls toggleMaximized
   reportWindowState ctx defaultWindowState {winMaximized = True}
-  assertEq failed ["restore"] =<< asked ctx calls toggleMaximizedUi
+  assertEq failed ["restore"] =<< asked ctx calls toggleMaximized
   (c, _) <- recording
   let reported =
         defaultWindowState

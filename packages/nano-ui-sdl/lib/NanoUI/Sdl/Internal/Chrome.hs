@@ -1,7 +1,7 @@
 -- | Support for windows that draw their own title bar. Title, size, mode and
 -- maximizing work on any backend and live in the core
--- ('NanoUI.setWindowTitleUi', 'NanoUI.resizeWindowUi',
--- 'NanoUI.toggleMaximizedUi', ...).
+-- ('NanoUI.setWindowTitle', 'NanoUI.resizeWindow',
+-- 'NanoUI.toggleMaximized', ...).
 --
 -- A window without the desktop's title bar ('DecorationsFrame' or
 -- 'DecorationsNone') has no native caption buttons or drag bar. 'windowCaption'
@@ -11,13 +11,13 @@
 --
 -- > titleBar :: NanoUI ()
 -- > titleBar =
--- >   rowWith (fillW . fixedH captionBarHeight . alignMid) $ do
+-- >   rowWith (fillW . fixedH captionBarHeight . alignMiddle) $ do
 -- >     menus <- appMenus
 -- >     flex
 -- >     label "My App"
 -- >     flex
 -- >     closing <- windowCaption menus
--- >     when closing quitUi
+-- >     when closing quit
 module NanoUI.Sdl.Internal.Chrome
   ( -- * The window
     windowResizable
@@ -52,6 +52,7 @@ import Foreign.C.Types (CUInt (..))
 import Foreign.Ptr (FunPtr, castFunPtr, castPtr, nullFunPtr, nullPtr)
 import Foreign.Storable (peekElemOff)
 import NanoUI
+import NanoUI.Chrome
 import NanoUI.Internal.Context (OverlayState (osPrevFloatingRects), getsOverlay)
 import NanoUI.Monad (askContext)
 import NanoUI.Sdl.Internal.Chrome.Types
@@ -282,8 +283,8 @@ windowCaptionWith opts taken = do
           , chromeResizeTop = if immovable then 0 else capResizeTop opts
           }
   case action of
-    Just CaptionMinimize -> minimizeWindowUi
-    Just CaptionToggleMaximize -> toggleMaximizedUi
+    Just CaptionMinimize -> minimizeWindow
+    Just CaptionToggleMaximize -> toggleMaximized
     _ -> pure ()
   pure (action == Just CaptionClose)
 

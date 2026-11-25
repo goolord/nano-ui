@@ -10,13 +10,13 @@
 --
 -- A virtualized list builds only the rows the viewport shows. With rows of
 -- a fixed height, row @i@ sits at @i * rowH@ in the content, so the scroller's
--- offset and viewport height say which rows are visible. 'getScrollMetricsUi'
+-- offset and viewport height say which rows are visible. 'getScrollMetrics'
 -- reports them, keyed by the scroller's id, which 'currentId' gives before
 -- the scroller is declared. Two spacers stand in for the rows above and
 -- below, so the content keeps its full height and the scrollbar its size.
 --
 -- Rows that do not exist cannot be scrolled to with 'scrollIntoView', so the
--- keyboard selection and "Jump to row" use 'scrollRectIntoViewUi' with the
+-- keyboard selection and "Jump to row" use 'scrollRectIntoView' with the
 -- row's rectangle in content coordinates instead.
 --
 -- Run it with @cabal run nano-ui-example-long-list@.
@@ -56,7 +56,7 @@ view = columnWith (padAll 12 . gap 8 . grow) $ do
   targetVar <- useVar (1 :: Double)
   selected <- readVar selectedVar
 
-  jump <- rowWith (tight . gap 8 . alignMid . fillW) $ do
+  jump <- rowWith (tight . gap 8 . alignMiddle . fillW) $ do
     label "Jump to row"
     let cfg = defaultNumericInputConfig {nicMin = 1, nicMax = fromIntegral rowCount}
     field <- numericInputConfigured' cfg targetVar
@@ -72,10 +72,10 @@ view = columnWith (padAll 12 . gap 8 . grow) $ do
   pageUp <- keyPressed KeyPageUp
   pageDown <- keyPressed KeyPageDown
 
-  -- Nothing may be declared between currentId and scrollArea, or the
+  -- Nothing may be declared between currentId and scrollWith, or the
   -- scroller would take a different id than the one read here.
   sid <- currentId
-  before <- getScrollMetricsUi sid
+  before <- getScrollMetrics sid
   let page = maybe 10 (\m -> max 1 (floor (rectH (scrollViewport m) / rowH) - 1)) before
       step
         | up = Just (-1)
@@ -91,13 +91,13 @@ view = columnWith (padAll 12 . gap 8 . grow) $ do
   -- An instant command moves the offset now, before the rows are picked.
   for_ command $ \(goTo, align) -> do
     writeVar selectedVar goTo
-    scrollRectIntoViewUi sid (rowRect goTo) align ScrollInstant
+    scrollRectIntoView sid (rowRect goTo) align ScrollInstant
 
   -- Read the metrics again, after the command, so the rows built are the
   -- ones the new offset shows. (Wheel and scrollbar drags are applied before
   -- the view runs, so they need nothing extra.) Before the first layout
   -- there are no metrics; build a screenful from the top.
-  metrics <- getScrollMetricsUi sid
+  metrics <- getScrollMetrics sid
   let (firstRow, lastRow) = case metrics of
         Nothing -> (0, 40)
         Just m ->
@@ -105,12 +105,12 @@ view = columnWith (padAll 12 . gap 8 . grow) $ do
               height = rectH (scrollViewport m)
            in (max 0 (floor (top / rowH)), min (rowCount - 1) (ceiling ((top + height) / rowH)))
   highlight <- themeSelection <$> uiTheme
-  (_, clicked) <- scrollArea (tight . grow) $
+  clicked <- scrollWith (tight . grow) $
     columnWith (tight . gap 0 . fillW) $ do
-      spacer Fit (Fixed (fromIntegral firstRow * rowH))
+      spacerH (fromIntegral firstRow * rowH)
       -- Keyed by row number, so a row keeps its widget ids as it scrolls.
       picks <- traverse (\i -> withKey i (listRow highlight (i == current) i)) [firstRow .. lastRow]
-      spacer Fit (Fixed (fromIntegral (rowCount - 1 - lastRow) * rowH))
+      spacerH (fromIntegral (rowCount - 1 - lastRow) * rowH)
       pure (listToMaybe [i | (i, True) <- zip [firstRow ..] picks])
   for_ clicked (writeVar selectedVar)
   where
@@ -124,11 +124,8 @@ listRow highlight isSelected i = do
   let bg = if isSelected then highlight else colorTransparent
   (_, area) <- mouseArea (fillW . fixedH rowH) $
     styled (panelStyle (background bg . borderWidth 0 . cornerRadius 4)) $
-      panelWith (asRow . tight . grow . padXY 8 0 . gap 12 . alignMid) $ do
+      panelWith (direction Row . tight . grow . padXY 8 0 . gap 12 . alignMiddle) $ do
         labelWith (fontMono . fontMuted . fixedW 64) (T.pack (show (i + 1)))
         label ("Item " <> T.pack (show (i + 1)))
         labelWith (fontMuted . alignEnd . fillW) (T.pack (show ((i * 7919) `mod` 10007)))
   pure (respClicked area)
-  where
-    -- A panel stacks its children in a column unless told otherwise.
-    asRow l = l {layoutDirection = Row}

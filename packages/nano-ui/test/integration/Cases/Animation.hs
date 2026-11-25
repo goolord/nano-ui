@@ -178,7 +178,7 @@ runButtonHoverAnimTest ctx failed = do
 -- once replayed the last animated frame's ops for good.
 runSpinnerTest :: Context -> IORef Int -> IO ()
 runSpinnerTest ctx failed = do
-  theme <- getTheme ctx
+  theme <- getThemeIO ctx
   let inp = withDelta 400 300 0.016
       ui = column $ do
         label "Loading a long label so the window has more than the spinner"

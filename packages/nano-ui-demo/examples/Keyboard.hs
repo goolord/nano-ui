@@ -77,11 +77,11 @@ keyboardApp app = do
         writeVar boldVar (not wasBold)
         logged (if wasBold then "Bold off" else "Bold on")
   columnWith (padAll 20 . gap 14 . fillW . fillH) $ do
-    (mSave, mBold, mQuit) <- rowWith (tight . gap 12 . alignMid . fillW) $ do
+    (mSave, mBold, mQuit) <- rowWith (tight . gap 12 . alignMiddle . fillW) $ do
       open <- readVar menuOpen
       btn <- menuButton' "Actions" open
       when (respClicked btn) (writeVar menuOpen (not open))
-      let cfg = (defaultPopupConfig (AnchorRect (respRect btn))) {cfgPlacement = PlacementBelow, cfgOffset = 0}
+      let cfg = (defaultPopupConfig (AnchorRect (respRect btn))) {popupPlacement = PlacementBelow, popupOffset = 0}
       -- A click outside or Escape closes the menu; so does picking a row.
       (_, picked) <- popup' menuOpen cfg $ columnWith (tight . gap 0) $ do
         s <- menuItemShortcut "Save" saveChord
@@ -93,7 +93,7 @@ keyboardApp app = do
       when (s || b || q) (writeVar menuOpen False)
       flex
       n <- readVar saves
-      labelWith (tight . alignMid . fontMuted) ("Saved " <> T.pack (show n) <> " times")
+      labelWith (tight . alignMiddle . fontMuted) ("Saved " <> T.pack (show n) <> " times")
       pure chosen
     -- shortcutLabel spells a chord for this platform, as menu rows do.
     isBold <- readVar boldVar
@@ -126,7 +126,7 @@ keyboardApp app = do
     -- so while it is open its rows take the chords first.
     whenM ((mSave ||) <$> shortcut saveChord) save
     whenM ((mBold ||) <$> shortcutOnce boldChord) toggleBold
-    whenM ((mQuit ||) <$> shortcut quitChord) quitUi
+    whenM ((mQuit ||) <$> shortcut quitChord) quit
     whenM (shortcut findChord) $ do
       requestFocus (respId searchR)
       logged "Focused search"

@@ -123,7 +123,7 @@ dropdowns =
   , ("combo", \opts -> withValue "" (comboBox' "Font" opts))
   ]
 
--- | A dropdown near the window's bottom opens above its field, where it
+-- | A dropdown near the floatingWindow's bottom opens above its field, where it
 -- fits, and a click there picks the row under it. One that fits on neither
 -- side is not slid back over the field, so the click that opens it picks
 -- nothing.
@@ -157,7 +157,7 @@ runDropdownScrolledAwayTest _ failed =
       V2 cx cy <- press (On resp) >> frame >> (spanCenter <$> rectOf "Gamma Mono")
       let past = rectH (respRect resp) + 20
           picked = checkEq (name, before) . (name,) . snd . snd
-      onContext (\c -> setScrollOffset c sid past)
+      onContext (\c -> setScrollOffsetIO c sid past)
       _ <- frame >> frame
       checkEq (name, False) . (name,) =<< labelShown "Gamma Mono"
       picked =<< (moveTo (At (V2 cx (cy - past))) >> release)

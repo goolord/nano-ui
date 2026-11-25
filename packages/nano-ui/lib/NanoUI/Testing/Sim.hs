@@ -104,7 +104,7 @@ import GHC.Stack (HasCallStack, withFrozenCallStack)
 import NanoUI hiding (liftIO)
 import NanoUI.Backend
 import NanoUI.Shortcut (Shortcut)
-import NanoUI.Internal.Context (getFocusVisible)
+import NanoUI.Internal.Context (getFocusVisible, getScrollOffset, getScrollOffset2D)
 import NanoUI.Testing (getHotId, getPrevRect, needsRedraw)
 import NanoUI.Testing.Assert qualified as A
 import NanoUI.Testing.Harness (chordInp, keyInp, pressWith, releaseWith, setFocus, spanLabel)

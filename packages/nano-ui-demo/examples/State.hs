@@ -126,8 +126,8 @@ owned state = section "Owned Vars" $ do
 -- field; nothing copies values back and forth.
 fields :: AppState -> NanoUI ()
 fields state = section "Fields of a record" $ do
-  rowWith (tight . gap 8 . alignMid . fillW) $ do
-    labelWith (alignMid . fixedW 80) "Volume"
+  rowWith (tight . gap 8 . alignMiddle . fillW) $ do
+    labelWith (alignMiddle . fixedW 80) "Volume"
     sliderWith (fixedW 200) 0 100 state.settings.volume
   checkbox "Silent" state.settings.silent
   textInput state.settings.nickname
@@ -167,10 +167,10 @@ conditional = section "Conditional UI" $ do
 
 counterRow :: T.Text -> Var Int -> NanoUI ()
 counterRow name n =
-  rowWith (tight . gap 8 . alignMid) $ do
-    labelWith (alignMid . fixedW 60) name
+  rowWith (tight . gap 8 . alignMiddle) $ do
+    labelWith (alignMiddle . fixedW 60) name
     whenM (button "-") (modifyVar n (subtract 1))
-    labelWith alignMid . T.pack . show =<< readVar n
+    labelWith alignMiddle . T.pack . show =<< readVar n
     whenM (button "+") (modifyVar n (+ 1))
 
 -- (f) A list that reorders. Each row runs under 'withKey' with the player's
@@ -184,8 +184,8 @@ keyed state = section "Keyed lists" $ do
     whenM (button "Rotate") (modifyVar state.players (\ps -> drop 1 ps <> take 1 ps))
   names <- readVar state.players
   column . forM_ names $ \name ->
-    withKey name . rowWith (tight . gap 8 . alignMid) $ do
+    withKey name . rowWith (tight . gap 8 . alignMiddle) $ do
       score <- useVar (0 :: Int)
-      labelWith (alignMid . fixedW 80) name
+      labelWith (alignMiddle . fixedW 80) name
       whenM (button "+1") (modifyVar score (+ 1))
-      labelWith alignMid . T.pack . show =<< readVar score
+      labelWith alignMiddle . T.pack . show =<< readVar score

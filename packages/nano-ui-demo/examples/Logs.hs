@@ -18,13 +18,16 @@ import Data.Text qualified as T
 import Data.Vector.Mutable qualified as MV
 import Data.Vector.Unboxed.Mutable qualified as MU
 import NanoUI
+import NanoUI.Backend (Layout (..))
 import NanoUI.Backend.Sdl
 import NanoUI.Internal.Context
   ( Context (..)
+  , getScrollOffset2D
   , takeTextEditLastAction
   )
-import NanoUI.Monad (askContext)
+import NanoUI.Monad (askContext, nextId)
 import NanoUI.Shortcut
+import NanoUI.Themes (tomorrowNightMinDarkTheme)
 import NanoUI.Var (peekVar)
 import Text.Printf (printf)
 
@@ -294,7 +297,7 @@ renderHeaderToolbar state allSelectedVar = do
           mutateState state (setFilter lvl)
   tintedPanel (colorRGBA 24 29 38 255) (colorRGBA 45 52 64 255) fillW $ do
     columnWith (tight . fillW . padXY 12 10 . gap 8) $ do
-      rowWith (tight . fillW . alignMid . gap 12) $ do
+      rowWith (tight . fillW . alignMiddle . gap 12) $ do
         labelWith (fontBold . fontSize 16 . tight) "Log Viewer"
         labelWith (fontMono . fontMuted . tight) ("[" <> T.pack (show totalCount) <> " total]")
 
@@ -307,7 +310,7 @@ renderHeaderToolbar state allSelectedVar = do
 
         when allSelected $ status amber "[● ALL SELECTED]"
 
-      rowWith (tight . fillW . alignMid . gap 8) $ do
+      rowWith (tight . fillW . alignMiddle . gap 8) $ do
         whenM (button (if asStreaming st then "Pause Stream" else "Start Stream")) $
           mutateState state (\s -> pure (changed s {asStreaming = not (asStreaming s), asLastStream = 0.0}))
         whenM (button "+100") $ mutateState state (`appendEntries` 100)
@@ -331,7 +334,7 @@ renderLogScroller scroller allSelected st = do
   scrollWid <- withKey ("log-scroller" :: Text) nextId
   writeVar scroller (Just scrollWid)
   ctx <- askContext
-  mMetrics <- getScrollMetricsUi scrollWid
+  mMetrics <- getScrollMetrics scrollWid
   endPad <- padB . layoutPadding <$> askDefaultLayout
   inp <- askInput
 
@@ -368,7 +371,7 @@ renderLogScroller scroller allSelected st = do
   effY <-
     if abs (targetY - curY) > 0.5
       then do
-        liftIO $ setScrollOffset2D ctx scrollWid (V2 curX targetY)
+        setScrollOffset scrollWid (V2 curX targetY)
         pure targetY
       else pure curY
 
@@ -376,7 +379,7 @@ renderLogScroller scroller allSelected st = do
   writeVar prevScrollYVar effY
   when reqJump $ writeVar jumpRequest False
 
-  rowWith (tight . fillW . padXY 12 4 . alignMid . gap 8) $ do
+  rowWith (tight . fillW . padXY 12 4 . alignMiddle . gap 8) $ do
     if isSticky
       then status green "● PINNED"
       else do
@@ -397,7 +400,7 @@ renderLogScroller scroller allSelected st = do
 
   -- The same key scope gives the scroll area the id read above as scrollWid,
   -- so this frame's offset and sticky state apply to it.
-  void $ withKey ("log-scroller" :: Text) $ scrollArea2D (fillW . fillH) $ do
+  withKey ("log-scroller" :: Text) $ scroll2DWith (fillW . fillH) $ do
     columnWith (tight . gap 0 . minW 1200) $ do
       when (topH > 0) $ spacer Fit (Fixed topH)
       forM_ [firstVis .. lastVis] $ \idx -> do
@@ -408,7 +411,7 @@ renderLogScroller scroller allSelected st = do
 renderLogRow :: Bool -> LogEntry -> NanoUI ()
 renderLogRow isAllSel entry = do
   let col = levelColor (leLevel entry)
-      rowLay = tight . fixedH logRowH . padXY 8 2 . alignMid
+      rowLay = tight . fixedH logRowH . padXY 8 2 . alignMiddle
       rowBody = selectableTextWith (fontColor col . fontMono . tight) (leLine entry)
   if isAllSel
     then tintedPanel (colorRGBA 45 65 95 255) (colorRGBA 70 100 145 255) rowLay rowBody
@@ -417,7 +420,7 @@ renderLogRow isAllSel entry = do
 renderStatusBar :: Int -> Int -> Bool -> NanoUI ()
 renderStatusBar totalCount filteredCount allSelected = do
   tintedPanel (colorRGBA 20 24 32 255) (colorRGBA 45 52 64 255) fillW $ do
-    rowWith (tight . fillW . padXY 12 4 . alignMid . gap 16) $ do
+    rowWith (tight . fillW . padXY 12 4 . alignMiddle . gap 16) $ do
       labelWith (fontMono . fontMuted . tight)
         ("Total: " <> T.pack (show totalCount) <> " logs | Filtered: " <> T.pack (show filteredCount))
       if allSelected

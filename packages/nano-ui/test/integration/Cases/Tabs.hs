@@ -130,7 +130,7 @@ runTabsScrollTest ctx failed = do
     setLabels overflowLabels >> void settle
     check =<< hasArrows
     check . not =<< textShown "LongestTabName"
-    -- The headers' extent and the window's padding on both sides: less
+    -- The headers' extent and the floatingWindow's padding on both sides: less
     -- spare room than the two arrows take.
     _ <- resize (lx + lw + x0 + 10) 120
     mapM_ (check <=< textShown) overflowLabels
@@ -149,7 +149,7 @@ tabsScrollCloseButton = do
   [Rect x0 _ _ _] <- nodesTexted "Controls" getNodeRect
   closes <- closeRects
   checkEq 3 (length closes)
-  -- The last close button's right edge, less a little, and the window's
+  -- The last close button's right edge, less a little, and the floatingWindow's
   -- right padding: only that button runs past the bar.
   _ <- resize (maximum [rectX r + rectW r | r <- closes] - 4 + x0) 120
   check =<< hasArrows
@@ -310,7 +310,7 @@ runTabsContainedBodyDamageTest ctx failed = do
 runPanelBodySwapDamageTest :: Context -> IORef Int -> IO ()
 runPanelBodySwapDamageTest ctx failed = do
   let inp0 = withInput 400 300
-      win body = window' (constVar True) "TabWin" (columnWith (fixedH 300) body)
+      win body = floatingWindow' (constVar True) "TabWin" (columnWith (fixedH 300) body)
       uiA = win (label "WIDE BODY ROW ONE")
   _ <- run2Frames ctx inp0 uiA >> runFrame ctx inp0 uiA
   _ <- runFrame ctx inp0 (win (column (replicateM_ 5 (label "row line"))))

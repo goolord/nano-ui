@@ -107,7 +107,7 @@ choices = do
   size <- useVar (1 :: Int)
   every <- useVar (0 :: Int)
   checkbox "Wrap long lines" wrapLines
-  rowWith (tight . gap 8 . alignMid) $ do
+  rowWith (tight . gap 8 . alignMiddle) $ do
     toggleSwitch live
     label "Live preview"
   radio ["Small", "Medium", "Large"] size
@@ -117,7 +117,7 @@ numbers :: NanoUI ()
 numbers = do
   volume <- useVar 40
   count <- useVar (12 :: Double)
-  field "Volume" $ rowWith (tight . gap 10 . alignMid . fillW) $ do
+  field "Volume" $ rowWith (tight . gap 10 . alignMiddle . fillW) $ do
     sliderWith fillW 0 100 volume
     labelWith (tight . fixedW 36 . alignEnd) . percentage =<< readVar volume
   -- Reads the value written by the slider in the same frame.
@@ -129,7 +129,7 @@ numbers = do
 meters :: NanoUI ()
 meters = do
   gain <- useVar (68 :: Float)
-  rowWith (tight . gap 16 . alignMid . fillW) $ do
+  rowWith (tight . gap 16 . alignMiddle . fillW) $ do
     columnWith (tight . gap 4 . alignCenter) $ do
       knobWith id 44 0 100 gain
       muted "Gain"
@@ -163,7 +163,7 @@ scopedThemes = do
   let (_, activeColor) = palette !! (chosen `mod` length palette)
   styled (accentColor activeColor) $
     panelWith (fillW . padAll 10 . gap 8) $ do
-      rowWith (tight . gap 10 . alignMid . fillW) $ do
+      rowWith (tight . gap 10 . alignMiddle . fillW) $ do
         whenM (styled primary (button "Scoped CTA")) (writeVar level 1)
         sliderWith fillW 0 1 level
       progressBar =<< readVar level
@@ -188,7 +188,7 @@ notes :: Bool -> NanoUI ()
 notes wide = do
   text <- useVar initialNote
   textAreaWith (fillW . fixedH (if wide then 210 else 120)) text
-  rowWith (tight . gap 8 . alignMid . fillW) $ do
+  rowWith (tight . gap 8 . alignMiddle . fillW) $ do
     written <- readVar text
     muted (count (T.words written) "word" <> ", " <> count (T.lines written) "line")
     flex

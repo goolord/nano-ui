@@ -5,7 +5,6 @@ module NanoUI.Internal.Canvas
   ( -- * Canvas blocks
     CanvasM (..)
   , CanvasEnv (..)
-  , runCanvas
   , runCanvasFor
   , runCanvasScaled
   , emitOp
@@ -51,10 +50,10 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Internal.Context.Types (CustomDrawContext (..))
 import NanoUI.Internal.Draw (DrawOp (..), TextFont (..), checkboxOps, defaultTextFont)
-import NanoUI.Internal.Font (FontMetrics (fmAscent, fmSnapScale), monospaceMetrics, tabularFontMetrics, truncateTextPure)
+import NanoUI.Internal.Font (FontMetrics (fmAscent, fmSnapScale), tabularFontMetrics, truncateTextPure)
 import NanoUI.Internal.Image (ImageDraw (..), imageDraw, imageDrawOp)
 import NanoUI.Internal.Path (FillRule (..), Paint (..), Path, Stroke, Transform, curveTolerance, fillPathOps, stroke, strokePathOps, transformOp)
-import NanoUI.Internal.Style (AlignX (..), AlignY (..), Style (..), TextEllipsis (..), Theme (..), alignXFraction, defaultTheme)
+import NanoUI.Internal.Style (AlignX (..), AlignY (..), Style (..), TextEllipsis (..), Theme (..), alignXFraction)
 import NanoUI.Internal.Types (Color, ImageId, Rect (..), V2 (..))
 
 -- | A drawing block that collects draw ops. Run it with 'runCanvasFor'.
@@ -70,16 +69,6 @@ data CanvasEnv = CanvasEnv
   , ceTolerance :: Float
   , ceContext :: CustomDrawContext
   }
-
--- | Compile a block at a fixed 2x display scale, with an idle 'defaultTheme'
--- 'drawContext'.
-{-# DEPRECATED runCanvas "runCanvas guesses the display's scale; use runCanvasFor with the widget's draw context, or canvas" #-}
-{-# INLINE runCanvas #-}
-runCanvas :: CanvasM a -> SmallArray DrawOp
-runCanvas =
-  runCanvasScaled
-    (CustomDrawContext False False False False False defaultTheme (monospaceMetrics 16) {fmSnapScale = 2})
-    2
 
 -- | Run a custom widget's drawing. Curves are flattened to within a quarter
 -- of a device pixel at the context's display scale, and 'drawContext'

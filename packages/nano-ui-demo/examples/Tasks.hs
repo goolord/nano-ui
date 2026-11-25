@@ -81,7 +81,7 @@ searchCard app = do
       TaskRunning previous -> (fromMaybe [] previous, True)
       TaskDone found -> (found, False)
       TaskFailed _ previous -> (fromMaybe [] previous, False)
-  rowWith (tight . gap 8 . alignMid) $ do
+  rowWith (tight . gap 8 . alignMiddle) $ do
     -- The spinner comes and goes, so it sits in a scope: the label after it
     -- keeps its widget id either way.
     scope (when running spinner)
@@ -128,13 +128,13 @@ flakyCard app = do
   status <- useTaskStatus (appFlaky app) attempt (flakyRequest attempt)
   -- Each branch declares different widgets, so the whole case is one scope.
   scope $ case status of
-    TaskRunning _ -> rowWith (tight . gap 8 . alignMid) $ do
+    TaskRunning _ -> rowWith (tight . gap 8 . alignMiddle) $ do
       spinner
       label "Contacting the server..."
-    TaskDone reply -> rowWith (tight . gap 8 . alignMid) $ do
+    TaskDone reply -> rowWith (tight . gap 8 . alignMiddle) $ do
       label reply
       whenM (button "Run again") (modifyVar attemptVar (+ 1))
-    TaskFailed err _ -> rowWith (tight . gap 8 . alignMid) $ do
+    TaskFailed err _ -> rowWith (tight . gap 8 . alignMiddle) $ do
       danger (T.pack (displayException err))
       whenM (button "Retry") (modifyVar attemptVar (+ 1))
 -- ANCHOR_END: flaky_card

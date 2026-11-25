@@ -3,6 +3,7 @@ module NanoUI.Internal.Layout.ScrollGeometry
   ( ScrollPolicy (..)
   , ScrollConfig (..)
   , defaultScrollConfig
+  , scroll2DConfig
   , ScrollBarLayout (..)
   , ScrollNode (..)
   , scrollNodeViewport
@@ -69,9 +70,14 @@ data ScrollConfig = ScrollConfig
   }
   deriving (Eq, Show)
 
--- | Automatic bars on both axes, a painted background, and not focusable.
+-- | Automatic vertical scrollbar, no horizontal scrollbar, painted background,
+-- and not focusable.
 defaultScrollConfig :: ScrollConfig
-defaultScrollConfig = ScrollConfig ScrollAuto ScrollAuto False False
+defaultScrollConfig = ScrollConfig ScrollNone ScrollAuto False False
+
+-- | Automatic scrollbars on both axes, painted background, and not focusable.
+scroll2DConfig :: ScrollConfig
+scroll2DConfig = ScrollConfig ScrollAuto ScrollAuto False False
 
 scrollConfigNative2D :: ScrollConfig -> Bool
 scrollConfigNative2D cfg = scrollPolicyX cfg /= ScrollNone && scrollPolicyY cfg /= ScrollNone

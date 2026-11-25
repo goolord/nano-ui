@@ -38,8 +38,8 @@ module NanoUI.Backend.Sdl
     -- * The window
 
     -- | 'WindowSettings' and the view-side window functions come from the
-    -- core ("NanoUI"): 'NanoUI.askWindow', 'NanoUI.setWindowTitleUi',
-    -- 'NanoUI.moveWindowUi', 'NanoUI.quitUi' and others. The rest of this
+    -- core ("NanoUI"): 'NanoUI.askWindow', 'NanoUI.setWindowTitle',
+    -- 'NanoUI.moveWindow', 'NanoUI.quit' and others. The rest of this
     -- section is specific to SDL.
   , WindowSettings (..)
   , defaultWindowSettings

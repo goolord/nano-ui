@@ -6,6 +6,7 @@ module NanoUI.Markdown.Widget
   , newMarkdownCache
   , markdownCacheSize
   , markdown
+  , markdownWith
   , markdownConfigured
   ) where
 
@@ -25,7 +26,7 @@ import NanoUI
   , FontMetrics (fmLineHeight)
   , ImageId
   , Inline
-  , Layout (..)
+  , LayoutModifier
   , Rect (..)
   , Size (..)
   , Style (..)
@@ -33,7 +34,7 @@ import NanoUI
   , V2 (..)
   , alignCenter
   , alignEnd
-  , alignMid
+  , alignMiddle
   , alignStart
   , askDefaultLayout
   , background
@@ -42,15 +43,12 @@ import NanoUI
   , box
   , breakAnywhere
   , buttonWith
-  , checkboxBoxSize
-  , colorToWord32
   , columnWith
   , CanvasConfig (..)
   , canvasConfigured
   , cornerRadius
   , defaultCanvasConfig
   , defaultLayout
-  , drawCheckbox
   , drawCircle
   , drawRect
   , drawStrokeCircle
@@ -99,6 +97,8 @@ import NanoUI
   , whenM
   , withKey
   )
+import NanoUI.Backend (Layout (..), colorToWord32)
+import NanoUI.Widgets.Custom (checkboxBoxSize, drawCheckbox)
 import NanoUI.Internal.Context (frameNumber, intKey)
 import NanoUI.Internal.Monad (nextId, liftIO, withContext)
 import NanoUI.Internal.Store (eqByPtr, ptrEq)
@@ -188,6 +188,11 @@ defaultMarkdownConfig =
 -- and copied; code blocks also have a copy button.
 markdown :: MarkdownCache -> MarkdownDoc -> NanoUI (Maybe Text)
 markdown cache = markdownConfigured cache defaultMarkdownConfig
+
+-- | 'markdown' with a layout modifier applied to the document column.
+markdownWith :: LayoutModifier -> MarkdownCache -> MarkdownDoc -> NanoUI (Maybe Text)
+markdownWith f cache =
+  markdownConfigured cache defaultMarkdownConfig {mdLayout = f . mdLayout defaultMarkdownConfig}
 
 -- | 'markdown' with a configuration.
 markdownConfigured :: MarkdownCache -> MarkdownConfig -> MarkdownDoc -> NanoUI (Maybe Text)
@@ -418,7 +423,7 @@ codeBlock env info code = do
   styled (panelStyle (mdCodeBlock cfg . background (styleBg (themeInput theme)) . borderColor (themeSeparator theme) . cornerRadius 6)) $
     panelWith (padXY 10 8 . gap 4 . fillW) $ do
       scope $ when (mdCopyCode cfg || not (T.null language)) $
-        rowWith (tight . fillW . alignMid) $ do
+        rowWith (tight . fillW . alignMiddle) $ do
           labelWith (tight . fontMuted . fontSizeScale 0.8 . envText env) language
           flex
           when (mdCopyCode cfg) $
@@ -451,7 +456,7 @@ listBlock env ty isTight items = do
     Bullet _ -> pure []
   let markerW = maximum (lineH : [side | any (isJust . itemTask) items] ++ numberWs)
       ink = fromMaybe (styleFg (themePanel theme)) (layoutFontColor (envText env defaultLayout))
-      marker v h shape = void (canvasConfigured defaultCanvasConfig {canvasLayout = fixedWH markerW h defaultLayout, canvasContent = v} (\(Rect x y _ _) -> shape x y))
+      marker v h shape = void (canvasConfigured defaultCanvasConfig {canvasLayout = fixedWH markerW h, canvasContent = v} (\(Rect x y _ _) -> shape x y))
       bullet = marker (version 1 (envDepth env, colorToWord32 ink)) lineH $ \x y ->
         let c@(V2 cx cy) = V2 (x + markerW / 2) (y + lineH / 2)
             r = max 2 (lineH * 0.15)

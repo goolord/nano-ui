@@ -93,7 +93,7 @@ captionButton cfg glyph = do
   (resp, _) <-
     customWidget
       defaultCustomWidgetSpec
-        { widgetLayout = tight . fixedWH (capButtonW cfg) (capButtonH cfg) $ defaultLayout
+        { widgetLayout = tight . fixedWH (capButtonW cfg) (capButtonH cfg)
         , widgetDraw = \cdc rect -> runCanvasFor cdc $ do
             let theme = cdcTheme cdc
                 lit = cdcHovered cdc || cdcPressed cdc

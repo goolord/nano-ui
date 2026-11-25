@@ -14,8 +14,6 @@ module NanoUI.Internal.Style.Theme
   , readableTone
   , toneColor
   , textToneColor
-  , variantFace
-  , variantTone
   , flatStyle
   , withReadableTones
   , buildThemePreset
@@ -63,12 +61,11 @@ module NanoUI.Internal.Style.Theme
   , scrollBarThumbHoverColor
   ) where
 
-import Control.Applicative ((<|>))
 import Data.Bits (setBit, testBit)
 import Data.List (find)
 import Data.Maybe (fromMaybe)
 import Data.Word (Word8)
-import NanoUI.Internal.Style.Layout (FontVariant (..), Tone (..))
+import NanoUI.Internal.Style.Layout (Tone (..))
 import NanoUI.Internal.Types (Color (..), clamp, colorA, colorB, colorG, colorLuminance, colorR, colorRGBA, colorTransparent, contrastRatio, fadeAlpha, lerpColor)
 
 -- | Surface colours and border geometry. Border width and corner radius use
@@ -163,27 +160,9 @@ toneColor t = \case
   Warning -> themeWarning t
   Danger -> themeDanger t
 
--- | Text colour when no explicit colour is set.
-textToneColor :: Theme -> FontVariant -> Maybe Tone -> Color
-textToneColor theme variant t = case t <|> variantTone variant of
-  Just t' -> toneColor theme t'
-  Nothing -> styleFg (themePanel theme)
-
--- | The face a variant draws in. Colour-only variants use the regular face.
-variantFace :: FontVariant -> FontVariant
-variantFace = \case
-  FontHeading -> FontRegular
-  FontMuted -> FontRegular
-  FontDanger -> FontRegular
-  v -> v
-
--- | The tone implied by a colour-only variant.
-variantTone :: FontVariant -> Maybe Tone
-variantTone = \case
-  FontHeading -> Just Accent
-  FontMuted -> Just Muted
-  FontDanger -> Just Danger
-  _ -> Nothing
+-- | Text color when no explicit color is set.
+textToneColor :: Theme -> Maybe Tone -> Color
+textToneColor theme = maybe (styleFg (themePanel theme)) (toneColor theme)
 
 -- | Set the background, shifting hover/press shades proportionally.
 background :: Color -> Style -> Style

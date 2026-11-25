@@ -46,11 +46,11 @@ import NanoUI.Internal.Widgets.Node
 -- | Anchor, preferred side, dismissal, and gap in logical pixels.
 -- Anchors use logical window coordinates.
 data PopupConfig = PopupConfig
-  { cfgAnchor :: !PopupAnchor
-  , cfgPlacement :: !PopupPlacement
-  , cfgDismissable :: !Bool
+  { popupAnchor :: !PopupAnchor
+  , popupPlacement :: !PopupPlacement
+  , popupDismissable :: !Bool
   -- ^ Close on Escape and on a press outside the panel and an 'AnchorRect'.
-  , cfgOffset :: !Float
+  , popupOffset :: !Float
   }
   deriving (Eq, Show)
 
@@ -58,14 +58,14 @@ data PopupConfig = PopupConfig
 defaultPopupConfig :: PopupAnchor -> PopupConfig
 defaultPopupConfig anchor =
   PopupConfig
-    { cfgAnchor = anchor
-    , cfgPlacement = PlacementAuto
-    , cfgDismissable = True
-    , cfgOffset = 4
+    { popupAnchor = anchor
+    , popupPlacement = PlacementAuto
+    , popupDismissable = True
+    , popupOffset = 4
     }
 
 -- | A floating panel placed by the config, shown while the Var holds
--- 'True'. A dismissal (Escape or a click outside, when 'cfgDismissable')
+-- 'True'. A dismissal (Escape or a click outside, when 'popupDismissable')
 -- writes 'False', so the panel closes in the same frame. A press on an
 -- 'AnchorRect' is not outside, so a button that toggles the Var on
 -- 'respClicked' closes the popup rather than closing and reopening it. The
@@ -121,12 +121,12 @@ popupShown open cfg f child = do
     -- The popup's padding and gap are defaults the caller's modifier can change.
     layout = f ((tight defaultLayout) {layoutPadding = Padding 6 6 6 6, layoutGap = 4})
     addPopupNode wid parent = do
-      registerPopupConfig ctx wid (cfgAnchor cfg) (cfgPlacement cfg) (cfgOffset cfg)
+      registerPopupConfig ctx wid (popupAnchor cfg) (popupPlacement cfg) (popupOffset cfg)
       addNodeFromLayout (ctxNodeArena ctx) NodePopup parent layout
 
     dismiss
-      | not (cfgDismissable cfg) = Nothing
-      | AnchorRect r <- cfgAnchor cfg = Just r
+      | not (popupDismissable cfg) = Nothing
+      | AnchorRect r <- popupAnchor cfg = Just r
       | otherwise = Just (Rect 0 0 0 0)
   floatingOverlay open dismiss addPopupNode (pure ()) ((,) False <$> child)
 
@@ -198,8 +198,8 @@ defaultTooltipConfig =
 tooltipWidget ::
   HasResponse r =>
   r ->
-  NanoUI a ->
-  NanoUI (Maybe a)
+  NanoUI () ->
+  NanoUI ()
 tooltipWidget = tooltipWidgetConfigured defaultTooltipConfig
 
 -- | 'tooltipWidget' with a configured delay, placement and gap. The target
@@ -209,8 +209,8 @@ tooltipWidgetConfigured ::
   HasResponse r =>
   TooltipConfig ->
   r ->
-  NanoUI a ->
-  NanoUI (Maybe a)
+  NanoUI () ->
+  NanoUI ()
 tooltipWidgetConfigured cfg target child = do
   -- The id 'popup' takes next; the timer is keyed on it to avoid using a
   -- sibling id.
@@ -218,18 +218,14 @@ tooltipWidgetConfigured cfg target child = do
   ctx <- askContext
   frame <- askFrameInput
   routed <- inputMousePos <$> askInput
-  let mouse@(V2 mx my) = inputMousePos frame
+  let V2 mx my = inputMousePos frame
       follow = tooltipPlacement cfg == PlacementAtCursor
       rect = respRect target
       tid = respId target
-  onTarget <-
+  hovered <-
     if rectContains rect routed
       then liftIO (findNodeByWidgetId ctx tid >>= \mIdx -> pointerOnWidget ctx mIdx tid rect routed)
       else pure False
-  -- The tooltip covering the target still counts as hovering it, as when a
-  -- pointer-following tooltip lags one frame behind the pointer.
-  onTip <- liftIO ((== RouteLayer (intKey wid)) <$> getsInteraction ctx isPointerRoute)
-  let hovered = onTarget || (onTip && rectContains rect mouse)
   (open, armed) <- liftIO (tooltipTimer ctx cfg (intKey wid) hovered frame)
   -- Request a frame when the pointer enters or leaves the target, even a
   -- label or container, and on every move while a following tooltip is open.
@@ -237,13 +233,12 @@ tooltipWidgetConfigured cfg target child = do
   let (anchor, placement)
         | follow = (AnchorRect (Rect mx my 0 pointerClearance), PlacementBelow)
         | otherwise = (AnchorRect rect, tooltipPlacement cfg)
-  result <-
-    snd
-      <$> popupWith'
-        (constVar open)
-        ((defaultPopupConfig anchor) {cfgPlacement = placement, cfgDismissable = False, cfgOffset = tooltipGap cfg})
-        (pointer PointerPass)
-        (inertView child)
+  void $
+    popupWith'
+      (constVar open)
+      ((defaultPopupConfig anchor) {popupPlacement = placement, popupDismissable = False, popupOffset = tooltipGap cfg})
+      (pointer PointerPass)
+      (inertView child)
   -- Clear the stored timestamp when a tooltip is no longer declared
   -- ('holdAction'), so if it reappears later it waits for the full delay
   -- rather than opening immediately or ending other tooltips' delays. The
@@ -251,7 +246,6 @@ tooltipWidgetConfigured cfg target child = do
   if armed
     then scope (holdAction (modifyStore ctx (deleteSpec slotTooltipShow (intKey wid))))
     else burstNextIds 1
-  pure result
 
 -- | Offset below the pointer's hot spot for a following tooltip, before the
 -- gap: roughly an arrow cursor's height, so the cursor does not cover it.
@@ -316,13 +310,13 @@ tooltipTimer ctx cfg k hovered inp = do
 -- | Attach a rich tooltip widget to an inner UI computation.
 withTooltip ::
   NanoUI a ->
-  NanoUI b ->
-  NanoUI (a, Maybe b)
+  NanoUI () ->
+  NanoUI a
 withTooltip mainChild tipChild = do
   base <- askDefaultLayout
   (res, contResp) <- containerResponse NodeContainer (tight base) mainChild
-  mTip <- tooltipWidget contResp tipChild
-  pure (res, mTip)
+  tooltipWidget contResp tipChild
+  pure res
 
 -- | 'tooltip' with a placement. 'PlacementAtCursor' follows the pointer.
 tooltipAt ::

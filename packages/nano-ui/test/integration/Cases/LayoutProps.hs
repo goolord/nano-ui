@@ -207,7 +207,7 @@ genMods =
     <*> frequency [(5, pure SFit), (1, pure SFill), (1, SGrow <$> choose (1, 3)), (1, SFixed <$> choose (30, 300))]
     <*> elements [0, 0, 4, 10]
     <*> elements [0, 0, 3, 8]
-    <*> choose (0, 7)
+    <*> choose (0, 11)
   where
     genWidth = frequency [(4, pure SFit), (2, pure SFill), (2, SGrow <$> choose (1, 3)), (1, SPercent <$> choose (20, 100)), (1, SFixed <$> choose (40, 400))]
 
@@ -241,7 +241,7 @@ renderBox axis = \case
     LMeasured w h ->
       void $ customWidget defaultCustomWidgetSpec
         { widgetMeasure = Just (\_ (avail, _) -> (min avail (fromIntegral w), fromIntegral h))
-        , widgetLayout = fillW defaultLayout
+        , widgetLayout = fillW
         }
     LSep -> separator
   where
@@ -260,12 +260,16 @@ renderBox axis = \case
       SPercent _ -> id
       SFixed px -> \l -> l {layoutHeight = Fixed (fromIntegral px)}
     align = \case
-      1 -> alignMid
+      1 -> alignMiddle
       2 -> alignEnd
       4 -> itemsCenter
       5 -> itemsEnd
       6 -> itemsBaseline
-      7 -> itemsCenter . alignMid
+      7 -> itemsCenter . alignMiddle
+      8 -> itemsStretch
+      9 -> justifyCenter
+      10 -> justifyEnd
+      11 -> justifyBetween
       _ -> id
 
 -- | What the checks read of one node.

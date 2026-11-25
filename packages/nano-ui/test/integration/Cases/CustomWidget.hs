@@ -23,7 +23,7 @@ blue = colorRGBA 0 0 255 255
 -- | A custom widget of this layout, content key and drawing.
 custom :: (Layout -> Layout) -> Int -> CustomDrawBuild -> NanoUI Response
 custom f key draw =
-  fst <$> customWidget defaultCustomWidgetSpec {widgetLayout = f defaultLayout, widgetContent = key, widgetDraw = draw}
+  fst <$> customWidget defaultCustomWidgetSpec {widgetLayout = f, widgetContent = key, widgetDraw = draw}
 
 -- | A label, then an 80x40 custom widget with this content key and drawing.
 afterLabel :: Int -> CustomDrawBuild -> NanoUI Response
@@ -43,7 +43,7 @@ frameQuads ctx inp ui = runFrame ctx inp ui >>= \(_, draw, _) -> drawQuads draw
 runCustomWidgetMeasureTest :: Context -> IORef Int -> IO ()
 runCustomWidgetMeasureTest ctx failed = do
   let inp = withInput 400 400
-      measured m = fst <$> customWidget defaultCustomWidgetSpec {widgetMeasure = m, widgetLayout = defaultLayout}
+      measured m = fst <$> customWidget defaultCustomWidgetSpec {widgetMeasure = m, widgetLayout = id}
       sizeOf ui = (\(Rect _ _ w h) -> (w, h)) . respRect <$> warmup2 ctx inp ui
   mapM (sizeOf . column . measured) [Just (\_ _ -> (160, 48)), Nothing, Just (\_ _ -> (160, 48))]
     >>= assertEq failed [(160, 48), (32, 32), (160, 48)]
@@ -64,7 +64,7 @@ runCustomWidgetPointerTest :: Context -> IORef Int -> IO ()
 runCustomWidgetPointerTest ctx failed = do
   let inp = withInput 300 300
       edged = withCursorShape UiCursorHidden . column $ fst <$> customWidget defaultCustomWidgetSpec
-        { widgetLayout = fixedWH 80 80 defaultLayout
+        { widgetLayout = fixedWH 80 80
         , widgetCursor = Just $ \_ (Rect x _ w _) (V2 px _) -> if px > x + w - 10 then UiCursorEwResize else UiCursorDefault
         }
   runSim ctx failed inp edged $ do
@@ -78,7 +78,7 @@ runCustomWidgetPointerTest ctx failed = do
     _ <- release
     checkEq UiCursorDefault =<< cursorAt away
   let interacting = column $ customWidget defaultCustomWidgetSpec
-        { widgetLayout = fixedWH 80 40 defaultLayout
+        { widgetLayout = fixedWH 80 40
         , widgetInteract = \resp cdc _ -> (resp, (cdcHovered cdc, cdcPressed cdc))
         }
   runSim ctx failed inp interacting $ do
@@ -139,12 +139,12 @@ runCustomWidgetContentTest ctx failed = do
   let (accent2, accent3) = (colorRGBA 7 8 9 255, colorRGBA 11 12 13 255)
       themedUi = afterLabel 3 (\cdc -> filled (themeAccent (cdcTheme cdc)) cdc)
   _ <- warmup2 ctx inp themedUi
-  theme0 <- getTheme ctx
-  setTheme ctx theme0 {themeAccent = accent2}
+  theme0 <- getThemeIO ctx
+  setThemeIO ctx theme0 {themeAccent = accent2}
   colours ctx themedUi >>= assert failed . elem accent2
   ctx3 <- withTheme ctx theme0 {themeAccent = accent3}
   colours ctx3 themedUi >>= assert failed . elem accent3
-  setTheme ctx theme0
+  setThemeIO ctx theme0
   let scoped c = styled (accentColor c) themedUi
   _ <- warmup2 ctx inp (scoped accent2)
   gen <- readIORef (ctxMetricGen ctx)
@@ -182,8 +182,8 @@ runDropTargetTest ctx failed = do
   assertEq failed ([], Just ["a.txt"]) =<< files ctx (`modal'` "Modal") (centerOf onModal)
   assertEq failed ([], Just []) =<< files ctx (`modal'` "Modal") (V2 2 2)
   c <- newContext
-  (_, (onWindow, _)) <- warmup2 c (withInput 400 400) (stacked (`window'` "Window"))
-  assertEq failed ([], Just ["a.txt"]) =<< files c (`window'` "Window") (centerOf onWindow)
+  (_, (onWindow, _)) <- warmup2 c (withInput 400 400) (stacked (`floatingWindow'` "Window"))
+  assertEq failed ([], Just ["a.txt"]) =<< files c (`floatingWindow'` "Window") (centerOf onWindow)
 
 runCanvasTextClippedTest :: Context -> IORef Int -> IO ()
 runCanvasTextClippedTest _ failed = do
