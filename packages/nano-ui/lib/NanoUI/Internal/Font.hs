@@ -9,14 +9,20 @@ module NanoUI.Internal.Font
   , wrapTextIO
   , wrapTextLinesIO
   , truncateTextIO
+  , truncateTextMiddleIO
+  , truncateTextStartIO
+  , truncateTextWithIO
+  , truncateTextPure
   ) where
 
 import Control.Monad (forM_, unless)
+import Data.Functor.Identity (Identity (..))
 import Data.IORef (modifyIORef', newIORef, readIORef)
 import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Internal.Font.Types
 import NanoUI.Internal.Metrics
+import NanoUI.Internal.Style (TextEllipsis (..))
 import NanoUI.Internal.TextCluster (clusterBounds, clusterLength)
 import NanoUI.Internal.Types (clamp)
 
@@ -144,7 +150,7 @@ charsPerWidth w txt maxW
   | w <= 0 = maxBound `div` 2
   | otherwise = floor (maxW * fromIntegral (T.length txt) / w)
 
-largestFitting :: (Int -> IO Bool) -> Int -> Int -> Int -> IO Int
+largestFitting :: Monad m => (Int -> m Bool) -> Int -> Int -> Int -> m Int
 largestFitting fits lo0 hi0 guess
   | hi0 <= lo0 = pure lo0
   | otherwise = do
@@ -172,11 +178,11 @@ largestFitting fits lo0 hi0 guess
           ok <- fits mid
           if ok then bisect mid hi else bisect lo mid
 
-takeWidth :: Int -> (Text -> IO Float) -> Float -> Text -> IO (Text, Text)
+takeWidth :: Monad m => Int -> (Text -> m Float) -> Float -> Text -> m (Text, Text)
 takeWidth guess lineW maxW txt
   | T.null txt = pure (txt, T.empty)
   | otherwise = do
-      k <- largestFitting fits 1 maxBound guess
+      k <- largestFitting fits 1 (T.length txt) guess
       let (start, end) = clusterBounds txt k
       pure (T.splitAt (if start > 0 then start else end) txt)
   where
@@ -184,9 +190,63 @@ takeWidth guess lineW maxW txt
       | T.compareLength txt k == LT = pure False
       | otherwise = (<= maxW) <$> lineW (T.take k txt)
 
--- | Truncate @txt@ with an ellipsis if it exceeds @maxW@ using @lineW@.
+takeFitPrefix :: Monad m => Int -> (Text -> m Float) -> Float -> Text -> m Text
+takeFitPrefix guess lineW maxW txt
+  | T.null txt || maxW <= 0 = pure T.empty
+  | otherwise = do
+      let (_, end1) = clusterBounds txt 0
+      ok1 <- (<= maxW) <$> lineW (T.take end1 txt)
+      if not ok1
+        then pure T.empty
+        else fst <$> takeWidth guess lineW maxW txt
+
+takeTailWidth :: Monad m => Int -> (Text -> m Float) -> Float -> Text -> m Text
+takeTailWidth guess lineW maxW txt
+  | T.null txt || maxW <= 0 = pure T.empty
+  | otherwise = do
+      let !len = T.length txt
+          startAt k =
+            let raw = max 0 (len - k)
+                (cs, ce) = clusterBounds txt raw
+             in if cs == raw then cs else ce
+          fits k =
+            let idx = startAt k
+             in if idx >= len then pure False else (<= maxW) <$> lineW (T.drop idx txt)
+      ok1 <- fits 1
+      if not ok1
+        then pure T.empty
+        else do
+          k <- largestFitting fits 1 len guess
+          pure (T.drop (startAt k) txt)
+
+-- | Truncate @txt@ with a trailing ellipsis if it exceeds @maxW@ using @lineW@.
 truncateTextIO :: (Text -> IO Float) -> Float -> Text -> IO Text
-truncateTextIO lineW maxW txt
+truncateTextIO = truncateTextEndM
+
+-- | Truncate @txt@ in the middle (@"prefix...suffix"@) if it exceeds @maxW@.
+truncateTextMiddleIO :: (Text -> IO Float) -> Float -> Text -> IO Text
+truncateTextMiddleIO = truncateTextMiddleM
+
+-- | Truncate @txt@ at the start (@"...suffix"@) if it exceeds @maxW@.
+truncateTextStartIO :: (Text -> IO Float) -> Float -> Text -> IO Text
+truncateTextStartIO = truncateTextStartM
+
+-- | Truncate @txt@ according to an explicit 'TextEllipsis' mode.
+truncateTextWithIO :: TextEllipsis -> (Text -> IO Float) -> Float -> Text -> IO Text
+truncateTextWithIO = truncateTextWithM
+
+-- | Pure single-line truncation against prepared 'FontMetrics'.
+truncateTextPure :: TextEllipsis -> FontMetrics -> Float -> Text -> Text
+truncateTextPure ell fm maxW txt =
+  runIdentity (truncateTextWithM ell (Identity . lineWidth fm) maxW txt)
+
+truncateTextWithM :: Monad m => TextEllipsis -> (Text -> m Float) -> Float -> Text -> m Text
+truncateTextWithM EllipsisEnd = truncateTextEndM
+truncateTextWithM EllipsisMiddle = truncateTextMiddleM
+truncateTextWithM EllipsisStart = truncateTextStartM
+
+truncateTextEndM :: Monad m => (Text -> m Float) -> Float -> Text -> m Text
+truncateTextEndM lineW maxW txt
   | maxW <= 0 = pure ""
   | otherwise = do
       w <- lineW txt
@@ -203,3 +263,57 @@ truncateTextIO lineW maxW txt
               if tooWide
                 then fst <$> takeWidth (charsPerWidth w txt maxW) lineW maxW txt
                 else pure dotted
+
+truncateTextStartM :: Monad m => (Text -> m Float) -> Float -> Text -> m Text
+truncateTextStartM lineW maxW txt
+  | maxW <= 0 = pure ""
+  | otherwise = do
+      w <- lineW txt
+      if w <= maxW
+        then pure txt
+        else do
+          ellW <- lineW "..."
+          if maxW <= ellW
+            then takeTailWidth (charsPerWidth w txt maxW) lineW maxW txt
+            else do
+              suf <- takeTailWidth (charsPerWidth w txt (maxW - ellW)) lineW (maxW - ellW) txt
+              let dotted = "..." <> T.dropWhile (== '.') suf
+              tooWide <- (> maxW) <$> lineW dotted
+              if tooWide
+                then takeTailWidth (charsPerWidth w txt maxW) lineW maxW txt
+                else pure dotted
+
+truncateTextMiddleM :: Monad m => (Text -> m Float) -> Float -> Text -> m Text
+truncateTextMiddleM lineW maxW txt
+  | maxW <= 0 = pure ""
+  | otherwise = do
+      w <- lineW txt
+      if w <= maxW
+        then pure txt
+        else do
+          ellW <- lineW "..."
+          if maxW <= ellW
+            then fst <$> takeWidth (charsPerWidth w txt maxW) lineW maxW txt
+            else do
+              let remW = maxW - ellW
+                  halfW = remW * 0.5
+              suf <- takeTailWidth (charsPerWidth w txt halfW) lineW halfW txt
+              sufW <- if T.null suf then pure 0 else lineW suf
+              let preBudget = max 0 (remW - sufW)
+                  prePool = T.take (max 0 (T.length txt - T.length suf)) txt
+              pre0 <- takeFitPrefix (charsPerWidth w txt preBudget) lineW preBudget prePool
+              if T.null pre0 && T.null suf
+                then fst <$> takeWidth (charsPerWidth w txt maxW) lineW maxW txt
+                else do
+                  let dotted0 = T.dropWhileEnd (== '.') pre0 <> "..." <> suf
+                  ok0 <- (<= maxW) <$> lineW dotted0
+                  if ok0
+                    then pure dotted0
+                    else
+                      if not (T.null pre0)
+                        then do
+                          let (s, _) = clusterBounds pre0 (max 0 (T.length pre0 - 1))
+                              dotted1 = T.dropWhileEnd (== '.') (T.take s pre0) <> "..." <> suf
+                          ok1 <- (<= maxW) <$> lineW dotted1
+                          if ok1 then pure dotted1 else truncateTextEndM lineW maxW txt
+                        else truncateTextStartM lineW maxW txt

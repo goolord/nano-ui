@@ -29,6 +29,8 @@ module NanoUI.Internal.Canvas
   , drawImageWith
   , drawText
   , drawTextWith
+  , drawTextClipped
+  , drawTextClippedWith
   , drawCheckbox
     -- * Paths, clips and transforms
   , drawPath
@@ -39,18 +41,20 @@ module NanoUI.Internal.Canvas
   , withClip
   ) where
 
+import Control.Monad (when)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Reader qualified as Reader
 import Control.Monad.Trans.State.Strict qualified as State
 import Data.Maybe (fromMaybe)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
 import Data.Text (Text)
+import Data.Text qualified as T
 import NanoUI.Internal.Context.Types (CustomDrawContext (..))
-import NanoUI.Internal.Draw (DrawOp (..), TextFont, checkboxOps)
-import NanoUI.Internal.Font (FontMetrics (fmSnapScale), monospaceMetrics)
+import NanoUI.Internal.Draw (DrawOp (..), TextFont (..), checkboxOps, defaultTextFont)
+import NanoUI.Internal.Font (FontMetrics (fmAscent, fmSnapScale), monospaceMetrics, tabularFontMetrics, truncateTextPure)
 import NanoUI.Internal.Image (ImageDraw (..), imageDraw, imageDrawOp)
 import NanoUI.Internal.Path (FillRule (..), Paint (..), Path, Stroke, Transform, curveTolerance, fillPathOps, stroke, strokePathOps, transformOp)
-import NanoUI.Internal.Style (AlignX (..), AlignY (..), Style (..), Theme (..), alignXFraction, defaultTheme)
+import NanoUI.Internal.Style (AlignX (..), AlignY (..), Style (..), TextEllipsis (..), Theme (..), alignXFraction, defaultTheme)
 import NanoUI.Internal.Types (Color, ImageId, Rect (..), V2 (..))
 
 -- | A drawing block that collects draw ops. Run it with 'runCanvasFor'.
@@ -203,6 +207,31 @@ drawText (V2 x y) alignX alignY txt col = emitOp (DrawText x y (alignXFraction a
 -- of the transform's area scale. Glyphs do not rotate.
 drawTextWith :: TextFont -> V2 -> AlignX -> AlignY -> Text -> Color -> CanvasM ()
 drawTextWith font (V2 x y) alignX alignY txt col = emitOp (DrawTextAligned x y (alignXFraction alignX) (alignYFrac alignY) 1 font txt col)
+
+-- | Draw single-line text in the default font inside @r@, truncating with a
+-- trailing ellipsis and clipping to @r@ when narrower than the text's width.
+drawTextClipped :: Rect -> AlignX -> AlignY -> Text -> Color -> CanvasM ()
+drawTextClipped r alignX alignY txt col = do
+  cdc <- drawContext
+  drawTextClippedWith (cdcFont cdc) defaultTextFont EllipsisEnd r alignX alignY txt col
+
+-- | Draw single-line text inside @r@ using explicit 'FontMetrics' (obtained
+-- from 'NanoUI.resolveFontUi' or 'NanoUI.uiFontMetrics'), 'TextFont', and
+-- 'TextEllipsis' mode. Truncates against @fm@ (applying tabular digit widths
+-- when 'textFontTabular' is set) and clips to @r@.
+drawTextClippedWith :: FontMetrics -> TextFont -> TextEllipsis -> Rect -> AlignX -> AlignY -> Text -> Color -> CanvasM ()
+drawTextClippedWith fm0 font ell r@(Rect rx ry rw rh) alignX alignY txt col =
+  when (rw > 0 && rh > 0 && not (T.null txt)) $ do
+    let fm = if textFontTabular font then tabularFontMetrics fm0 else fm0
+        cut = truncateTextPure ell fm rw txt
+        ax = rx + rw * alignXFraction alignX
+        ay = case alignY of
+          AlignTop -> ry
+          AlignMiddle -> ry + rh * 0.5
+          AlignBottom -> ry + rh
+          AlignBaseline -> ry + fmAscent fm
+    when (not (T.null cut)) $
+      withClip r (drawTextWith font (V2 ax ay) alignX alignY cut col)
 
 -- | Anchor position up the line: 0 is the bottom, 1 the top, and a negative
 -- value the baseline.

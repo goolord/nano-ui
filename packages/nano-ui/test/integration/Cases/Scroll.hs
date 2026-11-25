@@ -32,6 +32,7 @@ tests =
   , pixelSpec "scroll-wheel-tuning" runScrollTuningTest
   , pixelSpec "scroll-commands" runScrollCommandsTest
   , spec "scroll-wheel-routing" runWheelRoutingTest
+  , spec "scroll-grow-and-overlay" runScrollGrowOverlayTest
   ]
 
 -- | Labels @prefix 1@ to @prefix n@.
@@ -668,3 +669,28 @@ runWheelRoutingTest _ failed = do
   assertEq failed False . (!! 0) =<< wheelMoves failed popped (on 1) (V2 0 1)
   assertEq failed False . (!! 1) =<< wheelMoves failed popped (point (V2 20 150)) (V2 1 0)
   assertEq failed True . (!! 0) =<< wheelMoves failed popped (point (V2 20 150)) (V2 0 1)
+
+runScrollGrowOverlayTest :: Context -> IORef Int -> IO ()
+runScrollGrowOverlayTest ctx failed = do
+  let inp = withInputOff 400 300
+      bareVert = ScrollConfig ScrollNone ScrollAuto True
+      splitUi =
+        columnWith (fixedWH 300 200 . tight . gap 0) $
+          (,)
+            <$> (fst <$> scrollAreaConfigured bareVert (grow . minW 0 . minH 0) (numbered "top " 30))
+            <*> (fst <$> scrollAreaConfigured bareVert (grow . minW 0 . minH 0) (numbered "bot " 2))
+  (topId, botId) <- warmup2 ctx inp splitUi
+  assertJustM failed (getPrevRect ctx topId) $ \(Rect _ _ _ th) ->
+    assert failed (abs (th - 100) <= 1)
+  assertJustM failed (getPrevRect ctx botId) $ \(Rect _ _ _ bh) ->
+    assert failed (abs (bh - 100) <= 1)
+  c2 <- newContext
+  let overlayCfg = ScrollConfig ScrollNone ScrollOverlay True
+      autoCfg = ScrollConfig ScrollNone ScrollAuto True
+      overlayUi = column $ do
+        ovResp <- scrollConfigured overlayCfg (fixedWH 200 80 . tight) (buttonWith' (fillW . fixedH 20) "ov-btn" <* numbered "ov " 20)
+        auResp <- scrollConfigured autoCfg (fixedWH 200 80 . tight) (buttonWith' (fillW . fixedH 20) "au-btn" <* numbered "au " 20)
+        pure (respRect ovResp, respRect auResp)
+  (Rect _ _ ow _, Rect _ _ aw _) <- warmup2 c2 inp overlayUi
+  assert failed (abs (ow - 200) <= 0.5)
+  assertLt failed aw 198

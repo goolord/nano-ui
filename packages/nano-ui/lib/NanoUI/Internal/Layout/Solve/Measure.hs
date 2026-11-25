@@ -136,10 +136,13 @@ nodeMeasurer SolveEnv {seArena = na, seMs = ms} idx nt nodeSi = do
   let variant = textNodeFontVariant si
       weight = textNodeFontWeight si
       style = textNodeFontStyle si
-  (metrics, measureLine) <-
+      tabular = textNodeFontTabular si
+  (metrics0, measureLine0) <-
     if isDefaultNodeFont size weight style variant
       then pure (if variant == FontMono then msMonoFm ms else msFm ms, msMeasure ms)
       else msResolveFont ms size weight style variant
+  let !metrics = if tabular then tabularFontMetrics metrics0 else metrics0
+      measureLine = if tabular then measureTextIO metrics else measureLine0
   pure (TextMeasurer metrics variant (textNodeFontKey size si) measureLine)
 
 -- Keep these operations as inline functions rather than allocating two
@@ -513,16 +516,16 @@ growParentOn na horizontal idx = getParent na idx >>= go True
 -- | Whether a container of type @nt@ reports its minimum along an axis, with
 -- @horizontal@ the width, in place of its content: it grows along the axis,
 -- its minimum is explicit ('hasExplicitMin'), and its parent assigns its
--- size there ('growParentOn'). It shrinks that far in a line that is short of
--- space, so that is the least it needs. As with CSS's min-width on a flex
--- item, the explicit minimum replaces the content-based one. Otherwise a 2D
--- scroller, which lays its content out at the width it reports, scrolls
--- sideways for a long label in a cell that would have fit, and a pane's
--- content would size the pane grid. Without a minimum the content still
--- counts, so a grow wrapper around a wide table keeps its sideways scroll.
+-- size there ('growParentOn' or a fixed-size parent).
 minAssignedOn :: NodeArena -> NodeType -> Bool -> NodeIdx -> AxisSizing -> IO Bool
 minAssignedOn na nt horizontal idx (AxisSizing tag _ lo _)
-  | tag == SizingGrow && hasExplicitMin lo && not (isFloatingNode nt) = growParentOn na horizontal idx
+  | tag == SizingGrow && hasExplicitMin lo && not (isFloatingNode nt) = do
+      p <- getParent na idx
+      pFixed <-
+        if p < 0
+          then pure False
+          else (== SizingFixed) . axTag <$> (if horizontal then getWidthSizing else getHeightSizing) na p
+      if pFixed then pure True else growParentOn na horizontal idx
   | otherwise = pure False
 
 -- | Measure a node with no measurable content: an image, a box, a spacer,
@@ -837,15 +840,28 @@ measureScrollContainer env@SolveEnv {seArena = na, seArrays = a} idx = do
             narrowed = viewAt (scrollAxisGutter (scrollPolicyY cfg) slot (padR pad) fullH capH)
         if narrowed /= viewAt 0 then stackAt narrowed else pure full
   -- A width fit to the content makes room for the bar when the content
-  -- overflows the scroller's own height, fixed or capped.
-  let h = sizeWithin hAx (contentH + padY)
+  -- overflows the scroller's own height, fixed or capped. When a scroller's
+  -- size along a scrollable axis is assigned from above with an explicit
+  -- minimum ('minAssignedOn', like 'measureContainer'), report its padding
+  -- floor within its limits so sibling grow panes share space instead of
+  -- being pushed aside by the unclipped scroll content.
+  minAssignedW <-
+    if isScrollStyle2D si || dir == DirRow
+      then minAssignedOn na NodeScrollContainer True idx wAx
+      else pure False
+  minAssignedH <-
+    if isScrollStyle2D si || dir == DirColumn
+      then minAssignedOn na NodeScrollContainer False idx hAx
+      else pure False
+  let h = sizeWithin hAx (if minAssignedH then padY else contentH + padY)
       fitGutterW
         | not vertical || wTag == SizingGrow || wTag == SizingFixed = 0
         | otherwise = scrollAxisGutter (scrollPolicyY cfg) slot (padR pad) contentH (h - padY)
+      w = sizeWithin wAx (if minAssignedW then padX else contentW + padX + fitGutterW)
   if isScrollStyle2D si
     then setSolvedValue na idx contentH >> setScrollContentW na idx contentW
     else setSolvedValue na idx (if dir == DirColumn then contentH else contentW)
-  setRect na idx 0 0 (sizeWithin wAx (contentW + padX + fitGutterW)) h
+  setRect na idx 0 0 w h
 
 foldChildDimsFromParent :: SolveEnv -> NodeIdx -> DirTag -> Float -> IO (Float, Float)
 foldChildDimsFromParent env@SolveEnv {seArena = na} idx dir gap = do

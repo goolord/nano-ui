@@ -5,6 +5,7 @@
 -- the functions over it.
 module NanoUI.Internal.GridNode
   ( GridAxis (..)
+  , CenterDropMode (..)
   , GridNode (..)
   ) where
 
@@ -15,7 +16,16 @@ import Data.Word (Word64)
 data GridAxis = AxisV | AxisH
   deriving (Eq, Ord, Show, Read, Enum, Bounded)
 
--- | Binary split tree node. Pane and split ids share one monotonic counter.
+-- | How dropping a pane onto the center of another pane behaves in a 'PaneGrid'.
+data CenterDropMode
+  = -- | Swap the dragged pane with the target pane (the default).
+    CenterSwap
+  | -- | Merge the dragged pane into a tabbed stack ('PaneTabs') with the target pane.
+    CenterTab
+  deriving (Eq, Ord, Show, Read, Enum, Bounded)
+
+-- | Split-and-tab tree node. Pane, tab-group, and split ids share one
+-- monotonic counter.
 data GridNode
   = Split
       !Word64
@@ -31,4 +41,11 @@ data GridNode
   | Pane
       !Word64
       -- ^ Pane id.
+  | PaneTabs
+      !Word64
+      -- ^ Tab-group id.
+      ![Word64]
+      -- ^ Ordered pane ids in this tabbed stack.
+      !Word64
+      -- ^ Active (visible) pane id, an element of the pane list.
   deriving (Eq, Show, Read)

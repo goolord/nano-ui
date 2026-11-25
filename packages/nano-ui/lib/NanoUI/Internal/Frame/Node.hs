@@ -15,13 +15,13 @@ module NanoUI.Internal.Frame.Node
 import Data.Text (Text)
 import NanoUI.Internal.Context (Context (..), nodeTheme)
 import NanoUI.Internal.Draw.Types (TextFont (..))
-import NanoUI.Internal.Font (FontMetrics, isDefaultNodeFont, measureTextIO)
+import NanoUI.Internal.Font (FontMetrics, isDefaultNodeFont, measureTextIO, tabularFontMetrics)
 import NanoUI.Internal.Layout.ScrollGeometry
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Internal.Style (FontVariant (..), TextDecoration (..), variantFace)
 import NanoUI.Internal.Types (Rect (..))
-import NanoUI.Internal.WidgetText (containerFlagClip, hasFlag, panelSurface, textNodeFontStyle, textNodeFontVariant, textNodeFontWeight)
+import NanoUI.Internal.WidgetText (containerFlagClip, hasFlag, panelSurface, textNodeFontStyle, textNodeFontTabular, textNodeFontVariant, textNodeFontWeight)
 
 -- | Font for a node of type @nt@ with an explicit size and packed style: the
 -- metrics, whether the host returned a native styled face (paint then skips
@@ -38,12 +38,13 @@ resolveFontFor :: Context -> NodeType -> Float -> Int -> IO (FontMetrics, Bool, 
 resolveFontFor ctx nt size packed = do
   (fm, native) <- resolveTextFont ctx font
   let measure
+        | tabular = measureTextIO fm
         | not (isDefaultNodeFont size weight style variant) = ctxResolveMeasure ctx size weight style variant
         | variant == FontMono = measureTextIO fm
         | otherwise = ctxMeasureText ctx
   pure (fm, native, measure)
   where
-    font@(TextFont _ variant weight style _) =
+    font@(TextFont _ variant weight style _ tabular) =
       packedTextFont size (nodeFontBits nt packed)
 
 -- | Whether the host draws the weight and slant of the font a text node of
@@ -57,17 +58,19 @@ nodeFontNative ctx size si = snd <$> resolveTextFont ctx (packedTextFont size si
 {-# INLINE packedTextFont #-}
 packedTextFont :: Float -> Int -> TextFont
 packedTextFont size si =
-  TextFont size (textNodeFontVariant si) (textNodeFontWeight si) (textNodeFontStyle si) DecorationNone
+  TextFont size (textNodeFontVariant si) (textNodeFontWeight si) (textNodeFontStyle si) DecorationNone (textNodeFontTabular si)
 
 -- | The font a @DrawTextStyled@ op names, and whether the host draws its
 -- weight and slant natively. Base sans and mono resolve to the pre-read
 -- metrics; everything else defers to the host resolver.
 {-# INLINE resolveTextFont #-}
 resolveTextFont :: Context -> TextFont -> IO (FontMetrics, Bool)
-resolveTextFont ctx (TextFont size variant0 weight style _)
-  | isDefaultNodeFont size weight style variant =
-      pure (if variant == FontMono then ctxMonoFontMetrics ctx else ctxFontMetrics ctx, False)
-  | otherwise = ctxResolveFont ctx size weight style variant
+resolveTextFont ctx (TextFont size variant0 weight style _ tabular) = do
+  (fm0, native) <-
+    if isDefaultNodeFont size weight style variant
+      then pure (if variant == FontMono then ctxMonoFontMetrics ctx else ctxFontMetrics ctx, False)
+      else ctxResolveFont ctx size weight style variant
+  pure (if tabular then tabularFontMetrics fm0 else fm0, native)
   where
     -- A colour-only variant draws in the regular face.
     variant = variantFace variant0

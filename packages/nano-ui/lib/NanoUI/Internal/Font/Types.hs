@@ -21,6 +21,7 @@ module NanoUI.Internal.Font.Types
   , selectionSpans
   , monospaceMetrics
   , scaleFontMetrics
+  , tabularFontMetrics
   , lineWidth
   , textIndexAtX
   , centeredTextY
@@ -32,7 +33,8 @@ module NanoUI.Internal.Font.Types
   ) where
 
 import Data.Map.Strict qualified as Map
-import Data.Primitive.PrimArray (PrimArray, imapPrimArray, indexPrimArray, mapPrimArray, sizeofPrimArray)
+import Data.Maybe (isJust)
+import Data.Primitive.PrimArray (PrimArray, imapPrimArray, indexPrimArray, mapPrimArray, primArrayFromListN, sizeofPrimArray)
 import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Internal.Style (AlignX (..), FontStyle (..), FontVariant (..), FontWeight (..))
@@ -195,6 +197,99 @@ scaleFontMetrics s fm
         }
     scaleGlyphs (ShapedGlyphs quads) =
       ShapedGlyphs (imapPrimArray (\i v -> if i `mod` 8 < 4 then v * s else v) quads)
+
+-- | Give ASCII digits (@'0'@ to @'9'@) a uniform tabular advance equal to the
+-- widest digit in @fm@, centring each digit's glyph ink inside that cell and
+-- zeroing kerning around digits so numeric columns align and live counters
+-- never jitter horizontally. Returns @fm@ unchanged when the font is already
+-- monospace.
+tabularFontMetrics :: FontMetrics -> FontMetrics
+tabularFontMetrics fm
+  | isJust (monospaceAdvance fm) = fm
+  | otherwise = wrap fm
+  where
+    !snap = fmSnapScale fm
+    !digitAdv = onGrid snap (maximum [fmAdvance fm d | d <- ['0' .. '9']])
+    isTabDigit c = c >= '0' && c <= '9'
+    wrap src =
+      src
+        { fmAdvance = \c -> if isTabDigit c then digitAdv else fmAdvance src c
+        , fmKerning = \a b -> if isTabDigit a || isTabDigit b then 0 else fmKerning src a b
+        , fmShape = \t ->
+            if T.any isTabDigit t
+              then fmap (tabularShape snap digitAdv t) (fmShape src t)
+              else fmShape src t
+        , fmGlyph = \c ->
+            if isTabDigit c
+              then fmap (\gq -> gq {gqX = gqX gq + onGrid snap ((digitAdv - fmAdvance src c) * 0.5)}) (fmGlyph src c)
+              else fmGlyph src c
+        , fmBackend = fmap wrapBackend (fmBackend src)
+        }
+    wrapBackend backend =
+      FontBackend
+        { fbPrepare = \t -> wrap <$> fbPrepare backend t
+        , fbDrawShaped = \t ->
+            if not (T.any isTabDigit t)
+              then fbDrawShaped backend t
+              else do
+                prepared <- fbPrepare backend t
+                mGlyphs <- fbDrawShaped backend t
+                pure $ case (fmShape prepared t, mGlyphs) of
+                  (Just st, Just gs) -> Just (tabularGlyphs snap digitAdv t st gs)
+                  (_, m) -> m
+        }
+
+tabularOffsets :: Float -> Float -> Text -> PrimArray Float -> (Float, [Float], PrimArray Float)
+tabularOffsets snap digitAdv txt carets =
+  let !n = T.length txt
+      isTabDigit c = c >= '0' && c <= '9'
+      step (acc, shifts, stops) j =
+        let c0 = indexPrimArray carets j
+            c1 = indexPrimArray carets (j + 1)
+            origW = c1 - c0
+            c = T.index txt j
+         in if isTabDigit c && origW >= 0
+              then
+                let d = digitAdv - origW
+                    gShift = acc + onGrid snap (d * 0.5)
+                    acc' = acc + d
+                 in (acc', gShift : shifts, (c1 + acc') : stops)
+              else (acc, acc : shifts, (c1 + acc) : stops)
+      (totalDelta, revShifts, revStops) = foldl' step (0, [], [indexPrimArray carets 0]) [0 .. n - 1]
+   in (totalDelta, reverse revShifts, primArrayFromListN (n + 1) (reverse revStops))
+
+tabularShape :: Float -> Float -> Text -> ShapedText -> ShapedText
+tabularShape snap digitAdv txt st@(ShapedText adv ink carets)
+  | T.null txt || sizeofPrimArray carets /= T.length txt + 1 = st
+  | otherwise =
+      let (totalDelta, _, carets') = tabularOffsets snap digitAdv txt carets
+       in ShapedText (adv + totalDelta) (max 0 (ink + totalDelta)) carets'
+
+tabularGlyphs :: Float -> Float -> Text -> ShapedText -> ShapedGlyphs -> ShapedGlyphs
+tabularGlyphs snap digitAdv txt (ShapedText _ _ carets) sg@(ShapedGlyphs quads)
+  | T.null txt || sizeofPrimArray carets /= T.length txt + 1 = sg
+  | otherwise =
+      let !n = T.length txt
+          (_, shiftsList, _) = tabularOffsets snap digitAdv txt carets
+          !shifts = primArrayFromListN n shiftsList
+          shiftFor midX = go 0
+            where
+              go !j
+                | j >= n - 1 = indexPrimArray shifts (n - 1)
+                | otherwise =
+                    let a = indexPrimArray carets j
+                        b = indexPrimArray carets (j + 1)
+                        lo = min a b
+                        hi = max a b
+                     in if midX <= hi + 0.01 && (j == 0 || midX >= lo - 0.01)
+                          then indexPrimArray shifts j
+                          else go (j + 1)
+          adjust i v
+            | i `mod` 8 == 0 =
+                let gw = indexPrimArray quads (i + 2)
+                 in v + shiftFor (v + gw * 0.5)
+            | otherwise = v
+       in ShapedGlyphs (imapPrimArray adjust quads)
 
 -- | Vertical pen offset inside a box of height @h@ at top @y@ for text height @th@.
 {-# INLINE centeredTextY #-}

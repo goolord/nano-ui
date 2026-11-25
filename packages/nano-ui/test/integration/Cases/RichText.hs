@@ -27,6 +27,7 @@ tests =
   , spec "rich-text-relayout" runRichTextRelayoutTest
   , spec "rich-text-scroll-popup" runRichTextScrollPopupTest
   , spec "rich-text-selection" runSelectionTest
+  , spec "rich-text-tooltips" runRichTextTooltipsTest
   ]
 
 inp400 :: Input
@@ -316,3 +317,24 @@ runSelectionTest base failed = do
   ranges <- sortOn fst . map (\(Rect x _ w _) -> (x - rx, x - rx + w)) . selection <$> drawnOps shaped resp
   assertEq failed (Just 0, 47) (fst <$> listToMaybe ranges, maximum (0 : map snd ranges))
   assert failed (and (zipWith (\(_, e) (s, _) -> s <= e + 0.01) ranges (drop 1 ranges)))
+
+runRichTextTooltipsTest :: Context -> IORef Int -> IO ()
+runRichTextTooltipsTest ctx failed = do
+  let fm = ctxFontMetrics ctx
+      ui =
+        column $
+          richText'
+            [ inlineTooltip "garbage collector" (inlineCode "GC")
+            , " "
+            , inlineTooltip "Opens documentation" (hyperlink "https://example.com" "Open link")
+            ]
+  (resp, _) <- warmup2 ctx inp400 ui
+  openW <- lineWidthIO fm "Open link"
+  let Rect rx ry rw rh = respRect resp
+      pt = V2 (rx + rw - openW / 2 - 1) (ry + rh / 2)
+      hover = inp400 {inputMousePos = pt}
+  _ <- evalUi ctx hover ui
+  w <- getWakeAt ctx
+  assert failed (w > 0)
+  (_, clicked) <- runClick ctx inp400 ui pt
+  assertEq failed (Just "https://example.com") clicked

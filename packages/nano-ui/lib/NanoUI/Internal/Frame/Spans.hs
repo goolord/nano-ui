@@ -270,7 +270,7 @@ nodeTextLines ctx raw si fontSize wTag maxW effMaxW isRowChild ix w
           -- to wrap.
           shown <-
             if tw > contentW + 0.5 && contentW > 0 && (wTag == SizingGrow || isBounded maxW)
-              then truncateTextIO measureW contentW raw
+              then truncateTextWithIO (textNodeEllipsis si) measureW contentW raw
               else pure raw
           (,) fm . SpanSingle shown <$> prepareFontMetrics fm shown
 
@@ -418,7 +418,8 @@ computeWidgetLabel ctx nt txt si fontSizeVal ax w h
       (label, tw) <-
         if (plain || isTable || nt == NodeSelect) && tw0 > room + 0.5
           then do
-            cut <- truncateTextIO (fmap fst . measure) room txt
+            let ell = textNodeEllipsis (nodeFontBits nt si)
+            cut <- truncateTextWithIO ell (fmap fst . measure) room txt
             (cut,) . fst <$> measure cut
           else pure (txt, tw0)
       -- Metrics for the label as it is shown, which places it.

@@ -11,6 +11,7 @@ tests :: [Spec]
 tests =
   [ spec "label-truncates" runTruncateTest
   , spec "toggle-button" runToggleButtonTest
+  , spec "ellipsis-modes-and-tabular" runEllipsisAndTabularTest
   ]
 
 -- | The text spans drawn inside a widget's rect.
@@ -69,3 +70,39 @@ runToggleButtonTest ctx failed = do
     check . elem tint . fillsIn (respRect resp) =<< liftIO (drawQuads draw)
     _ <- click (On resp)
     checkEq False =<< readV ref
+
+runEllipsisAndTabularTest :: Context -> IORef Int -> IO ()
+runEllipsisAndTabularTest base failed = do
+  let inp = withInputOff 400 240
+      ellUi = column $ do
+        row (labelWith (maxW 140 . ellipsisMiddle) "Data.Map.Internal.insertWithKey")
+        row (labelWith (maxW 140 . ellipsisStart) "src/Stronghead/Eventlog/Model.hs")
+  warmup2 base inp ellUi
+  ss <- collectTextSpans base
+  let texts = [t | (_, t, _, _, _) <- ss]
+  case texts of
+    [midT, startT] -> do
+      assert failed ("Da" `T.isPrefixOf` midT && "..." `T.isInfixOf` midT && "ey" `T.isSuffixOf` midT)
+      assert failed ("..." `T.isPrefixOf` startT && "hs" `T.isSuffixOf` startT)
+    _ -> assertEq failed 2 (length texts)
+  let propFm =
+        (monospaceMetrics 10)
+          { fmAdvance = \c -> case c of
+              ' ' -> 4
+              '1' -> 5
+              '8' -> 10
+              _ -> 7
+          }
+      propCtx = withFontMetrics base propFm
+      tabUi = column $ do
+        labelWith fontTabular "111.5"
+        labelWith fontTabular "888.5"
+        label "111.5"
+        label "888.5"
+  warmup2 propCtx inp tabUi
+  tss <- collectTextSpans propCtx
+  case [rectW r | (r, _, _, _, _) <- tss] of
+    [tw1, tw8, pw1, pw8] -> do
+      assert failed (abs (tw1 - tw8) <= 0.01)
+      assertLt failed pw1 pw8
+    ws -> assertEq failed 4 (length ws)

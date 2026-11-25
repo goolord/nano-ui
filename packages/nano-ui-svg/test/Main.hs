@@ -187,7 +187,7 @@ testGradientsAndClips = do
 testTextAndImages :: IO ()
 testTextAndImages = do
   let
-    styledFont = TextFont 18 FontMono WeightBold FontStyleItalic DecorationUnderline
+    styledFont = TextFont 18 FontMono WeightBold FontStyleItalic DecorationUnderline False
     strikeFont =
       defaultTextFont
         { textFontSize = 12

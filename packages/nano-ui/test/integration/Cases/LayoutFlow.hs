@@ -42,6 +42,7 @@ tests =
   , spec "pointer-owner" runPointerOwnerTest
   , spec "covered-field-focus" runCoveredFieldFocusTest
   , spec "covered-widget-no-pointer" runCoveredWidgetNoPointerTest
+  , spec "container-queries" runContainerQueryTest
   ]
 
 red, green, blue, yellow :: Color
@@ -616,3 +617,21 @@ runEmptyFrameTest ctx failed = do
   wid <- warmup2 ctx inp0 (row (currentId <* image (fixedWH 40 24) (ImageId 0)))
   assertJustM failed (getPrevRect ctx wid) $ \(Rect _ _ w h) ->
     assert failed (abs (w - 40) <= 0.5 && abs (h - 24) <= 0.5)
+
+runContainerQueryTest :: Context -> IORef Int -> IO ()
+runContainerQueryTest ctx failed = do
+  let pair prefix =
+        responsiveRowColIn 220 tight $ do
+          label (prefix <> "-A")
+          label (prefix <> "-B")
+      cqUi =
+        rowWith (gap 8 . tight) $ do
+          columnWith (fixedW 150 . tight) (pair "narrow")
+          columnWith (fixedW 260 . tight) (pair "wide")
+  runSim ctx failed (withInput 500 200) cqUi $ do
+    na <- rectOf "narrow-A"
+    nb <- rectOf "narrow-B"
+    wa <- rectOf "wide-A"
+    wb <- rectOf "wide-B"
+    checkGt (rectY nb) (rectY na + 4)
+    checkGt (rectX wb) (rectX wa + 4)

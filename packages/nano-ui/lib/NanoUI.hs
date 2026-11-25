@@ -157,12 +157,21 @@ module NanoUI
   , center
   , responsive
   , responsiveRowCol
+  , withContainerSize
+  , withContainerWidth
+  , responsiveIn
+  , responsiveRowColIn
+  , ScrollPolicy (..)
+  , ScrollConfig (..)
+  , defaultScrollConfig
   , scroll
   , scrollWith
   , scroll2D
   , scroll2DWith
   , scrollArea
   , scrollArea2D
+  , scrollConfigured
+  , scrollAreaConfigured
   , separator
   , spacer
   , flex
@@ -332,6 +341,7 @@ module NanoUI
   , tree'
   , SortDir (..)
   , SortCol (..)
+  , SortKey (..)
   , ColSize (..)
   , TableConfig (..)
   , TableResponse (..)
@@ -356,6 +366,8 @@ module NanoUI
   , widgetCell
   , cellSort
   , cellSortKey
+  , cellSortNum
+  , cellSortInt
   , withText
 
     -- * Overlays
@@ -421,6 +433,7 @@ module NanoUI
   , PaneGridDrop, pgdLocation, pgdRect, pgdPane
   , commitPaneDrop
   , GridAxis (..)
+  , CenterDropMode (..)
   , GridNode (..)
   , PaneTree (..)
   , validateGridTree
@@ -503,6 +516,8 @@ module NanoUI
   , lineWidth
   , lineWidthUi
   , truncateTextUi
+  , truncateTextMiddleUi
+  , truncateTextWithUi
   , uiFontMetrics
   , uiFontSize
   , resolveFontUi
@@ -822,9 +837,15 @@ module NanoUI
   , textDecoration
   , fontUnderline
   , fontStrike
+  , fontTabular
   , TextBreak (..)
   , textBreak
   , breakAnywhere
+  , TextEllipsis (..)
+  , textEllipsis
+  , ellipsisEnd
+  , ellipsisMiddle
+  , ellipsisStart
   , Tone (..)
   , fontTone
 

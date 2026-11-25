@@ -27,8 +27,9 @@ import NanoUI.Internal.Style (Layout, Theme)
 import NanoUI.Internal.Types (Color)
 import NanoUI.Widgets.TextBuffer (Cursor, TextBuffer)
 
--- | Text with a layout-style modifier, optional link target and background.
-data Inline = Inline !Text (Layout -> Layout) !(Maybe Text) !(Maybe Color)
+-- | Text with a layout-style modifier, optional link target, background,
+-- and hover tooltip.
+data Inline = Inline !Text (Layout -> Layout) !(Maybe Text) !(Maybe Color) !(Maybe Text)
 
 instance IsString Inline where
   fromString = inlineText . T.pack
@@ -36,7 +37,7 @@ instance IsString Inline where
 -- | Plain text in the paragraph's style. A string literal is the same piece
 -- ('IsString').
 inlineText :: Text -> Inline
-inlineText txt = Inline txt id Nothing Nothing
+inlineText txt = Inline txt id Nothing Nothing Nothing
 
 -- | The style of one 'Inline' piece, resolved once when the paragraph is
 -- measured.
@@ -50,7 +51,9 @@ data Run = Run
   , runTarget :: !(Maybe Text)
   -- ^ Link target, if the piece is a link.
   , runBackground :: !(Maybe Color)
-  -- ^ Fill drawn behind the piece's text.
+  -- ^ Fill drawn behind the piece's text, if any.
+  , runTooltip :: !(Maybe Text)
+  -- ^ Optional tooltip shown when hovering the piece.
   }
 
 -- | How a 'Token' wraps. 'Word' and 'Space' come from pieces that break at

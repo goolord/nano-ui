@@ -29,32 +29,41 @@ module NanoUI.Internal.Widgets.Layout
   , separator
   , spacer
   , flex
+  , ScrollPolicy (..)
+  , ScrollConfig (..)
+  , defaultScrollConfig
   , scroll
   , scrollWith
   , scroll2D
   , scroll2DWith
   , scrollArea
   , scrollArea2D
+  , scrollConfigured
+  , scrollAreaConfigured
   , scrollAreaIdConfigured
   , grid
   , gridWith
   , gridWith'
   , responsive
   , responsiveRowCol
+  , withContainerSize
+  , withContainerWidth
+  , responsiveIn
+  , responsiveRowColIn
   , center
   )
 where
 
 import Control.Monad (void)
 import Data.Text (Text)
-import NanoUI.Internal.Context (Context (..))
+import NanoUI.Internal.Context (Context (..), getPrevRect, intKey, recordLayoutRead)
 import NanoUI.Internal.Layout.ScrollGeometry
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, nextId, styled, windowWidth, withContext)
+import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, currentId, liftIO, nextId, styled, windowSize, windowWidth, withContext)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Style qualified as Style
-import NanoUI.Internal.Types (Color (..), lerpColor)
+import NanoUI.Internal.Types (Color (..), Rect (..), Size (..), lerpColor)
 import NanoUI.Internal.Widgets.Node
 
 {-# INLINE withDefaultWith #-}
@@ -216,6 +225,92 @@ responsive breakpoint wideContainer narrowContainer child = do
 responsiveRowCol :: Float -> (Layout -> Layout) -> NanoUI a -> NanoUI a
 responsiveRowCol breakpoint f = responsive breakpoint (rowWith f) (columnWith f)
 
+-- | Run @body@ inside an unpadded container that fills the available width
+-- (unless @f@ overrides sizing), passing the container's inner content 'Size'
+-- (outer laid-out bounds less its padding, or 'windowSize' before its first
+-- layout). When layout changes that size by more than half a pixel, a
+-- follow-up frame is scheduled; pure scrolling or movement does not.
+withContainerSize :: (Layout -> Layout) -> (Size -> NanoUI a) -> NanoUI a
+withContainerSize f body = do
+  wid <- currentId
+  ctx <- askContext
+  winSz <- windowSize
+  base <- askDefaultLayout
+  let layout = f (fillW (tight base))
+      Padding pl pr pt pb = layoutPadding layout
+      innerOf (Rect _ _ rw rh) = Size (max 0 (rw - pl - pr)) (max 0 (rh - pt - pb))
+      fallback = Size (max 0 (sizeW winSz - pl - pr)) (max 0 (sizeH winSz - pt - pb))
+  sz <- liftIO $ do
+    mPrev <- getPrevRect ctx wid
+    let sizeOf = maybe fallback innerOf
+        cur@(Size w h) = sizeOf mPrev
+    recordLayoutRead ctx (intKey wid) $ do
+      Size w' h' <- sizeOf <$> getPrevRect ctx wid
+      pure (abs (w' - w) > 0.5 || abs (h' - h) > 0.5)
+    pure cur
+  container NodeContainer layout (tagContainer wid >> body sz)
+
+-- | Like 'withContainerSize', passing only the container's inner content width
+-- and scheduling a follow-up frame only when that width changes.
+withContainerWidth :: (Layout -> Layout) -> (Float -> NanoUI a) -> NanoUI a
+withContainerWidth f body = do
+  wid <- currentId
+  ctx <- askContext
+  ww <- windowWidth
+  base <- askDefaultLayout
+  let layout = f (fillW (tight base))
+      Padding pl pr _ _ = layoutPadding layout
+      innerW (Rect _ _ rw _) = max 0 (rw - pl - pr)
+      fallback = max 0 (ww - pl - pr)
+  w <- liftIO $ do
+    mPrev <- getPrevRect ctx wid
+    let widthOf = maybe fallback innerW
+        cur = widthOf mPrev
+    recordLayoutRead ctx (intKey wid) $ do
+      w' <- widthOf <$> getPrevRect ctx wid
+      pure (abs (w' - cur) > 0.5)
+    pure cur
+  container NodeContainer layout (tagContainer wid >> body w)
+
+-- | Container-scoped counterpart to 'responsive': chooses between
+-- @wideContainer@ and @narrowContainer@ based on the enclosing container's
+-- laid-out width (rather than 'windowWidth'), settling automatically when a
+-- split pane or parent resizes across @breakpoint@.
+responsiveIn :: Float -> (NanoUI a -> NanoUI a) -> (NanoUI a -> NanoUI a) -> NanoUI a -> NanoUI a
+responsiveIn breakpoint wideContainer narrowContainer child = do
+  wid <- currentId
+  ctx <- askContext
+  ww <- windowWidth
+  isWide <- liftIO $ do
+    mPrev <- getPrevRect ctx wid
+    let wideOf = (>= breakpoint) . maybe ww rectW
+        cur = wideOf mPrev
+    recordLayoutRead ctx (intKey wid) ((/= cur) . wideOf <$> getPrevRect ctx wid)
+    pure cur
+  base <- askDefaultLayout
+  let outer = (fillW (tight base)) {layoutDirection = Column}
+  container NodeContainer outer $ do
+    tagContainer wid
+    if isWide then wideContainer child else narrowContainer child
+
+-- | A row while its own laid-out width is at least @breakpoint@, a column
+-- below it. Defaults to 'fillW' unless @f@ overrides width.
+responsiveRowColIn :: Float -> (Layout -> Layout) -> NanoUI a -> NanoUI a
+responsiveRowColIn breakpoint f child = do
+  wid <- currentId
+  ctx <- askContext
+  ww <- windowWidth
+  base <- askDefaultLayout
+  let layout0 = f (fillW base)
+  isWide <- liftIO $ do
+    mPrev <- getPrevRect ctx wid
+    let wideOf = (>= breakpoint) . maybe ww rectW
+        cur = wideOf mPrev
+    recordLayoutRead ctx (intKey wid) ((/= cur) . wideOf <$> getPrevRect ctx wid)
+    pure cur
+  let dir = if isWide then Row else Column
+  container NodeContainer (layout0 {layoutDirection = dir}) (tagContainer wid >> child)
+
 -- | A line of text. Newlines start new lines.
 {-# INLINE label #-}
 label :: Text -> NanoUI ()
@@ -339,6 +434,16 @@ scroll2DWith f child = snd <$> scrollArea2D f child
 {-# INLINE scrollArea2D #-}
 scrollArea2D :: (Layout -> Layout) -> NanoUI a -> NanoUI (WidgetId, a)
 scrollArea2D = scrollAreaFrom (const defaultScrollConfig)
+
+-- | Scroll container with an explicit 'ScrollConfig' and viewport layout.
+{-# INLINE scrollConfigured #-}
+scrollConfigured :: ScrollConfig -> (Layout -> Layout) -> NanoUI a -> NanoUI a
+scrollConfigured cfg f child = snd <$> scrollAreaConfigured cfg f child
+
+-- | 'scrollConfigured' returning the container's 'WidgetId'.
+{-# INLINE scrollAreaConfigured #-}
+scrollAreaConfigured :: ScrollConfig -> (Layout -> Layout) -> NanoUI a -> NanoUI (WidgetId, a)
+scrollAreaConfigured cfg = scrollAreaFrom (const cfg)
 
 {-# INLINE scrollAreaFrom #-}
 scrollAreaFrom ::

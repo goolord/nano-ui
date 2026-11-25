@@ -33,6 +33,8 @@ module NanoUI.Internal.Monad.Core
   , resolveFontUi
   , lineWidthUi
   , truncateTextUi
+  , truncateTextMiddleUi
+  , truncateTextWithUi
   , uiTime
   , uiTheme
   , styled
@@ -86,13 +88,13 @@ import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.BackendSession (BackendSession, SBackend)
 import NanoUI.Internal.Context (askHostIO, Host, Context (ctxNodeArena, ctxContainerStack, ctxIdCursor, ctxFontMetrics, ctxFontSize), currentTheme, damageFull, damageKey, damagePeers, damageRect, damageWidget, pushThemeScope, scopeRawTheme, routedInput, backendSession, getSystemAppearance, setThemeInView)
 import NanoUI.Internal.Draw.Types (TextFont (..))
-import NanoUI.Internal.Font (FontMetrics, lineWidthIO, truncateTextIO)
+import NanoUI.Internal.Font (FontMetrics, lineWidthIO, truncateTextIO, truncateTextMiddleIO, truncateTextWithIO)
 import NanoUI.Internal.Frame.Node (resolveTextFont)
 import NanoUI.Internal.Id (enterKeyed, enterScope, scopeTag, IdContext, WidgetId)
 import NanoUI.Internal.Id.Cursor (peekWidgetId, readIdCursor, skipSiblingIds, takeWidgetId, writeIdCursor)
 import NanoUI.Internal.Input (noButtons, stripInteractionInput, withoutPointer, Input (inputComposition, inputMousePos, inputWindowSize, inputButtonsHeld, inputKeysHeld), MouseButton, Pressable (heldIn, pressedIn, releasedIn))
 import NanoUI.Internal.Layout.Arena (getArenaScope, setArenaScope)
-import NanoUI.Internal.Style (Appearance, FontStyle, FontVariant, FontWeight, Layout, TextDecoration (DecorationNone), Theme, defaultLayout)
+import NanoUI.Internal.Style (Appearance, FontStyle, FontVariant, FontWeight, Layout, TextDecoration (DecorationNone), TextEllipsis, Theme, defaultLayout)
 import NanoUI.Internal.Types (DamageBounds, Rect, Size (..), V2)
 
 
@@ -338,7 +340,7 @@ uiFontSize = fmap ctxFontSize askContext
 -- is drawn at the width it was measured at.
 resolveFontUi :: Float -> FontWeight -> FontStyle -> FontVariant -> NanoUI FontMetrics
 resolveFontUi size weight style variant =
-  withContext (\ctx -> fst <$> resolveTextFont ctx (TextFont size variant weight style DecorationNone))
+  withContext (\ctx -> fst <$> resolveTextFont ctx (TextFont size variant weight style DecorationNone False))
 
 -- | The advance of one line of text in these metrics, in logical pixels. Unlike
 -- the pure 'NanoUI.Internal.Font.lineWidth' it first loads the glyphs the text needs,
@@ -356,6 +358,15 @@ lineWidthUi fm txt = liftIO (lineWidthIO fm txt)
 -- > name <- truncateTextUi fm 120 (trackName t)
 truncateTextUi :: FontMetrics -> Float -> Text -> NanoUI Text
 truncateTextUi fm maxW txt = liftIO (truncateTextIO (lineWidthIO fm) maxW txt)
+
+-- | Like 'truncateTextUi', placing the ellipsis in the middle so both prefix
+-- and suffix remain readable (for module paths, symbols, or filenames).
+truncateTextMiddleUi :: FontMetrics -> Float -> Text -> NanoUI Text
+truncateTextMiddleUi fm maxW txt = liftIO (truncateTextMiddleIO (lineWidthIO fm) maxW txt)
+
+-- | Truncate one line of text to @maxW@ using an explicit 'TextEllipsis' mode.
+truncateTextWithUi :: TextEllipsis -> FontMetrics -> Float -> Text -> NanoUI Text
+truncateTextWithUi ell fm maxW txt = liftIO (truncateTextWithIO ell (lineWidthIO fm) maxW txt)
 
 {-# INLINE uiTime #-}
 -- | Monotonic seconds from an unspecified epoch. Subtract two readings to

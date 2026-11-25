@@ -8,6 +8,7 @@ import Data.Either (isLeft)
 import Data.IntMap.Strict qualified as IM
 import Data.Map.Strict qualified as M
 import Data.Maybe (isJust, listToMaybe)
+import Data.Text qualified as T
 import Data.Word (Word64)
 import NanoUI.Internal.Widgets.SplitPane
   ( DropPreview (..)
@@ -37,6 +38,7 @@ tests =
   , spec "pane-grid-drop-preview" runDropPreviewTest
   , spec "pane-grid-pinned-pane" runPinnedPaneTest
   , spec "pane-grid-clipped-control" runClippedControlTest
+  , spec "pane-grid-native-tabs" runNativeTabsTest
   ]
 
 -- | Two panes side by side in a 600 by 400 grid: a 16px gutter from 292 to
@@ -724,3 +726,64 @@ runClippedControlTest ctx failed = do
     liftIO (writeIORef rendered False)
     _ <- moveTo (At (v2Add grab (V2 30 0)))
     check . not =<< liftIO (readIORef rendered)
+
+runNativeTabsTest :: Context -> IORef Int -> IO ()
+runNativeTabsTest ctx failed = do
+  assert failed (isLeft (validateGridTree (PaneTabs 100 [] 10)))
+  assert failed (isLeft (validateGridTree (PaneTabs 100 [10, 20] 99)))
+  let merged = dropPreviewTreeSized Nothing 40 8 halves 10 99 (Rect 0 0 600 400) (DropTab 20 Nothing)
+  case dpTree <$> merged of
+    Just (PaneTabs _ pids act) -> assertEq failed ([20, 10], 10) (pids, act)
+    other -> assertEq failed (Just (PaneTabs 99 [20, 10] 10)) other
+  treeVar <- newVar (Just (PaneTabs 100 [10, 20] 10))
+  let tabName 10 = "Alpha"
+      tabName 20 = "Beta"
+      tabName n = "Pane " <> T.pack (show n)
+      ui =
+        paneGrid
+          defaultPaneGridConfig
+            { pgLayout = fillW . fillH
+            , pgTree = ControlledTree treeVar
+            , pgCenterDrop = CenterTab
+            , pgTabTitle = tabName
+            , pgClosableTabs = True
+            , pgViewPane = \pid _ -> do
+                let t = "body-" <> tabName pid
+                label t
+                pure (PaneView (tabName pid) True)
+            }
+  runSim ctx failed (withInput 400 300) ui $ do
+    check =<< textShown "Alpha"
+    check =<< textShown "Beta"
+    check =<< textShown "body-Alpha"
+    check . not =<< textShown "body-Beta"
+    _ <- click "Beta" >> settle
+    check =<< textShown "body-Beta"
+    check . not =<< textShown "body-Alpha"
+    betaR <- rectOf "Beta"
+    -- Click the close button right next to "Beta" in its tab pill.
+    _ <- click (at (rectX betaR + rectW betaR + 10) (rectY betaR + rectH betaR / 2)) >> settle
+    checkEq (Just (Pane 10)) =<< readV treeVar
+    check =<< textShown "body-Alpha"
+  -- Custom tab rendering via pgViewTab.
+  customCtx <- newContext
+  customTree <- newVar (Just (PaneTabs 200 [10, 20] 10))
+  let customUi =
+        paneGrid
+          defaultPaneGridConfig
+            { pgLayout = fillW . fillH
+            , pgTree = ControlledTree customTree
+            , pgCenterDrop = CenterTab
+            , pgTabTitle = tabName
+            , pgClosableTabs = False
+            , pgViewTab = Just (\pid isAct -> label ((if isAct then "* " else "") <> tabName pid))
+            , pgViewPane = \pid _ -> do
+                label ("body-" <> tabName pid)
+                pure (PaneView (tabName pid) True)
+            }
+  runSim customCtx failed (withInput 400 300) customUi $ do
+    check =<< textShown "* Alpha"
+    check =<< textShown "Beta"
+    _ <- click "Beta" >> settle
+    check =<< textShown "* Beta"
+    check =<< textShown "body-Beta"

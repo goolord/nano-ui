@@ -223,12 +223,14 @@ data TextFont = TextFont
   , textFontWeight :: !FontWeight
   , textFontStyle :: !FontStyle
   , textFontDecoration :: !TextDecoration
+  , textFontTabular :: !Bool
+  -- ^ Uniform-width ASCII digits ('NanoUI.Internal.Style.fontTabular').
   }
   deriving (Eq, Show)
 
 -- | Regular text using the backend's default size, weight, and upright style.
 defaultTextFont :: TextFont
-defaultTextFont = TextFont 0 FontRegular WeightNormal FontStyleNormal DecorationNone
+defaultTextFont = TextFont 0 FontRegular WeightNormal FontStyleNormal DecorationNone False
 
 -- | A quad as a 'FillPolygon': its four corners' x/y pairs in order round
 -- it, cut into two triangles from the first.

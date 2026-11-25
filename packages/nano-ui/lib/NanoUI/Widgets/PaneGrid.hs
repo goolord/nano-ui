@@ -19,6 +19,7 @@
 -- 'commitPaneDrop' only when it chooses to create a pane.
 module NanoUI.Widgets.PaneGrid
   ( GridAxis (..)
+  , CenterDropMode (..)
   , GridNode (..)
   , PaneTree (..)
   , validateGridTree
@@ -35,7 +36,7 @@ module NanoUI.Widgets.PaneGrid
   , paneDragHandle
   ) where
 
-import Control.Monad (forM_, unless, void, when)
+import Control.Monad (foldM, forM, forM_, unless, void, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Hashable (hash)
 import Data.List (find)
@@ -47,8 +48,9 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Word (Word64)
 import NanoUI.Internal.Context
+import NanoUI.Internal.Font (FontMetrics (..), buttonPadding)
 import NanoUI.Internal.Input
-import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askInput, damageWidgetNow, focusedWidget, freshWidget, lastRect, releaseFocus, liftIO, takeEscape, whenM, withIdFrame, withKey)
+import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askInput, damageWidgetNow, focusedWidget, freshWidget, lastRect, releaseFocus, liftIO, takeEscape, uiTheme, whenM, withIdFrame, withKey)
 import NanoUI.Internal.Id (IdContext (..), WidgetId, hashWidgetId, scopeIdContext)
 import NanoUI.Internal.Var (bindVarOn, requestRerun)
 import NanoUI.Internal.Var.Types (Var)
@@ -63,7 +65,9 @@ import NanoUI.Internal.Types
 import NanoUI.Internal.Widgets.Behavior (KeyNav (..), leftPress, pastDragThreshold, useKeyNav)
 import NanoUI.Internal.Widgets.Cursor (withCursorShape)
 import NanoUI.Widgets.Custom
-import NanoUI.Internal.Widgets.Layout (column', row', rowWith')
+import NanoUI.Internal.Widgets.Button (buttonWith')
+import NanoUI.Internal.Widgets.Display (box)
+import NanoUI.Internal.Widgets.Layout (column', columnWith, labelWith, row', rowWith, rowWith', separator)
 import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeType, getWidgetId, isWidgetNode)
 import NanoUI.Internal.Widgets.Node
 import NanoUI.Internal.Widgets.Shortcut (shortcutOnce)
@@ -93,6 +97,12 @@ validateGridTree tree = void (walk S.empty tree)
       | S.member ident seen = Left "pane grid: duplicate pane or split id"
       | otherwise = Right (S.insert ident seen)
     walk seen (Pane ident) = insertId seen ident
+    walk seen (PaneTabs gid pids active)
+      | null pids = Left "pane grid: tab group must not be empty"
+      | notElem active pids = Left "pane grid: active tab must belong to its tab group"
+      | otherwise = do
+          s1 <- insertId seen gid
+          foldM insertId s1 pids
     walk seen (Split ident _ ratio left right) = do
       next <- insertId seen ident
       if isNaN ratio || isInfinite ratio || ratio < 0 || ratio > 1
@@ -156,6 +166,19 @@ data PaneGridConfig = PaneGridConfig
     -- ^ Whether the grid is a Tab stop whose arrow, @m@, @x@ and Escape keys
     -- act on its panes (default 'True'). Turn it off when pane content needs
     -- those keys.
+  , pgCenterDrop :: !CenterDropMode
+    -- ^ Whether dropping a pane onto the center of another swaps them
+    -- ('CenterSwap', the default) or merges them into a native 'PaneTabs' stack
+    -- ('CenterTab').
+  , pgTabTitle :: !(Word64 -> Text)
+    -- ^ Title shown on native 'PaneTabs' headers for a pane id (default
+    -- @"Pane <id>"@), and used as the pane label when dragging from a tab.
+  , pgViewTab :: !(Maybe (Word64 -> Bool -> NanoUI ()))
+    -- ^ Optional custom renderer for one tab's label area in a 'PaneTabs' strip,
+    -- given the pane id and whether it is the active tab. When 'Nothing'
+    -- (default), renders 'pgTabTitle' truncated in the middle.
+  , pgClosableTabs :: !Bool
+    -- ^ Whether native 'PaneTabs' headers include a close button (default 'True').
   , pgViewPane :: !(Word64 -> PaneGridCtx -> NanoUI PaneView)
     -- ^ Renders the content of one pane. Each pane is sized by its split ratio
     -- regardless of content size, clipping overflow.
@@ -176,6 +199,10 @@ defaultPaneGridConfig =
     , pgTree = InitialTree (Just (Pane 1))
     , pgDividerColor = Nothing
     , pgFocusable = True
+    , pgCenterDrop = CenterSwap
+    , pgTabTitle = \pid -> "Pane " <> T.pack (show pid)
+    , pgViewTab = Nothing
+    , pgClosableTabs = True
     , pgViewPane = \_ _ -> pure (PaneView "" False)
     }
 
@@ -249,9 +276,11 @@ data PaneGridResponse = PaneGridResponse
 data PaneEdge = PaneLeft | PaneRight | PaneAbove | PaneBelow
   deriving (Eq, Show)
 
--- | Split beside one pane, or around the whole grid.
+-- | Split beside one pane, merge into a pane's tab group, or split around the
+-- whole grid.
 data PaneDropLocation
   = BesidePane !Word64 !PaneEdge
+  | IntoTabs !Word64
   | OutsideGrid !PaneEdge
   deriving (Eq, Show)
 
@@ -300,6 +329,7 @@ data RenderedPane = RenderedPane
   , rpView :: !PaneView
   , rpControlHit :: !Bool
   , rpHandle :: !(Maybe Rect)
+  , rpIsTab :: !Bool
   }
 
 -- | Per-frame shared environment.
@@ -420,7 +450,7 @@ paneGridCore cfg controlled given = do
                 Just dt -> preview dt
                 Nothing
                   | rectContains baseRect mouse ->
-                      nearestPane targetRegions mouse >>= \(q, r) -> preview (dropTargetForPane r mouse q)
+                      nearestPane targetRegions mouse >>= \(q, r) -> preview (dropTargetForPaneWith (pgCenterDrop cfg) r mouse q)
                   | otherwise -> Nothing
            in (moved, zone, rest)
         _ -> (False, Nothing, Nothing)
@@ -550,8 +580,9 @@ resolveExternalDrop env wid baseRect mouse end = do
             edge AxisV False = PaneRight
             edge AxisH True = PaneAbove
             edge AxisH False = PaneBelow
-        (location, proposed) <- case fromMaybe (dropTargetForPane r mouse q) (topLevelDropTarget edgeBand baseRect mouse) of
+        (location, proposed) <- case fromMaybe (dropTargetForPaneWith (pgCenterDrop (geCfg env)) r mouse q) (topLevelDropTarget edgeBand baseRect mouse) of
           DropSplit p ax onA -> Just (BesidePane p (edge ax onA), treeSplit p seed ax onA np tree)
+          DropTab p mIdx -> Just (IntoTabs p, treeAddTab p seed mIdx np tree)
           DropTop ax onA ->
             Just
               ( OutsideGrid (edge ax onA)
@@ -604,6 +635,29 @@ withPaneKey env pid =
   withIdFrame (\parent -> (parent, gePaneScope env)) . withKey pid
 
 -- | Render one pane's content via 'pgViewPane' under the pane's stable key.
+-- | Whether a left press landed on an enabled interactive child declared at or
+-- after arena index @start@, using previous-frame bounds.
+hitChildControl :: Context -> Input -> Int -> IO Bool
+hitChildControl ctx inp start
+  | not (pressedIn MouseLeft inp) = pure False
+  | otherwise = do
+      let arena = ctxNodeArena ctx
+      end <- arenaCount arena
+      let hitFrom idx
+            | idx >= end = pure False
+            | otherwise = do
+                nt <- getNodeType arena idx
+                hit <- pure (isWidgetNode nt) <&&> do
+                  child <- getWidgetId arena idx
+                  dis <- isDisabled ctx child
+                  if dis
+                    then pure False
+                    else do
+                      r <- getPrevRect ctx child
+                      maybe (pure False) (\childRect -> nodeInteractionHit ctx idx childRect (inputMousePos inp)) r
+                if hit then pure True else hitFrom (idx + 1)
+      hitFrom start
+
 renderPane ::
   GridEnv ->
   Word64 ->
@@ -618,29 +672,58 @@ renderPane env pid rect =
     handleRef <- liftIO (newIORef Nothing)
     let ctxt = geMakeCtx env pid rect (draggingPane env pid) handleRef
     view <- clipContainer (paneLay (geMinSize env)) (pgViewPane (geCfg env) pid ctxt)
-    -- Whether a press landed on a control in the pane, using last frame's
-    -- rects, since the active id is only settled after the view runs.
-    controlHit <-
-      if not (pressedIn MouseLeft inp)
-        then pure False
-        else liftIO $ do
-          end <- arenaCount arena
-          let hitFrom idx
-                | idx >= end = pure False
-                | otherwise = do
-                    nt <- getNodeType arena idx
-                    hit <- pure (isWidgetNode nt) <&&> do
-                      child <- getWidgetId arena idx
-                      dis <- isDisabled ctx child
-                      if dis
-                        then pure False
-                        else do
-                          r <- getPrevRect ctx child
-                          maybe (pure False) (\childRect -> nodeInteractionHit ctx idx childRect (inputMousePos inp)) r
-                    if hit then pure True else hitFrom (idx + 1)
-          hitFrom start
-    handleRect <- liftIO (readIORef handleRef)
-    pure [RenderedPane pid view controlHit handleRect]
+    controlHit <- liftIO (hitChildControl ctx inp start)
+    handleRect0 <- liftIO (readIORef handleRef)
+    let handleRect = handleRect0 >>= rectIntersect rect
+    pure [RenderedPane pid view controlHit handleRect False]
+
+renderTabStrip :: GridEnv -> Rect -> [Word64] -> Word64 -> NanoUI ([RenderedPane], Float)
+renderTabStrip env fullR pids active = do
+  inp <- askInput
+  th <- uiTheme
+  let ctx = geCtx env
+      arena = ctxNodeArena ctx
+      fm = ctxFontMetrics ctx
+      (_, padY) = buttonPadding fm
+      defaultTabH = fromIntegral (max 24 (ceiling (fmLineHeight fm + padY) :: Int))
+      closeSz = fromIntegral (max 16 (round (fmLineHeight fm) :: Int))
+      maxLabelW = max 96 (fmLineHeight fm * 8)
+      maxTabW = maxLabelW + closeSz + 28
+  (tabs, stripResp) <- rowWith' (minH defaultTabH . tight . gap 0 . fillW) $
+    forM pids $ \pid ->
+      withKey ("tab" :: Text, pid) $ do
+        let isActive = pid == active
+            title = pgTabTitle (geCfg env) pid
+            closable = pgClosableTabs (geCfg env)
+        withCursorShape UiCursorPointer $ do
+          (controlHit, tabArea) <- mouseArea (minH defaultTabH . maxW maxTabW) $
+            columnWith (tight . gap 0 . fillH) $ do
+              start <- liftIO (arenaCount arena)
+              rowWith (padXY 8 2 . gap 6 . alignMid . fillH) $ do
+                case pgViewTab (geCfg env) of
+                  Just viewTab -> viewTab pid isActive
+                  Nothing ->
+                    labelWith
+                      ( tight
+                          . maxW maxLabelW
+                          . ellipsisMiddle
+                          . (if isActive then fontSemiBold else fontMuted)
+                      )
+                      title
+                when closable $ do
+                  closeR <- buttonWith' (fixedWH closeSz closeSz . tight . fontMuted) "\215"
+                  when (respClicked closeR) (closePane env pid)
+              hit <- liftIO (hitChildControl ctx inp start)
+              box (fixedH 2 . fillW) (if isActive then themeAccent th else colorTransparent)
+              pure hit
+          let clippedTab =
+                if rectNonEmpty fullR
+                  then rectIntersect fullR (respRect tabArea)
+                  else Just (respRect tabArea)
+          pure (RenderedPane pid (PaneView title False) controlHit clippedTab True)
+  let stripH = rectH (respRect stripResp)
+      usedH = if stripH > 0 then stripH else defaultTabH
+  pure (tabs, usedH)
 
 renderNode ::
   GridEnv ->
@@ -657,6 +740,24 @@ renderNode env dividers node mt = case node of
     -- Its prev-frame rect, zero until the pane has been laid out once.
     | otherwise ->
         renderPane env pid (M.findWithDefault (Rect 0 0 0 0) pid (geRegions env))
+  PaneTabs gid pids active ->
+    withKey gid $
+      clipContainer (paneLay (geMinSize env)) $ do
+        let fullR = M.findWithDefault (Rect 0 0 0 0) active (geRegions env)
+        (tabRendered, stripH) <- renderTabStrip env fullR pids active
+        separator
+        let tabBarH = stripH + 1
+            bodyR =
+              Rect
+                (rectX fullR)
+                (rectY fullR + min (rectH fullR) tabBarH)
+                (rectW fullR)
+                (max 0 (rectH fullR - tabBarH))
+        bodyRendered <-
+          if geLifted env && draggingPane env active
+            then [] <$ container NodeContainer fillLay (pure ())
+            else renderPane env active bodyR
+        pure (tabRendered <> bodyRendered)
   Split sid ax ratio a b ->
     withKey sid $ do
       let (ma, mb) = splitMinChildren (geMinSize env) (geGutter env) a b mt
@@ -779,12 +880,12 @@ runGestures wid env dividers rendered moved zone = do
       -- diBand already includes the leeway; inflating it would steal presses
       -- from neighbouring panes.
       hitDiv = find (\d -> rectContains (diBand d) mouse) dividers
-      -- The pane whose handle (or, when 'pvDraggable', whole region) is
-      -- under the pointer. A handle wider than its pane counts only inside
-      -- the pane.
+      -- The pane whose handle, tab header, or (when 'pvDraggable') whole
+      -- region is under the pointer. Handles and tab headers are already
+      -- clipped to their enclosing cell.
       pickHit = flip find rendered $ \pane ->
-        any (`rectContains` mouse) (M.lookup (rpPaneId pane) (geRegions env))
-          && (pvDraggable (rpView pane) || any (`rectContains` mouse) (rpHandle pane))
+        any (`rectContains` mouse) (rpHandle pane)
+          || (pvDraggable (rpView pane) && any (`rectContains` mouse) (M.lookup (rpPaneId pane) (geRegions env)))
   when (pressedIn MouseLeft inp && not (covered || disabled || barDrag)
       && maybe True (`rectContains` mouse) clip
       && gsGesture (geState env) == NoGesture && not (any rpControlHit rendered)) $
@@ -792,7 +893,14 @@ runGestures wid env dividers rendered moved zone = do
       -- From the ratio the divider is drawn at, which the panes' minima may
       -- have clamped, so it moves with the pointer from the start.
       (Just d, _) -> start (Resize (diSplitId d) (clampRatio (geGutter env) d (diRatio d)) (mouseMain (diAxis d) mouse))
-      (_, Just pane) -> start (Drag (rpPaneId pane) mouse False (pvTitle (rpView pane)))
+      (_, Just pane) -> do
+        liftIO (leftPress (geCtx env) >>= modifyStore (geCtx env) . insertSpec slotDragPress (geKey env))
+        let pid = rpPaneId pane
+            g = Drag pid mouse False (pvTitle (rpView pane))
+        void . updateGrid env True $ \s ->
+          if rpIsTab pane
+            then s {gsTree = treeSelectTab pid <$> gsTree s, gsFocus = pid, gsGesture = g}
+            else s {gsGesture = g}
       _ -> pure ()
   case gsGesture (geState env) of
     NoGesture -> pure ()

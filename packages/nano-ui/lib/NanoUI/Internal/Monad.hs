@@ -40,6 +40,8 @@ module NanoUI.Internal.Monad
   , resolveFontUi
   , lineWidthUi
   , truncateTextUi
+  , truncateTextMiddleUi
+  , truncateTextWithUi
   , uiTime
   , uiTheme
   , setUiTheme

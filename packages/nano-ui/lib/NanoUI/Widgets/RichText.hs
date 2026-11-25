@@ -8,6 +8,7 @@ module NanoUI.Widgets.RichText
   , emphasis
   , inlineCode
   , inlineBackground
+  , inlineTooltip
   , hyperlink
   , richText
   , richText'
@@ -19,6 +20,7 @@ module NanoUI.Widgets.RichText
   , selectableRichTextWith'
   ) where
 
+import Control.Applicative ((<|>))
 import Control.Monad (filterM, forM_, foldM, unless, when)
 import Data.Hashable (hashWithSalt)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -27,7 +29,7 @@ import Data.List (dropWhileEnd, groupBy)
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Primitive.PrimArray (indexPrimArray, sizeofPrimArray)
-import Data.Primitive.SmallArray (SmallArray, indexSmallArray, smallArrayFromList)
+import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromList)
 import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Internal.Context
@@ -41,11 +43,12 @@ import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input (Input (..), MouseButton (MouseLeft), UiCursorKind (..), heldIn, inputMousePos, pressedIn, releasedIn)
 import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing), lookupNodeByKey)
 import NanoUI.Internal.Store (eqByPtr, ptrEq, fieldRichSelection, findSlot, insertSlot)
-import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, freshWidget, liftIO, requestFocus, uiTheme)
+import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, freshWidget, liftIO, requestFocus, uiTheme, withKey)
 import NanoUI.Internal.Style hiding (Flow (..))
 import NanoUI.Internal.TextCluster (clusterLength)
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), rectContains)
-import NanoUI.Internal.Widgets.Node (Response, addWidget, respClicked, respHovered, respRect)
+import NanoUI.Internal.Widgets.Node (Response (..), addWidget, respClicked, respHovered, respRect)
+import NanoUI.Internal.Widgets.Popup (tooltip)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
 import NanoUI.Internal.Widgets.TextInput (cursorAtOffset, cursorOffset, fieldTextCommands)
 import NanoUI.Widgets.TextBuffer qualified as TB
@@ -55,11 +58,11 @@ import System.IO.Unsafe (unsafeDupablePerformIO)
 -- | Text styled by font modifiers (@fontBold@, @fontSize 20@,
 -- @fontColor red . fontUnderline@), applied over the paragraph's layout.
 inlineWith :: (Layout -> Layout) -> Text -> Inline
-inlineWith f txt = Inline txt f Nothing Nothing
+inlineWith f txt = Inline txt f Nothing Nothing Nothing
 
 -- | Add font modifiers to a piece, a hyperlink included.
 restyle :: (Layout -> Layout) -> Inline -> Inline
-restyle f (Inline txt style target bg) = Inline txt (f . style) target bg
+restyle f (Inline txt style target bg tip) = Inline txt (f . style) target bg tip
 
 -- | Bold text.
 strong :: Text -> Inline
@@ -79,12 +82,16 @@ inlineCode = inlineWith fontMono
 --
 -- > richText ["Run ", inlineBackground codeTint (inlineCode "cabal build"), " first."]
 inlineBackground :: Color -> Inline -> Inline
-inlineBackground c (Inline txt style target _) = Inline txt style target (Just c)
+inlineBackground c (Inline txt style target _ tip) = Inline txt style target (Just c) tip
+
+-- | Attach hover tooltip text to any 'Inline' piece (code run, text, or link).
+inlineTooltip :: Text -> Inline -> Inline
+inlineTooltip tip (Inline txt style target bg _) = Inline txt style target bg (Just tip)
 
 -- | @hyperlink target label@: text styled with the theme's link colour and
 -- underlined on hover. Clicking the link returns @Just target@ from 'richText'.
 hyperlink :: Text -> Text -> Inline
-hyperlink target label = Inline label id (Just target) Nothing
+hyperlink target label = Inline label id (Just target) Nothing Nothing
 
 -- | A paragraph of pieces, wrapped at its width. Returns the target of the
 -- hyperlink clicked this frame.
@@ -130,8 +137,8 @@ richTextWithMode' selectable f pieces = do
   inp <- askInput
   base <- f <$> askDefaultLayout
   theme <- uiTheme
-  let styled = [(piece, pieceFont l, pieceColor theme l target, layoutTextBreak l) | piece@(Inline _ style target _) <- pieces, let l = style base]
-      plainInput = T.concat [txt | (Inline txt _ _ _, _, _, _) <- styled]
+  let styled = [(piece, pieceFont l, pieceColor theme l target, layoutTextBreak l) | piece@(Inline _ style target _ _) <- pieces, let l = style base]
+      plainInput = T.concat [txt | (Inline txt _ _ _ _, _, _, _) <- styled]
       align = layoutAlignX base
   Paragraphs cacheRef <- liftIO $ Host.hostOrInit (ctxParagraphs ctx) (Paragraphs <$> newIORef (ParagraphCache 0 paragraphBound IM.empty))
   gen <- liftIO (readIORef (ctxMetricGen ctx))
@@ -142,11 +149,11 @@ richTextWithMode' selectable f pieces = do
   sameInputs <- liftIO (maybe (pure False) reused cached)
   let hashed =
         foldl'
-          ( \h (Inline txt _ target bg, TextFont size variant weight fstyle deco, Color rgba, brk) ->
+          ( \h (Inline txt _ target bg tip, TextFont size variant weight fstyle deco tabular, Color rgba, brk) ->
               h `hashWithSalt` txt `hashWithSalt` size `hashWithSalt` fromEnum variant
                 `hashWithSalt` fromEnum weight `hashWithSalt` fromEnum fstyle `hashWithSalt` fromEnum deco
-                `hashWithSalt` rgba `hashWithSalt` target `hashWithSalt` fmap (\(Color c) -> c) bg
-                `hashWithSalt` fromEnum brk
+                `hashWithSalt` tabular `hashWithSalt` rgba `hashWithSalt` target `hashWithSalt` fmap (\(Color c) -> c) bg
+                `hashWithSalt` tip `hashWithSalt` fromEnum brk
           )
           (gen `hashWithSalt` fromEnum align `hashWithSalt` selectable)
           styled
@@ -157,7 +164,7 @@ richTextWithMode' selectable f pieces = do
   para0 <- case cached of
     Just para | paraKey para == key -> liftIO (para <$ unless sameInputs (writeIORef (paraInputs para) inputs))
     _ -> liftIO $ do
-      let starts = scanl (+) 0 [T.length txt | (Inline txt _ _ _, _, _, _) <- styled]
+      let starts = scanl (+) 0 [T.length txt | (Inline txt _ _ _ _, _, _, _) <- styled]
       resolved <- mapM (measurePiece ctx) (zip3 [0 ..] starts styled)
       let runs = smallArrayFromList (map fst resolved)
           tokens = concatMap snd resolved
@@ -189,22 +196,22 @@ richTextWithMode' selectable f pieces = do
         -- the field loses focus.
         pure (if focused then Just current else Nothing, dragged)
       else pure (Nothing, False)
-  let linkPieces =
+  let allInteractivePieces =
         [ (runIdx, Rect (rx + x1) (ry + lineTop line) (x2 - x1) (lineHeight line))
-        | respHovered resp
-        , line <- paraLines para
+        | line <- paraLines para
         , (run, runIdx, x1, x2) <- pieceSpans runs line
-        , isJust (runTarget run)
+        , isJust (runTarget run) || isJust (runTooltip run)
         ]
+      hoveredPieces = if respHovered resp then allInteractivePieces else []
+      linkPieces = [(runIdx, r) | (runIdx, r) <- hoveredPieces, isJust (runTarget (indexSmallArray runs runIdx))]
       runAt p = listToMaybe [runIdx | (runIdx, r) <- linkPieces, rectContains r p]
       hoveredRun = runAt (inputMousePos inp)
       draw = drawParagraph runs theme hoveredRun selection linesAt
       drawKey = key `hashWithSalt` fromMaybe (-1) hoveredRun `hashWithSalt` fmap (\s -> (selectionStart s, selectionEnd s)) selection
   liftIO $ do
-    -- A move onto or off a link inside the hovered paragraph changes no hot
-    -- widget, so no frame would show it: each link piece is a hover zone,
-    -- and crossing one's edge runs a frame.
-    forM_ linkPieces (registerHoverZone ctx False . snd)
+    -- A move onto or off a link or tooltipped run inside the hovered paragraph
+    -- changes no hot widget, so each interactive piece registers a hover zone.
+    forM_ hoveredPieces (registerHoverZone ctx False . snd)
     unless (paraWidth para0 == rw && fmap paraKey cached == Just key) $
       cacheParagraph ctx cacheRef wid (isJust cached) para
     registerCustomMeasure ctx wid $ \_ (availW, _) ->
@@ -217,6 +224,18 @@ richTextWithMode' selectable f pieces = do
         0
         False
         (if selectable then KeysReadOnly else KeysNone)
+  let mouse = inputMousePos inp
+      tooltipRuns =
+        [ (runIdx, tip)
+        | runIdx <- [0 .. sizeofSmallArray runs - 1]
+        , Just tip <- [runTooltip (indexSmallArray runs runIdx)]
+        ]
+  forM_ tooltipRuns $ \(runIdx, tip) ->
+    withKey ("rt-tip" :: Text, runIdx) $ do
+      let runRects = [r | (ri, r) <- allInteractivePieces, ri == runIdx]
+          mTargetRect = listToMaybe [r | r <- runRects, rectContains r mouse] <|> listToMaybe runRects
+      forM_ mTargetRect $ \pieceR ->
+        tooltip (resp {rawRespRect = pieceR}) tip
   clicked <-
     if respClicked resp && not dragReleased
       then do
@@ -251,7 +270,10 @@ drawParagraph runs theme hoveredRun selection linesAt _cdc (Rect x0 y0 w _) =
     lineOps line =
       let spans = pieceSpans runs line
           highlights = maybe [] (\(lo, hi) -> selectionOps x0 y0 line lo hi (themeSelection theme)) selected
-       in [FillRect (Rect (x0 + x1) (y0 + lineTop line) (x2 - x1) (lineHeight line)) bg | (run, _, x1, x2) <- spans, Just bg <- [runBackground run]]
+       in [ FillRect (Rect (x0 + x1) (y0 + lineTop line) (x2 - x1) (lineHeight line)) bg
+          | (run, _, x1, x2) <- spans
+          , Just bg <- [runBackground run]
+          ]
             ++ highlights
             ++ [ DrawTextStyled (x0 + x) (lineY line run) ((runFont run) {textFontDecoration = DecorationNone}) txt (runColor run)
                | (x, runIdx, txt) <-
@@ -480,7 +502,14 @@ paragraphBound = 4096
 -- | Extract 'TextFont' from a 'Layout'. Colour-only variants resolve to the
 -- regular face in 'resolveTextFont'.
 pieceFont :: Layout -> TextFont
-pieceFont l = TextFont (layoutFontSize l) (layoutFontVariant l) (layoutFontWeight l) (layoutFontStyle l) (layoutTextDecoration l)
+pieceFont l =
+  TextFont
+    (layoutFontSize l)
+    (layoutFontVariant l)
+    (layoutFontWeight l)
+    (layoutFontStyle l)
+    (layoutTextDecoration l)
+    (layoutFontTabular l)
 
 -- | A piece's colour: its own, else the link colour for a link, else its
 -- colour for its tone and face, as for a label.
@@ -492,7 +521,7 @@ pieceColor theme l target =
 -- | A piece's line metrics and its tokens measured in its font. A piece that
 -- may break anywhere is measured a character cluster at a time.
 measurePiece :: Context -> (Int, Int, (Inline, TextFont, Color, TextBreak)) -> IO (Run, [Token])
-measurePiece ctx (i, start, (Inline txt _ target bg, font, color, brk)) = do
+measurePiece ctx (i, start, (Inline txt _ target bg tip, font, color, brk)) = do
   (fm, _) <- resolveTextFont ctx font
   let anywhere = brk == BreakAnywhere
       parts
@@ -504,7 +533,7 @@ measurePiece ctx (i, start, (Inline txt _ target bg, font, color, brk)) = do
   -- and a mark drawn over the letter before it.
   let carets = if anywhere then stCarets <$> fmShape wholeMetrics txt else Nothing
   tokens <- reverse . snd <$> foldM (measure fm anywhere wholeMetrics carets) (start, []) parts
-  pure (Run font color (fmLineHeight fm) (fmAscent fm) target bg, tokens)
+  pure (Run font color (fmLineHeight fm) (fmAscent fm) target bg tip, tokens)
   where
     kindOf anywhere c
       | c == '\n' = Break

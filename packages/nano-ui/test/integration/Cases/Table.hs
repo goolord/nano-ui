@@ -50,6 +50,7 @@ tests =
   , spec "table-col-resize" runTableColResizeTest
   , pixelSpec "table-hbar-reach" runTableHBarReachTest
   , spec "table-squeeze" runTableSqueezeTest
+  , spec "table-sort-keys-and-bare" runTableSortKeysBareTest
   ]
 
 -- | A table sorted ascending on its first column, given everything but the sort.
@@ -575,7 +576,7 @@ bodyNode ctx = findNodeM na $ \i -> do
   nt <- getNodeType na i
   d <- getDirection na i
   si <- getStyleIdx na i
-  pure (nt == NodeScrollContainer && d == DirColumn && si .&. 15 == 0 && si .&. 16 /= 0)
+  pure (nt == NodeScrollContainer && d == DirColumn && si .&. 63 == 0 && si .&. 64 /= 0)
   where
     na = ctxNodeArena ctx
 
@@ -677,3 +678,31 @@ runTableSqueezeTest ctx failed = do
     checkEq (4, [408]) (length after, topOf after)
     check (all ((> 39.5) . rectW) after)
     check (all (\r -> rectX r + rectW r <= 302) (take 1 (reverse after)))
+
+runTableSortKeysBareTest :: Context -> IORef Int -> IO ()
+runTableSortKeysBareTest ctx failed = do
+  let nanVal = 0 / 0 :: Double
+      numRows =
+        [ ("p100" :: Text, 100.2 :: Double, 42 :: Int)
+        , ("n2", -2.0, -3)
+        , ("nan", nanVal, 999)
+        , ("p9", 9.5, 7)
+        , ("n12", -12.5, -50)
+        , ("z0", 0.0, 0)
+        ]
+      cols =
+        headed "Id" (\(k, _, _) -> textCell k)
+          <> headed "Num" (\(_, d, _) -> cellSortNum d (textCell (T.pack (show d))))
+          <> headed "Int" (\(_, _, n) -> cellSortInt n (textCell (T.pack (show n))))
+  sortVar <- newVar (SortCol 1 SortAsc)
+  let bareCfg = defaultTableConfig {tableBare = True}
+      ui = column (tableConfigured bareCfg (fixedWH 360 240) "nums" cols numRows sortVar)
+  _ <- warmup2 ctx (withInputOff 400 280) ui
+  ss <- collectTextSpans ctx
+  let orderOf names = [t | (_, t, _, _, _) <- ss, t `elem` names]
+      rowIds = ["p100", "n2", "nan", "p9", "n12", "z0"]
+  assertEq failed ["n12", "n2", "z0", "p9", "p100", "nan"] (orderOf rowIds)
+  writeVarIO sortVar (SortCol 2 SortDesc)
+  _ <- warmup2 ctx (withInputOff 400 280) ui
+  ss2 <- collectTextSpans ctx
+  assertEq failed ["nan", "p100", "p9", "z0", "n2", "n12"] [t | (_, t, _, _, _) <- ss2, t `elem` rowIds]

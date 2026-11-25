@@ -70,6 +70,8 @@ module NanoUI.Widgets.Custom
   , drawImageWith
   , drawText
   , drawTextWith
+  , drawTextClipped
+  , drawTextClippedWith
   , drawCheckbox
   , checkboxBoxSize
     -- * Paths, clips and transforms

@@ -1,6 +1,7 @@
 -- | Scrollbar geometry: gutters, viewport clips, and track and thumb layout.
 module NanoUI.Internal.Layout.ScrollGeometry
-  ( ScrollConfig (..)
+  ( ScrollPolicy (..)
+  , ScrollConfig (..)
   , defaultScrollConfig
   , ScrollBarLayout (..)
   , ScrollNode (..)
@@ -46,6 +47,9 @@ data ScrollPolicy
   | ScrollAlways
   | ScrollNone
   | ScrollHidden
+  | -- | Paint a floating thumb without a background track or reserved cross-axis
+    -- gutter, so content uses the full viewport width and height.
+    ScrollOverlay
   deriving (Eq, Show, Enum, Bounded)
 
 -- | 2D scroll configuration (policy per axis).
@@ -144,7 +148,7 @@ scrollPolicyFor cfg = \case
 -- | Whether the bar along @dir@ is never painted or grabbed.
 scrollChromeSuppressed :: ScrollConfig -> DirTag -> Bool
 scrollChromeSuppressed cfg dir =
-  let p = scrollPolicyFor cfg dir in p /= ScrollAuto && p /= ScrollAlways
+  let p = scrollPolicyFor cfg dir in p /= ScrollAuto && p /= ScrollAlways && p /= ScrollOverlay
 
 -- | Wheel eligibility is wider than chrome eligibility: a hidden bar never
 -- paints or drags, but it still scrolls. Only a dead axis ('ScrollNone')

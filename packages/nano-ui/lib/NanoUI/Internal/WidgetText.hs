@@ -58,6 +58,8 @@ module NanoUI.Internal.WidgetText
   , textNodeFontWeight
   , textNodeFontStyle
   , textNodeTextDecoration
+  , textNodeFontTabular
+  , textNodeEllipsis
   , tableSortMarkOf
   , buttonVisualStyle
   , labelFontStyle
@@ -86,7 +88,7 @@ import NanoUI.Internal.Font (FontMetrics (..), fmLineHeight, tableCellInset, wid
 import NanoUI.Internal.Layout.Arena (labelFontShift)
 import NanoUI.Internal.StyleBits (BitField (..))
 import qualified NanoUI.Internal.StyleBits as SB
-import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), Style (..), TextDecoration (..), Theme (..), Tone (..), toneColor, variantFace, variantTone)
+import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), Style (..), TextDecoration (..), TextEllipsis (..), Theme (..), Tone (..), toneColor, variantFace, variantTone)
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorB, colorG, colorR, colorRGBA, lerpColor)
 import qualified Data.Text as T
 
@@ -281,7 +283,9 @@ packTextNodeStyle l stripe =
     .|. SB.packField SB.textWeight (fromEnum (layoutFontWeight l))
     .|. SB.packField SB.textSlant (fromEnum (layoutFontStyle l))
     .|. SB.packField SB.textDecoration (fromEnum (layoutTextDecoration l))
+    .|. (if layoutFontTabular l then SB.fieldMask SB.textTabular else 0)
     .|. SB.placeField SB.textTone (maybe 0 ((+ 1) . fromEnum) (layoutFontTone l <|> variantTone (layoutFontVariant l)))
+    .|. SB.packField SB.textEllipsis (fromEnum (layoutEllipsis l))
 
 -- | The enum packed in field @f@ of the style bits, or @fallback@ when the
 -- field holds no constructor.
@@ -305,8 +309,8 @@ textNodeFontKey :: Float -> Int -> Int
 textNodeFontKey size si =
   let w = castFloatToWord32 size
    in if finiteBitSize (0 :: Int) > 32
-        then fromIntegral w `shiftL` 16 .|. (si .&. SB.textFontKeyMask)
-        else fromIntegral (w `xor` (w `shiftR` 16)) `shiftL` 14 .|. (si .&. SB.textFontKeyMask)
+        then fromIntegral w `shiftL` 18 .|. (si .&. SB.textFontKeyMask)
+        else fromIntegral (w `xor` (w `shiftR` 16)) `shiftL` 17 .|. (si .&. SB.textFontKeyMask)
 
 -- | The font variant packed in a text node's style index.
 {-# INLINE textNodeFontVariant #-}
@@ -332,6 +336,16 @@ textNodeFontStyle = decodeStyleEnum SB.textSlant FontStyleNormal
 {-# INLINE textNodeTextDecoration #-}
 textNodeTextDecoration :: Int -> TextDecoration
 textNodeTextDecoration = decodeStyleEnum SB.textDecoration DecorationNone
+
+-- | Whether a text node's style requests uniform tabular digit advances.
+{-# INLINE textNodeFontTabular #-}
+textNodeFontTabular :: Int -> Bool
+textNodeFontTabular = SB.testField SB.textTabular
+
+-- | Decode where a truncated single-line text node places its ellipsis.
+{-# INLINE textNodeEllipsis #-}
+textNodeEllipsis :: Int -> TextEllipsis
+textNodeEllipsis = decodeStyleEnum SB.textEllipsis EllipsisEnd
 
 -- | Row fill for stripe code 1 (even rows) or 2 (odd rows); 0 is unstriped.
 {-# INLINE stripeColor #-}

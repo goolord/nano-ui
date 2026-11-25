@@ -3,6 +3,7 @@ module Cases.CustomWidget (tests) where
 
 import Spec
 import Data.Primitive.SmallArray qualified as SA
+import Data.Text qualified as T
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Testing.Sim
 
@@ -12,6 +13,7 @@ tests =
   , spec "custom-widget-pointer" runCustomWidgetPointerTest
   , spec "custom-widget-content" runCustomWidgetContentTest
   , spec "drop-target" runDropTargetTest
+  , spec "canvas-text-clipped" runCanvasTextClippedTest
   ]
 
 red, blue :: Color
@@ -182,3 +184,23 @@ runDropTargetTest ctx failed = do
   c <- newContext
   (_, (onWindow, _)) <- warmup2 c (withInput 400 400) (stacked (`window'` "Window"))
   assertEq failed ([], Just ["a.txt"]) =<< files c (`window'` "Window") (centerOf onWindow)
+
+runCanvasTextClippedTest :: Context -> IORef Int -> IO ()
+runCanvasTextClippedTest _ failed = do
+  let cdc = CustomDrawContext False False False False False defaultTheme (monospaceMetrics 10)
+      wideFm = monospaceMetrics 16
+      narrowFm = monospaceMetrics 8
+      monoFont = defaultTextFont {textFontVariant = FontMono}
+      ops =
+        foldr (:) [] . runCanvasFor cdc $ do
+          drawTextClipped (Rect 0 0 80 20) AlignStart AlignMiddle "VeryLongIdentifierName" red
+          drawTextClippedWith wideFm monoFont EllipsisMiddle (Rect 0 24 160 20) AlignStart AlignMiddle "Data.Map.Internal.insert" blue
+          drawTextClippedWith narrowFm monoFont EllipsisMiddle (Rect 0 48 160 20) AlignStart AlignMiddle "Data.Map.Internal.insert" blue
+      texts = [t | DrawTextAligned _ _ _ _ _ _ t _ <- ops]
+  case texts of
+    [endT, wideMid, narrowMid] -> do
+      assert failed ("..." `T.isSuffixOf` endT)
+      assert failed ("..." `T.isInfixOf` wideMid && "..." `T.isInfixOf` narrowMid)
+      -- Explicit FontMetrics controls truncation width: wider glyphs keep fewer characters.
+      assertLt failed (T.length wideMid) (T.length narrowMid)
+    _ -> assertEq failed 3 (length texts)

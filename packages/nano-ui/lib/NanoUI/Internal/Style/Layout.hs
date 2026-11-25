@@ -76,6 +76,7 @@ module NanoUI.Internal.Style.Layout
   , fontUnderline
   , addUnderline
   , fontStrike
+  , fontTabular
   , alignStart
   , alignCenter
   , alignTop
@@ -93,6 +94,11 @@ module NanoUI.Internal.Style.Layout
   , TextBreak (BreakWords, BreakAnywhere)
   , textBreak
   , breakAnywhere
+  , TextEllipsis (EllipsisEnd, EllipsisMiddle, EllipsisStart)
+  , textEllipsis
+  , ellipsisEnd
+  , ellipsisMiddle
+  , ellipsisStart
   ) where
 
 import Data.Bits ((.|.))
@@ -237,6 +243,8 @@ data Layout = Layout
   -- ^ Also in the 'layoutGap' word.
   , layoutTextBreak :: {-# UNPACK #-} !TextBreak
   -- ^ Where rich text may wrap ('textBreak'). Also in the 'layoutGap' word.
+  , layoutEllipsis :: {-# UNPACK #-} !TextEllipsis
+  -- ^ Where truncated single-line text places its ellipsis. Completes the 'layoutGap' word.
   , layoutAlignX :: !AlignX
   , layoutAlignY :: !AlignY
   , layoutMinW :: {-# UNPACK #-} !Float
@@ -255,6 +263,8 @@ data Layout = Layout
   , layoutFontWeight :: !FontWeight
   , layoutFontStyle :: !FontStyle
   , layoutTextDecoration :: !TextDecoration
+  , layoutFontTabular :: !Bool
+  -- ^ Uniform-width ASCII digits ('fontTabular').
   , layoutFlow :: !Flow
   , layoutPin :: !(Maybe V2)
   }
@@ -285,10 +295,12 @@ defaultLayout =
     , layoutFontWeight = WeightNormal
     , layoutFontStyle = FontStyleNormal
     , layoutTextDecoration = DecorationNone
+    , layoutFontTabular = False
     , layoutFlow = Line
     , layoutLineGap = -1
     , layoutLineAlign = LinesStart
     , layoutTextBreak = BreakWords
+    , layoutEllipsis = EllipsisEnd
     , layoutAspect = 0
     , layoutPin = Nothing
     , layoutPointer = PointerAuto
@@ -707,3 +719,55 @@ textBreak b l = l {layoutTextBreak = b}
 -- | Wrap rich text between any two characters, as for code.
 breakAnywhere :: Layout -> Layout
 breakAnywhere = textBreak BreakAnywhere
+
+-- | Render ASCII digits (@0@ to @9@) with uniform tabular advance widths so live
+-- counters and aligned numeric columns never jitter horizontally, even in a
+-- proportional UI font.
+{-# INLINE fontTabular #-}
+fontTabular :: Layout -> Layout
+fontTabular l = l {layoutFontTabular = True}
+
+-- | Where single-line text places its ellipsis (@...@) when truncated to fit.
+newtype TextEllipsis = TextEllipsis Word8
+  deriving newtype (Eq, Ord)
+  deriving (Bounded, Enum) via BoundedByte 2
+
+-- | Truncate at the trailing end (@"ghc-internal:GHC..."@). The default.
+pattern EllipsisEnd :: TextEllipsis
+pattern EllipsisEnd = TextEllipsis 0
+
+-- | Truncate in the middle (@"ghc-internal:...Natural.add"@), preserving both
+-- package/path prefix and identifier/file suffix.
+pattern EllipsisMiddle :: TextEllipsis
+pattern EllipsisMiddle = TextEllipsis 1
+
+-- | Truncate at the leading start (@"...Bignum.Natural.add"@).
+pattern EllipsisStart :: TextEllipsis
+pattern EllipsisStart = TextEllipsis 2
+
+{-# COMPLETE EllipsisEnd, EllipsisMiddle, EllipsisStart #-}
+
+instance Show TextEllipsis where
+  show EllipsisEnd = "EllipsisEnd"
+  show EllipsisMiddle = "EllipsisMiddle"
+  show EllipsisStart = "EllipsisStart"
+
+-- | Set where truncated single-line text places its ellipsis.
+{-# INLINE textEllipsis #-}
+textEllipsis :: TextEllipsis -> Layout -> Layout
+textEllipsis e l = l {layoutEllipsis = e}
+
+-- | Truncate single-line text at the trailing end.
+{-# INLINE ellipsisEnd #-}
+ellipsisEnd :: Layout -> Layout
+ellipsisEnd = textEllipsis EllipsisEnd
+
+-- | Truncate single-line text in the middle, keeping prefix and suffix visible.
+{-# INLINE ellipsisMiddle #-}
+ellipsisMiddle :: Layout -> Layout
+ellipsisMiddle = textEllipsis EllipsisMiddle
+
+-- | Truncate single-line text at the leading start, keeping the suffix visible.
+{-# INLINE ellipsisStart #-}
+ellipsisStart :: Layout -> Layout
+ellipsisStart = textEllipsis EllipsisStart

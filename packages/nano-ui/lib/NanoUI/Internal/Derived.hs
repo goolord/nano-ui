@@ -10,6 +10,7 @@ module NanoUI.Internal.Derived
   , insertDerived
   , TableDerived (..)
   , Opaque (..)
+  , SortKey (..)
   , SortCol (..)
   , SortDir (..)
   , TreeItem (..)
@@ -20,6 +21,7 @@ module NanoUI.Internal.Derived
 where
 
 import Control.Applicative ((<|>))
+import Data.Int (Int64)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet (IntSet)
@@ -36,6 +38,30 @@ data SortDir = SortAsc | SortDesc
 data SortCol = SortCol {sortColIndex :: !Int, sortColDir :: !SortDir}
   deriving (Eq, Show)
 
+-- | Typed sort key for a table cell, supporting exact numeric ordering alongside
+-- lexicographic text ordering.
+data SortKey
+  = SortText !Text
+  | SortNum !Double
+  | SortInt !Int64
+  deriving (Eq, Show)
+
+instance Ord SortKey where
+  compare a b = case (a, b) of
+    (SortInt x, SortInt y) -> compare x y
+    (SortNum x, SortNum y) -> cmpDouble x y
+    (SortInt x, SortNum y) -> cmpDouble (fromIntegral x) y
+    (SortNum x, SortInt y) -> cmpDouble x (fromIntegral y)
+    (SortText x, SortText y) -> compare x y
+    (SortText _, _) -> GT
+    (_, SortText _) -> LT
+    where
+      cmpDouble x y
+        | isNaN x && isNaN y = EQ
+        | isNaN x = GT
+        | isNaN y = LT
+        | otherwise = compare x y
+
 -- | Retained only for conservative pointer comparison, never cast or decoded.
 data Opaque = forall a. Opaque a
 
@@ -48,7 +74,7 @@ data TableDerived = TableDerived
   , tdRowObjs :: !(SmallArray Opaque)
   , tdHeaders :: !(Vector Text)
   , tdEncoded :: !(SmallArray (Vector Text))
-  , tdKeys :: !(SmallArray (Vector Text))
+  , tdKeys :: !(SmallArray (Vector SortKey))
   , tdSortable :: !(SmallArray Bool)
   , tdViews :: !(SmallArray Bool)
   -- ^ Each column that has a cell with a widget view.

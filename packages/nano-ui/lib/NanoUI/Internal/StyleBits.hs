@@ -16,7 +16,9 @@
 -- 8-11    textWeight        labelFont (moved up 32 bits)
 -- 12-13   textSlant
 -- 14-15   textDecoration
+-- 16      textTabular
 -- 18-20   textTone          tone plus one, 0 for none
+-- 21-22   textEllipsis      0 end, 1 middle, 2 start
 -- 26      inputSearch       NodeTextInput flags
 -- 28      inputSelectable
 -- 29      inputPassword
@@ -40,10 +42,10 @@
 -- 10-11   chromeStyle
 -- 12-13   chromeOrient
 -- 4-7     stripe            NodePanel: a table cell's row stripe
--- 0-1     scrollPolicyX     NodeScrollContainer
--- 2-3     scrollPolicyY
--- 4       scrollMarker      always set
--- 5       scrollBare
+-- 0-2     scrollPolicyX     NodeScrollContainer
+-- 3-5     scrollPolicyY
+-- 6       scrollMarker      always set
+-- 7       scrollBare
 -- 0-1     pickerPart        NodeColorPicker
 -- @
 --
@@ -63,7 +65,9 @@ module NanoUI.Internal.StyleBits
   , textWeight
   , textSlant
   , textDecoration
+  , textTabular
   , textTone
+  , textEllipsis
   , textFontFields
   , textFontKeyMask
   -- * Text field flags
@@ -182,10 +186,19 @@ textSlant = BitField 12 2
 textDecoration :: BitField
 textDecoration = BitField 14 2
 
+{-# INLINE textTabular #-}
+textTabular :: BitField
+textTabular = BitField 16 1
+
 -- | The 'NanoUI.Internal.Style.Tone' plus one, or 0 for none.
 {-# INLINE textTone #-}
 textTone :: BitField
 textTone = BitField 18 3
+
+-- | Where truncated single-line text places its ellipsis (0 end, 1 middle, 2 start).
+{-# INLINE textEllipsis #-}
+textEllipsis :: BitField
+textEllipsis = BitField 21 2
 
 -- | Every field of a text font packing, which 'labelFont' must hold.
 textFontFields :: [(String, BitField)]
@@ -195,14 +208,16 @@ textFontFields =
   , ("textWeight", textWeight)
   , ("textSlant", textSlant)
   , ("textDecoration", textDecoration)
+  , ("textTabular", textTabular)
   , ("textTone", textTone)
+  , ("textEllipsis", textEllipsis)
   ]
 
--- | The fields that pick the font a text node is measured in: face, weight
--- and slant.
+-- | The fields that pick the font a text node is measured in: face, weight,
+-- slant and tabular figures.
 {-# INLINE textFontKeyMask #-}
 textFontKeyMask :: Int
-textFontKeyMask = fieldMask textFace .|. fieldMask textWeight .|. fieldMask textSlant
+textFontKeyMask = fieldMask textFace .|. fieldMask textWeight .|. fieldMask textSlant .|. fieldMask textTabular
 
 -- Text field flags ---------------------------------------------------------
 
@@ -352,20 +367,20 @@ chromeOrient = BitField 12 2
 
 {-# INLINE scrollPolicyX #-}
 scrollPolicyX :: BitField
-scrollPolicyX = BitField 0 2
+scrollPolicyX = BitField 0 3
 
 {-# INLINE scrollPolicyY #-}
 scrollPolicyY :: BitField
-scrollPolicyY = BitField 2 2
+scrollPolicyY = BitField 3 3
 
 -- | Always set, so that no scroll node's style index is 0.
 {-# INLINE scrollMarker #-}
 scrollMarker :: BitField
-scrollMarker = BitField 4 1
+scrollMarker = BitField 6 1
 
 {-# INLINE scrollBare #-}
 scrollBare :: BitField
-scrollBare = BitField 5 1
+scrollBare = BitField 7 1
 
 -- Colour picker ------------------------------------------------------------
 

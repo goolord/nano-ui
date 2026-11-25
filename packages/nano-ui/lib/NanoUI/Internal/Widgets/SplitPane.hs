@@ -4,6 +4,7 @@
 -- unique 'Word64' ids, so pane state stays keyed to a pane as it moves.
 module NanoUI.Internal.Widgets.SplitPane
   ( GridAxis (..)
+  , CenterDropMode (..)
   , GridNode (..)
   , PaneDrop (..)
   , treePanes
@@ -22,6 +23,8 @@ module NanoUI.Internal.Widgets.SplitPane
   , dividerLength
   , clampRatio
   , treeSplit
+  , treeAddTab
+  , treeSelectTab
   , treeSetRatio
   , pinnedSide
   , reflowFixed
@@ -29,24 +32,29 @@ module NanoUI.Internal.Widgets.SplitPane
   , DropPreview (..)
   , dropPreviewTreeSized
   , dropTargetForPane
+  , dropTargetForPaneWith
   , nearestPane
   , bestPane
   , topLevelDropTarget
   ) where
 
 import Control.Applicative ((<|>))
-import Data.List (find, sortOn)
+import Data.List (elemIndex, find, sortOn)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Word (Word64)
-import NanoUI.Internal.GridNode (GridAxis (..), GridNode (..))
+import NanoUI.Internal.GridNode (CenterDropMode (..), GridAxis (..), GridNode (..))
 import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, clamp01, rectContains, rectH, rectNonEmpty, rectW, rectX, rectY)
 
 -- | Result of dropping a dragged pane on a target pane.
 data PaneDrop
   = DropSwap Word64
       -- ^ Drop on the center of the pane: the two panes swap places.
+  | DropTab Word64 (Maybe Int)
+      -- ^ Drop on a pane center (when 'CenterTab' is enabled) or tab bar:
+      -- merge the dragged pane into the target's 'PaneTabs' stack at an optional
+      -- index (or at the end when 'Nothing').
   | DropSplit Word64 GridAxis Bool
       -- ^ Drop near an edge: the target pane splits along the axis and the
       -- dragged pane moves into the new child. 'True' puts the dragged pane on
@@ -56,30 +64,49 @@ data PaneDrop
       -- top-level split. 'True' puts the dragged pane on the A side.
   deriving (Eq, Show)
 
--- | Fold a tree bottom-up: @onPane@ for each pane id, @onSplit@ for each
--- split (id, axis, ratio) with its already-folded A and B sides. The sides
--- are passed lazily, so a short-circuiting @onSplit@ stops early.
-foldGrid :: (Word64 -> r) -> (Word64 -> GridAxis -> Float -> r -> r -> r) -> GridNode -> r
-foldGrid onPane onSplit = go
+forceWords :: [Word64] -> [Word64]
+forceWords [] = []
+forceWords (!x : xs) = let !rest = forceWords xs in x : rest
+
+normalizeTabs :: Word64 -> [Word64] -> Word64 -> Maybe GridNode
+normalizeTabs gid pids0 active =
+  case forceWords pids0 of
+    [] -> Nothing
+    [only] -> Just (Pane only)
+    pids@(first : _) ->
+      let !act = if elem active pids then active else first
+       in Just (PaneTabs gid pids act)
+
+-- | Fold a tree bottom-up: @onPane@ for each pane leaf, @onTabs@ for each
+-- tabbed stack, and @onSplit@ for each split (id, axis, ratio) with its
+-- already-folded A and B sides.
+foldGrid ::
+  (Word64 -> r) ->
+  (Word64 -> [Word64] -> Word64 -> r) ->
+  (Word64 -> GridAxis -> Float -> r -> r -> r) ->
+  GridNode ->
+  r
+foldGrid onPane onTabs onSplit = go
   where
     go (Pane pid) = onPane pid
+    go (PaneTabs gid pids active) = onTabs gid pids active
     go (Split sid axis ratio a b) = onSplit sid axis ratio (go a) (go b)
 
--- | Pane ids in the tree (depth-first, A then B).
+-- | Pane ids in the tree (depth-first, A then B, and tab-order within 'PaneTabs').
 treePanes :: GridNode -> [Word64]
-treePanes = foldGrid pure (\_ _ _ a b -> a <> b)
+treePanes = foldGrid pure (\_ pids _ -> pids) (\_ _ _ a b -> a <> b)
 
 -- | Number of panes.
 treeSize :: GridNode -> Int
-treeSize = foldGrid (const 1) (\_ _ _ a b -> a + b)
+treeSize = foldGrid (const 1) (\_ pids _ -> length pids) (\_ _ _ a b -> a + b)
 
--- | The largest pane or split id in the tree.
+-- | The largest pane, tab-group, or split id in the tree.
 treeMaxId :: GridNode -> Word64
-treeMaxId = foldGrid id (\sid _ _ a b -> maximum [sid, a, b])
+treeMaxId = foldGrid id (\gid pids _ -> foldl' max gid pids) (\sid _ _ a b -> maximum [sid, a, b])
 
 -- | Does a pane with the given id exist?
 paneExist :: GridNode -> Word64 -> Bool
-paneExist t p = foldGrid (== p) (\_ _ _ a b -> a || b) t
+paneExist t p = foldGrid (== p) (\_ pids _ -> elem p pids) (\_ _ _ a b -> a || b) t
 
 -- | Minimum (width, height) that must be reserved for a subtree under a
 -- @minSize@ per-pane floor and @spacing@ between every split level.
@@ -111,6 +138,7 @@ buildMinTree :: Float -> Float -> GridNode -> MinTree
 buildMinTree minSize spacing = go
   where
     go (Pane _) = MinLeaf minSize minSize
+    go (PaneTabs _ _ _) = MinLeaf minSize minSize
     go (Split _ axis _ a b) =
       let ma = go a
           mb = go b
@@ -197,6 +225,7 @@ layoutNode minSize spacing root = go root (buildMinTree minSize spacing root)
   where
     go sp mt r = case sp of
       Pane pid -> (M.singleton pid r, [])
+      PaneTabs _ _ active -> (M.singleton active r, [])
       Split sid axis ratio0 a b ->
         let (ma, mb) = splitMinChildren minSize spacing a b mt
             mins = splitMinsTree axis ma mb
@@ -211,27 +240,60 @@ layoutNode minSize spacing root = go root (buildMinTree minSize spacing root)
 -- split; 'False' puts it on the B (right/bottom) side. Returns the updated
 -- tree (unchanged if the pane does not exist).
 treeSplit :: Word64 -> Word64 -> GridAxis -> Bool -> Word64 -> GridNode -> GridNode
-treeSplit targetPaneId splitId axis newOnA newPaneId = foldGrid onPane Split
+treeSplit targetPaneId splitId axis newOnA newPaneId = foldGrid onPane onTabs Split
   where
     onPane p
       | p /= targetPaneId = Pane p
       | otherwise = splitBeside splitId axis newOnA newPaneId (Pane p)
+    onTabs gid pids active
+      | notElem targetPaneId pids = PaneTabs gid pids active
+      | otherwise = splitBeside splitId axis newOnA newPaneId (PaneTabs gid pids active)
 
 splitBeside :: Word64 -> GridAxis -> Bool -> Word64 -> GridNode -> GridNode
 splitBeside splitId axis newOnA newPane node
   | newOnA = Split splitId axis 0.5 (Pane newPane) node
   | otherwise = Split splitId axis 0.5 node (Pane newPane)
 
+-- | Merge @newPaneId@ into the 'Pane' or 'PaneTabs' stack containing @targetPaneId@,
+-- using @groupId@ when promoting a single 'Pane' into 'PaneTabs', and activating
+-- @newPaneId@.
+treeAddTab :: Word64 -> Word64 -> Maybe Int -> Word64 -> GridNode -> GridNode
+treeAddTab targetPaneId groupId mIdx newPaneId = foldGrid onPane onTabs Split
+  where
+    insertAt xs x = case mIdx of
+      Nothing -> forceWords (xs ++ [x])
+      Just i ->
+        let k = clamp 0 (length xs) i
+            (pre, post) = splitAt k xs
+         in forceWords (pre ++ [x] ++ post)
+    onPane p
+      | p /= targetPaneId = Pane p
+      | otherwise = PaneTabs groupId (insertAt [p] newPaneId) newPaneId
+    onTabs gid pids active
+      | notElem targetPaneId pids = PaneTabs gid pids active
+      | otherwise =
+          let clean = filter (/= newPaneId) pids
+           in PaneTabs gid (insertAt clean newPaneId) newPaneId
+
+-- | Set the active pane in whichever 'PaneTabs' stack contains @paneId@.
+treeSelectTab :: Word64 -> GridNode -> GridNode
+treeSelectTab paneId =
+  foldGrid
+    Pane
+    (\gid pids active -> PaneTabs gid pids (if elem paneId pids then paneId else active))
+    Split
+
 -- | Set the raw ratio of a split (clamped to @[0,1]@).
 treeSetRatio :: Word64 -> Float -> GridNode -> GridNode
 treeSetRatio splitId r =
-  foldGrid Pane (\sid ax r0 -> Split sid ax (if sid == splitId then clamp01 r else r0))
+  foldGrid Pane PaneTabs (\sid ax r0 -> Split sid ax (if sid == splitId then clamp01 r else r0))
 
 -- | Whether this side of a split is itself a pinned pane. A pin only fixes
 -- a pane's extent along its direct parent split's axis.
 pinnedSide :: (Word64 -> Bool) -> GridNode -> Bool
 pinnedSide isFixed = \case
   Pane p -> isFixed p
+  PaneTabs _ pids active -> isFixed active || any isFixed pids
   Split{} -> False
 
 -- | The A-side ratio that gives this region's split an A extent of @d@. The
@@ -254,6 +316,7 @@ reflowFixed :: (Word64 -> Bool) -> Float -> Float -> Rect -> Rect -> GridNode ->
 reflowFixed isFixed minSize spacing oldR0 newR0 root = go oldR0 newR0 root (buildMinTree minSize spacing root)
   where
     go _ _ n@(Pane _) _ = n
+    go _ _ n@(PaneTabs _ _ _) _ = n
     go oldR newR (Split sid axis ratio a b) mt =
       Split sid axis ratio' (go oldA newA a ma) (go oldB newB b mb)
       where
@@ -282,17 +345,37 @@ reflowFixed isFixed minSize spacing oldR0 newR0 root = go oldR0 newR0 root (buil
 -- unchanged if the pane does not exist, and @Nothing@ when removing it would
 -- empty the tree.
 treeRemovePane :: Word64 -> GridNode -> Maybe GridNode
-treeRemovePane pid = foldGrid onPane onSplit
+treeRemovePane pid = foldGrid onPane onTabs onSplit
   where
     onPane p = if p == pid then Nothing else Just (Pane p)
+    onTabs gid pids active
+      | notElem pid pids = Just (PaneTabs gid pids active)
+      | otherwise =
+          let rest = filter (/= pid) pids
+              nextAct
+                | active /= pid = active
+                | Just idx <- elemIndex pid pids
+                , not (null rest) =
+                    rest !! min (length rest - 1) idx
+                | otherwise = fromMaybe active (listToMaybe rest)
+           in normalizeTabs gid rest nextAct
     onSplit sid ax r0 ma mb = liftA2 (Split sid ax r0) ma mb <|> ma <|> mb
 
 -- | Swap two panes by id (content follows the pane id).
 treeSwapPanes :: Word64 -> Word64 -> GridNode -> GridNode
-treeSwapPanes a b = foldGrid (\p -> Pane (if p == a then b else if p == b then a else p)) Split
+treeSwapPanes a b =
+  let swap p = if p == a then b else if p == b then a else p
+   in foldGrid (Pane . swap) (\gid pids act -> PaneTabs gid (forceWords (map swap pids)) (swap act)) Split
 
--- | Move a pane onto a drop target. Center drops swap the two panes; edge
--- drops split the target pane with the given fresh split id and move the
+findTabGroup :: Word64 -> GridNode -> Maybe Word64
+findTabGroup p =
+  foldGrid
+    (const Nothing)
+    (\gid pids _ -> if elem p pids then Just gid else Nothing)
+    (\_ _ _ l r -> l <|> r)
+
+-- | Move a pane onto a drop target. Center drops swap or tab-merge the panes;
+-- edge drops split the target pane with the given fresh split id and move the
 -- dragged pane into the new child; top-level drops wrap the whole tree in a
 -- new root split with the dragged pane on one side.
 treeMovePane :: Word64 -> Word64 -> PaneDrop -> GridNode -> Maybe GridNode
@@ -301,6 +384,9 @@ treeMovePane moved splitId dt tree
   | otherwise =
       case dt of
         DropSwap tgt -> onTarget tgt (Just (treeSwapPanes moved tgt tree))
+        DropTab tgt mIdx ->
+          let gid = fromMaybe splitId (findTabGroup tgt tree)
+           in onTarget tgt (treeAddTab tgt gid mIdx moved <$> treeRemovePane moved tree)
         DropSplit tgt axis onA -> onTarget tgt (treeSplit tgt splitId axis onA moved <$> treeRemovePane moved tree)
         -- Removing the only pane leaves nothing to wrap.
         DropTop axis onA -> splitBeside splitId axis onA moved <$> treeRemovePane moved tree
@@ -309,17 +395,24 @@ treeMovePane moved splitId dt tree
     onTarget tgt r = if tgt /= moved && paneExist tree tgt then r else Nothing
 
 -- | Classify a drop point on a target pane into the 'PaneDrop' the drop
--- performs: the pane's center swaps the two panes, an edge zone splits the
--- target along that edge's axis with the dragged pane on the near side.
+-- performs under 'CenterSwap'.
 dropTargetForPane :: Rect -> V2 -> Word64 -> PaneDrop
-dropTargetForPane r (V2 mx my) tgt
-  | not (rectNonEmpty r) = DropSwap tgt
+dropTargetForPane = dropTargetForPaneWith CenterSwap
+
+-- | Like 'dropTargetForPane', choosing whether a center drop swaps panes
+-- ('CenterSwap') or merges them into a 'PaneTabs' stack ('CenterTab').
+dropTargetForPaneWith :: CenterDropMode -> Rect -> V2 -> Word64 -> PaneDrop
+dropTargetForPaneWith centerMode r (V2 mx my) tgt
+  | not (rectNonEmpty r) = centerDrop
   | tx < 0.25 = DropSplit tgt AxisV True
   | tx > 0.75 = DropSplit tgt AxisV False
   | ty < 0.25 = DropSplit tgt AxisH True
   | ty > 0.75 = DropSplit tgt AxisH False
-  | otherwise = DropSwap tgt
+  | otherwise = centerDrop
   where
+    centerDrop = case centerMode of
+      CenterSwap -> DropSwap tgt
+      CenterTab -> DropTab tgt Nothing
     tx = (mx - rectX r) / rectW r
     ty = (my - rectY r) / rectH r
 
@@ -388,9 +481,13 @@ dropPreviewTreeSized source minSize spacing tree moved splitId baseRect dt = do
         (Just r, DropTop axis onA) -> retain r axis onA t'
         _ -> t'
       sourceAxis (Pane _) = Nothing
+      sourceAxis (PaneTabs _ _ _) = Nothing
       sourceAxis (Split _ axis _ a b)
-        | a == Pane moved || b == Pane moved = Just axis
+        | leafContains moved a || leafContains moved b = Just axis
         | otherwise = sourceAxis a <|> sourceAxis b
+      leafContains p (Pane q) = p == q
+      leafContains p (PaneTabs _ ps _) = elem p ps
+      leafContains _ Split{} = False
       retain r axis onA t =
         case find ((== splitId) . diSplitId) (snd (layoutNode minSize spacing t baseRect)) of
           Just d
