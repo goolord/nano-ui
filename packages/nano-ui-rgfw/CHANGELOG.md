@@ -2,63 +2,9 @@
 
 ## 0.2.0.0 -- Unreleased
 
-### Added
+Initial release.
 
-- First release: `NanoUI.Backend.Rgfw` runs nano-ui views in a native window
-  through RGFW and OpenGL 3.2, with the bundled Cozette bitmap font, whose
-  MIT notice ships in `LICENSE-Cozette`. Builds with GHC 9.10 through 9.14
-  (`base >=4.20 && <4.23`). The runners throw an
-  `IOError` when the window or its OpenGL 3.2 context cannot be created.
-- Text of every size and face is laid out in the Cozette cell it is drawn
-  in: `fontSize` and `fontMono` change nothing under this backend. Text in
-  a `drawing` or canvas (`richText`, Markdown, chart labels, canvas
-  `drawText`, the pane grid's drag title) is drawn in that cell like widget
-  text, above the shapes of its layer; its font size, scale, weight, slant
-  and decoration are not rendered.
-- Reducer runners take `model -> NanoUIE msg ()` from the `nano-ui-emit`
-  package, so message types are checked statically.
-- `askRgfwDebug` reads the session's `RgfwDebugSnapshot` from a view
-  (`Nothing` outside an RGFW session, as SDL's `askSdlDebug`), and
-  `debugWindowBody` shows it. `CoreDebugSnapshot` and `RgfwFrameStats`, the
-  types of its `dbgCore` and `dbgFrame`, are exported with it. A custom loop
-  makes a sampler with `newRgfwDebugSampler` and installs it with
-  `withBackendSession` and `rgfwSession`, from `NanoUI.Rgfw.Internal.Debug`.
-- `optExplainLayout` opens a window with the layout overlay on, and
-  `debugWindowBody` has a checkbox for it.
-- The middle mouse button, the side buttons as back and forward, and the
-  misc buttons past them as `MouseOther 6` to `MouseOther 8`.
-- The pointer leaving the window moves it off every widget, so nothing stays
-  hovered, unless a button is held: a drag keeps its pointer. The pointer
-  starts off the window until RGFW reports where it is.
-- Cursor shapes show RGFW's standard cursors or the nearest it has, the grab
-  hands show the move arrows, and `UiCursorHidden` hides the pointer.
-- `optTheme`, `newRgfwContext` and `applyRgfwTheme` take a core `Theme`,
-  drawn with square corners and 1px borders. `optThemeFor` picks the theme
-  for the desktop's light or dark setting, as SDL's `sdlAppThemeFor`. RGFW
-  cannot read the setting, so it is given `Nothing`, for which `lightDark`
-  picks the dark theme.
-- The core's window: the window opens from `optWindow`, a core
-  `WindowSettings` (`defaultWindowSettings {wsTitle = t, wsSize = s}`), with
-  a position, size limits, an icon, a mode and whether a close request ends
-  the session. Its size is in layout units, converted at the scale the
-  window opens at, so a window opens at the same size on every monitor. The
-  core's window setters and commands, `askWindow`, `quitUi` and
-  `requestScreenshot` work from a view, but for opacity and transparency:
-  RGFW windows are opaque and do not fade. Focus, maximized, minimized and
-  fullscreen are read from what RGFW keeps from its events, with no round
-  trip to the X server.
-- Super (Command) is `modSuper`, and Ctrl+letter is a key chord rather than
-  typed text. Every key RGFW reports comes in as a `Key`, with its release
-  and held state, and each auto-repeat of a held key as a press, which
-  `inputKeysNew` leaves out. Losing the keyboard (RGFW's focus-out event)
-  lets go of the keys held. Typed text keeps format and private-use
-  characters, the Apple logo included, but for the range AppKit sends for its
-  arrow and function keys (U+F700 to U+F747).
-- A frame repaints only its damage. Frames draw into a retained offscreen
-  framebuffer, which each present copies to the window, and a frame that is
-  not forced, resized or rescaled paints and uploads only the widgets and
-  glyphs inside its damage pieces. A frame with no damage skips the OpenGL
-  render and the buffer swap.
-- Images are drawn from a texture of the core's image atlas.
-- Another thread can wake the loop, so a background job's result shows
-  without waiting for input.
+- `NanoUI.Backend.Rgfw` runs `nano-ui` views in a native OpenGL 3.2 window using bundled RGFW (`nano-ui-rgfw-bindings`) and the bundled Cozette bitmap font (`LICENSE-Cozette`), requiring no external SDL or FreeType C libraries.
+- Supports `nano-ui-shader` GLSL 150 surface shaders and offscreen subtree effects, retained damage-clipped framebuffer rendering, image atlas textures, multi-thread wakeups, clipboard, cursor shapes, full keyboard/mouse input, and `WindowSettings` window commands (`askWindow`, `quit`, `requestScreenshot`, excluding transparency/opacity).
+- Supports Elm-style reducer apps (`NanoUIE msg ()` from `nano-ui-emit`), `optTheme` / `optThemeFor`, `optExplainLayout`, and `askRgfwDebug` / `debugWindowBody`.
+- Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).

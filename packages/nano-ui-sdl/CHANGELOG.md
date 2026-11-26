@@ -2,378 +2,90 @@
 
 ## 0.2.0.0 -- Unreleased
 
-- On the OpenGL ES 2 renderer, a window's next frame after a further
-  window (`nativeWindow`) closed failed with "SDL_SetRenderTarget/Scale
-  failed: glFramebufferTexture2D() failed". SDL's renderer sets a render
-  target without making its GL context current, and closing a window
-  leaves none current. The session now queues a clear of the window first
-  in that case, which makes SDL activate the context.
-- A further window (`nativeWindow`) repaints while its border is dragged
-  on Windows, as the first window does: the session's resize watch draws
-  it at each new size while the modal size loop holds the event loop.
+See the [0.1 to 0.2 migration guide](https://goolord.github.io/nano-ui/book/getting-started/migrating-0.2.html)
+for upgrade examples.
 
-- When a driver turns vsync off although the session asked for it, presents
-  return at once. After ten such presents in a row the session paces
-  animation by time instead of drawing as fast as it can. A continuous
-  session (`sdlAppContinuous`) is paced the same way, at the display's
-  refresh period; with `sdlAppVsync` off it still draws without waiting.
+### Breaking changes
 
-- The refresh rate that paces animation follows the window to another
-  display, or a display mode change (`EvDisplayChanged`,
-  `sdlRefreshPeriodRef`).
-
-- Font search ranks a family's own files above a longer family that starts
-  with its name: "Roboto" no longer finds `RobotoMono[wght].ttf` before
-  `Roboto[wdth,wght].ttf`. The font directory walk follows a symbolic link
-  to a directory once, and starts on a background thread when a session
-  opens.
-
-- SDL and SDL_ttf failures carry `SDL_GetError()`'s text. An image atlas
-  texture SDL will not make is reported once, not tried again every frame.
-
-- Clips are whole device pixels at any UI scale, so a partial frame at a
-  fractional scale no longer paints a pixel past its damage.
-
-- The mono font is hinted fully, so its advances are whole pixels: a shaped
-  run's glyphs sit evenly on a grid of cells, with their stems on pixels,
-  instead of 8, 8, 8, 9 pixels apart (Consolas at 15 px under light hinting).
-  Other fonts keep light hinting.
-
-- A font's line gap is split above and below its glyphs, as CSS splits
-  leading, instead of all falling under them. Text in a font with a gap,
-  such as Consolas, is centred in its line; fonts without one, such as the
-  bundled Inter, do not move.
-
-- Upright text at semibold or heavier is set in the family's bold face when
-  the font's file has one beside it (`consolab.ttf` by `consola.ttf`,
-  `Foo-Bold.ttf` by `Foo-Regular.ttf`), checked to be the same family at a
-  bold weight, and is drawn synthetically only when there is none.
-
-- `setSdlUiFont` asks for the frame that applies the new family, as
-  `setSdlUiScale` does. A family picked from a view no longer waits for the
-  next input to show.
-
-- Installed fonts are found by listing each font folder once and asking only
-  about entries not named like font files; an unreadable subfolder is
-  skipped instead of hiding its whole root. The `dir-traverse` dependency is
-  gone.
-
-- **Breaking:** the application facade exports `SdlEnv` opaquely. Native
-  integrations that access its record fields must explicitly import
-  `NanoUI.Sdl.Internal.Window`; ordinary views use the session operations.
-
-- **Breaking:** `FileDialogId` is opaque and session-owned. `pollFileDialogUi`
-  consumes results once, restoring window focus just like `pollFileDialog`.
-  Use `peekFileDialogUi` for observation.
-  Dialog launch helpers return `FileDialogId`, not an always-`Just` value;
-  failures are reported through `FileDialogFailed` when polled.
-
-- Direct-backbuffer screenshots invoke callbacks after presentation, matching
-  retained frames. Session teardown closes pending screenshot requests.
-
-- **Breaking:** `runSdlAppReduce` takes `model -> NanoUIE msg ()` from the new
-  `nano-ui-emit` package, without `Typeable` or runtime message filtering.
-
-- **Breaking:** views never handle `SdlEnv`. The open session's view-side
-  operations find it themselves: `askOpenFileDialog`, `askSaveFileDialog`,
-  `askOpenFolderDialog`, `pollFileDialogUi`, `setSdlUiFont`, `setSdlUiScale`,
-  `windowCaption`, `windowCaptionWith` and `setWindowChromeUi` lost their
-  environment argument, and `askSdlDebug` answers `Maybe SdlDebugSnapshot`.
-  Outside a session they do nothing (a dialog reports `FileDialogFailed`).
-  Removed `runSdlAppWith` and `runSdlAppReduceWith`: allocate state once in
-  IO, pass it to the view, and run it with `runSdlApp` or `runSdlAppReduce`.
-  `askSdlEnv` opts into the explicit session for the IO-level operations.
-  The session lives on the context it drives (`BackendSession 'Sdl`), not in
-  a process-wide variable, so another context never reaches it.
+- **Concrete `NanoUI` monad and session-owned `SdlEnv`:** Views use `NanoUI`
+  instead of `Ui :> es => Eff es` (dropping the `effectful-core` dependency)
+  and never thread an `SdlEnv` handle. `askOpenFileDialog`,
+  `askSaveFileDialog`, `askOpenFolderDialog`, `pollFileDialogUi`,
+  `setSdlUiFont`, `setSdlUiScale`, `windowCaption`, `windowCaptionWith`,
+  `setWindowChromeUi`, and `askSdlDebug` find the active session on the
+  `Context`. Removed `runSdlAppWith` and `runSdlAppReduceWith`; allocate state
+  once in `IO` and pass it to `runSdlApp` or `runSdlAppReduce`. `SdlEnv` is
+  exported opaquely (`askSdlEnv` opts into IO-level helpers; fields moved to
+  `NanoUI.Sdl.Internal.Window`).
+- **Opaque `FileDialogId`:** Dialog launch helpers return `FileDialogId`
+  directly (failures report as `FileDialogFailed` on poll). `pollFileDialogUi`
+  consumes a result once and restores window focus; use `peekFileDialogUi` to
+  observe without consuming.
+- **Window settings and decorations:** Replaced `sdlWindowTitle`,
+  `sdlWindowSize`, `sdlWindowResizable`, `sdlWindowFullscreen`, and
+  `sdlWindowHidden` with `sdlWindowSettings :: WindowSettings`. Replaced
+  `sdlWindowBorderless` with `sdlWindowDecorations :: WindowDecorations`
+  (`DecorationsFull`, `DecorationsFrame`, `DecorationsNone`).
+- **Typed reducer runner:** `runSdlAppReduce` takes `model -> NanoUIE msg ()`
+  from `nano-ui-emit`.
+- **Shared TTF text layer (`nano-ui-ttf`):** Extracted SDL3_ttf shaping, font
+  discovery, the glyph atlas, and bundled Inter (`LICENSE-Inter`) into
+  `nano-ui-ttf`. Moved `NanoUI.Sdl.Input` and `NanoUI.Sdl.NanoUIFont` to
+  `NanoUI.Sdl.Internal.*` (`NanoUIFont` stays exported from
+  `NanoUI.Backend.Sdl`).
+- **Removed `+simd` flag:** Replaced the AVX2-only damage culler with a
+  portable triangle culler; remove `+simd`/`-simd` from local project files.
 
 ### Added
 
-- `clearWindowChromeUi`, `setWindowDecorationsUi` and `setWindowShadowUi`
-  from a view, and `sdlDebugSnapshot` for an explicit session from IO.
-- `CoreDebugSnapshot`, the type of `SdlDebugSnapshot`'s `dbgCore`, and the
-  row formatters `formatFpsRows`, `formatDrawRows` and `formatExplainRows`,
-  so a view reads `askSdlDebug`'s frame timings without
-  `NanoUI.Internal.Debug`.
-
-- Everything a window without the desktop's title bar has to do for itself.
-  `windowCaption` is the whole of it in one call from a view -- it draws the
-  three caption buttons, minimizes and maximizes for you, tells the desktop
-  which strip of the bar drags the window and which edges resize it, and
-  answers whether the window was asked to close. `windowCaptionWith` takes a
-  `CaptionOptions`: the buttons' size, and how far in from the window's edges
-  takes hold of one to resize it. The top edge has a reach of its own, since
-  it is the one edge with no frame outside it to take hold of instead. A
-  window that still has the desktop's title bar gets the buttons and nothing
-  else, and a fullscreen one has no bar to drag and no edges to resize. The
-  drag region leaves out floating panels drawn over the bar.
-- `WindowChrome`, `setWindowChrome` and `clearWindowChrome` for a window that
-  draws chrome of another shape. The regions are given in layout units and
-  converted by the window's zoom, and they go to an `SDL_SetWindowHitTest`,
-  so a drag region also snaps the window to the sides of the screen,
-  maximizes it on a double click, and hangs the window menu off the right
-  button.
-- `windowResizable`, and `setWindowChromeUi` for handing over chrome regions
-  from a view. Regions handed over from a view, by `windowCaption` or
-  `setWindowChromeUi`, lapse after the first frame whose view does not hand
-  them over again, so a view hands them over every frame; regions set with
-  `setWindowChrome` from IO stay. The title, size, mode, maximizing and
-  minimizing are the core's, for any backend (`setWindowTitleUi`,
-  `resizeWindowUi`, `toggleMaximizedUi` and the rest); `windowCaption`'s
-  buttons use them.
-- `CaptionOptions` and `WindowChrome` derive `Eq` and `Show`.
-- `WindowDecorations`: `DecorationsFull`, `DecorationsFrame` or
-  `DecorationsNone`, how much of the desktop's title bar and frame a window
-  keeps. `sdlWindowDecorations` picks it when the window opens and
-  `setWindowDecorations` changes it afterwards.
-  `DecorationsFrame` is for a view that draws its own title bar. On Windows a
-  window with no frame is a popup: there is nothing outside its edges, so
-  nothing to take hold of it by, and an application that resizes by its edges
-  has to spend its own chrome on them. `DecorationsFrame` puts the ordinary
-  frame back, the sizing frame's width in on every side and no caption, so
-  the frame stays where it always is -- invisible, outside the window you can
-  see, what the desktop resizes the window by, and what carries its shadow.
-  The window is made that much larger, so `wsSize` is still the size
-  of the view. Two things go with it. The desktop's own border line is taken
-  off, since with no caption that line falls on the view's first row, over
-  the border the view draws there. And the desktop's rounding is turned off:
-  the corners it rounds are the frame's, a frame's width outside the view, so
-  the view's own corners are square whatever happens there, and a rounding
-  that only shapes the shadow leaves the shadow curving round a window that
-  is not. A window that cannot be resized, or is fullscreen, gets DWM's
-  shadow and no frame. Elsewhere it is a borderless window and the
-  compositor decides.
-  `DecorationsNone` keeps nothing of the desktop's; `setWindowShadow` puts
-  DWM's shadow under one that wants it. `setWindowDecorations`,
-  `setWindowShadow` and their `Ui` forms do nothing when asked for what the
-  window already has, so a view can ask every frame without flicker, except
-  that `DecorationsFrame` asked again puts the sizing frame on once the window
-  has become resizable or left fullscreen.
-- `windowZoom`, the window coordinates a layout unit is worth.
-
-- `nano-ui-sdl-idle`, a window for measuring what an app costs while nobody
-  touches it: a static view, a focused search field, a background wake, a
-  spinner that goes away, a `wakeAfter` clock, a typed character, and frames
-  asked for during startup. `hidden` runs a scene off screen. See
-  "Idle cost" in `docs/development.md`.
-- `sdlRenderDriver` and `RenderDriver`, for picking the SDL render driver a
-  window asks for. `RenderDriverAuto` is the default and lets nano-ui choose,
-  `RenderDriverSdlDefault` leaves SDL's own order alone, and
-  `RenderDriverNamed` asks for one by name. An `SDL_RENDER_DRIVER` in the
-  environment still wins over all three.
-- The new cursor shapes, as SDL's system cursors or the nearest it has; help,
-  zoom, copy, alias and context-menu show the arrow.
-- `sdlExplainLayout` opens a window with the layout overlay on.
-- Every key comes in as a `Key`, with its release and held state: F1 to F24,
-  paging, Insert, Space, PrintScreen, Pause, the lock and menu keys, the
-  keypad, and a typing key as the `KeyChar` it types in the current layout.
-  The GUI key is `modSuper`. Each auto-repeat of a held key is a press,
-  which `inputKeysNew` leaves out, and the window losing the keyboard lets
-  go of the keys held.
-- Input methods compose inside the text fields, with the candidate window by
-  the caret. Text input runs only while a widget takes text (a focused text
-  field, or a widget that calls `useInputMethod`), with SDL's text input type
-  for what it takes, so a password's input method hides it and a number
-  gets a numeric on-screen keyboard; with nothing taking text it stops, so
-  no composition builds up unseen and no on-screen keyboard stays up. A
-  widget of your own that reads typed text, such as a terminal, asks with
-  `useInputMethod` and draws the composition it answers;
-  `SDL_IME_IMPLEMENTED_UI=none` in the environment lets the input method draw
-  it again.
-- The middle mouse button, the side buttons as back and forward, and any
-  further button as a `MouseOther` of its SDL number. The pointer leaving
-  the window (`EvMouseLeave`) moves it off every widget, so nothing stays
-  hovered, unless a button is held: a drag keeps its pointer, so a dragged
-  slider no longer drops to its minimum (with `SDL_MOUSE_AUTO_CAPTURE=0`,
-  say). `UiCursorHidden` hides the pointer.
-- The desktop's light or dark setting reaches `systemAppearance`, and a change
-  arrives as `EvSystemThemeChanged`. `sdlAppThemeFor` takes the theme for
-  each setting, such as `lightDark light dark`, and follows it as it
-  changes.
-- The core's window, in full: the window opens from `sdlWindowSettings`, a
-  core `WindowSettings`, which adds a position, size limits, an icon, a
-  mode, transparency, opacity and whether a close request ends the session.
-  Views change it with the core's setters and commands (`setWindowTitleUi`,
-  `setWindowModeUi`, `moveWindowUi`, `resizeWindowUi` and the rest), read it
-  with `askWindow`, and end the session with `quitUi`. A transparent window
-  (`wsTransparent`) shows the desktop where the theme's window colour is
-  translucent.
-- `captureScreenshot`, the last presented frame as a `Screenshot`, and
-  answers to the core's `requestScreenshot`.
-- The jobs a view's `useTask` hooks started end with the session.
+- **GPU fragment shaders (`nano-ui-shader`):** Tier 1 (`shaderBox`) and
+  Tier 2 (`withShader`) shader execution on OpenGL 3.2 / GLSL 150 and SDL3's
+  GPU renderer, with straight-alpha blending and unshaded fallback on compile
+  failure.
+- **Custom title bars and native chrome:** `windowCaption`,
+  `windowCaptionWith`, `CaptionOptions`, `WindowChrome`, `setWindowChrome`,
+  `clearWindowChrome`, `setWindowChromeUi`, `clearWindowChromeUi`,
+  `DecorationsFrame` (native Win32 resize frame and DWM shadow without a title
+  bar), `setWindowDecorationsUi`, `setWindowShadowUi`, `windowResizable`, and
+  `windowZoom`.
+- **Platform integration:** Full core `WindowSettings` and view-side window
+  commands, `captureScreenshot`, `nativeWindow` live-resize support on
+  Windows, IME text composition (`useInputMethod`), full `Key` and
+  `MouseButton` support, system light/dark theme following (`sdlAppThemeFor`),
+  `sdlRenderDriver` (`RenderDriverAuto`, `RenderDriverSdlDefault`,
+  `RenderDriverNamed`), `sdlExplainLayout`, `CoreDebugSnapshot` formatters
+  (`formatFpsRows`, `formatDrawRows`, `formatExplainRows`),
+  `resetRenderTextures`, and the `nano-ui-sdl-idle` measurement tool.
 
 ### Changed
 
-- Widgets and view functions have `NanoUI` types instead of
-  `Ui :> es => Eff es`, and the package no longer depends on `effectful-core`.
-- Builds with GHC 9.10 through 9.14 (`base >=4.20 && <4.23`).
-- The licence is `MIT AND OFL-1.1`. The bundled Inter is under the SIL Open
-  Font License 1.1, whose text ships in `LICENSE-Inter`; an application that
-  embeds the font ships it too.
-- On Linux and other Unix systems fonts are searched where fontconfig looks:
-  `fonts` under `$XDG_DATA_HOME` and each absolute `$XDG_DATA_DIRS` entry,
-  `~/.fonts`, and `/usr/local/share/fonts` and `/usr/share/fonts` whatever
-  `XDG_DATA_DIRS` holds. Nix profiles, Guix and older installs are found.
-- `NANO_CURSOR_TRACE` turns on for any value, as the other traces do, not
-  only for `1`.
-- With SDL 3.4 or later, the renderer's texture address mode is set to clamp
-  when the session starts. Left on auto, SDL scans every UV in the frame's
-  vertex buffer on each draw call, which cost more than a quarter of a
-  full-window frame. SDL 3.2 has no such setting, so there each draw call
-  passes SDL only the vertices it uses: submitting the demo's Controls tab
-  went from 0.77 to 0.22 ms a frame.
-- The text caches use the core's generational cache, so the package no longer
-  depends on `hashable` or `unordered-containers`.
-- A frame presented in full, as every frame of a continuous session is, no
-  longer works out what changed since the last one: it clears the core's
-  `ctxDamageWanted` for its UI pass, and sets it back even when the pass
-  throws. Scrolling a 3000-row list continuously takes about 20% less time
-  a frame on the Haskell side. An idle frame still works it out, cheaply,
-  so it can hand back the last frame's draw data instead of painting.
-- `SdlEnv` no longer has `sdlDialogState`: each `FileDialogId` holds its
-  own result, and every dialog shares one native callback instead of a
-  wrapper apiece. `RenderDriver` is exported from `NanoUI.Backend.Sdl`, which
-  `sdlRenderDriver` needed. In `NanoUI.Sdl.Internal.Input`, the four
-  left/right press/release events are one `EvMouseButton`, `EvResize` and
-  `EvDisplayScale` are one `EvWindowChanged`, and `waitEvent` takes a
-  timeout (negative waits indefinitely) in place of `waitEventTimeout`.
-- `sdlDrawFrame` answers only whether another frame is needed, not the input
-  it was given as well. `FileDialogId` holds the dialog's result cell rather
-  than a number: it keeps `Eq` and drops `Ord`, `Show` and the `Int`
-  constructor. `SdlEnv`'s `sdlDebug` is the core `DebugSamplerRef`, beside
-  `sdlDebugPublished` and `sdlFrameTrace`.
-- Font variants other than `FontMono` share the sans font at a size instead
-  of each opening its own copy.
-- A line over 4096 bytes is cached like any other, counting one entry per
-  4096 bytes against the shaping caches' limits, where it used to be shaped
-  again on every paint. Glyphs outside the clip emit no quads. Repainting a
-  text area that holds a 20,000-character line went from 6.1 ms and 8 MB
-  allocated a frame to 0.12 ms and 15 KB in `nano-ui-sdl-profile`.
-- A font's caches of prepared and drawn texts hold twice what the last frame
-  looked up in them, and 1024 at least, where they held 1024. A frame that
-  drew more distinct texts in one font rotated each out before the next
-  frame drew it, and shaped and placed every one again: one label of 2000
-  lines went from 57 ms and 83 MB allocated a frame to 5.9 ms and 8.2 MB,
-  and a grid of 2400 labels from 16.7 ms to 4.0 ms.
-- `NanoUI.Sdl.Input` and `NanoUI.Sdl.NanoUIFont` are now
-  `NanoUI.Sdl.Internal.Input` and `NanoUI.Sdl.Internal.NanoUIFont`.
-  `NanoUIFont` is still exported from `NanoUI.Backend.Sdl`.
-- Glyph surfaces upload directly to SDL's streaming atlas. SDL owns its
-  initialization/reset storage; the backend no longer maintains a second
-  full-size CPU pixel buffer.
-
-- `sdlWindowBorderless` is replaced by `sdlWindowDecorations`:
-  `DecorationsFull` for `False`, and `DecorationsNone` for what `True` did.
-- `sdlWindowTitle`, `sdlWindowSize`, `sdlWindowResizable`,
-  `sdlWindowFullscreen` and `sdlWindowHidden` are replaced by
-  `sdlWindowSettings`, the core `WindowSettings` both backends open their
-  windows from: `sdlWindowSettings = defaultWindowSettings {wsTitle = t,
-  wsSize = s, wsResizable = r}`, and `wsMode = Fullscreen` or `wsMode =
-  Hidden` for the two flags. `sdlWindowDecorations` and
-  `sdlWindowAlwaysOnTop` stay, as the SDL window's own.
-
-- Windows windows render through OpenGL rather than D3D11. D3D11 presents
-  through a flip-model swap chain, so a present blocks for about a refresh
-  even with vsync off; during a border drag those stalls land in Windows'
-  modal size loop and the window judders. Set
-  `sdlRenderDriver = RenderDriverSdlDefault` for the old behavior. A machine
-  whose GL will not create a context opens on SDL's own choice instead.
-- Command rendering uses the core's unboxed vectors, traversing the already
-  layer-ordered command stream directly.
-- Session resources are composed with `Data.Acquire` from `resourcet`; each
-  acquisition carries its release action. This adds no per-frame resource layer.
-- A key held with Ctrl is a key chord (`KeyChar` with `modCtrl`) instead of
-  its symbol typed into `inputChars`.
+- **Windows OpenGL default and smooth live resize:** `RenderDriverAuto` picks
+  `"opengl"` on Windows (with native GLSL 150 shaders) and installs a Win32
+  resize subclass to avoid D3D11 flip-model resize stalls and Vulkan WSI
+  stretch artifacts.
+- **Typography and font search:** Uses real bold faces when available beside
+  the regular font, applies full hinting to monospace fonts, splits line gap
+  above and below glyphs like CSS, searches XDG/fontconfig directories on Unix,
+  walks font directories in the background, skips unreadable folders, and
+  includes Windows/macOS fallback aliases for CJK, Indic, symbols, and serif.
+- **Performance and dependencies:** Dynamic per-font shaping caches, caching
+  for lines over 4096 bytes, dirty-rect CPU atlas uploads with fast resets,
+  SDL 3.4 clamp texture addressing, skipping damage diffs on continuous frames,
+  `Data.Acquire` session teardown, and support for GHC 9.10 through 9.14 and
+  `sdl3-bindgen-sys >=0.0.0.2 && <0.0.2`. Dropped `dir-traverse`, `hashable`,
+  and `unordered-containers`.
 
 ### Fixed
 
-- A background job's wake whose refresh event could not be queued (SDL's
-  queue was full) no longer stops later wakes from waking the loop until
-  other input arrives.
-- A minimum size set above the maximum, or a maximum below the minimum, on
-  X11, Windows or macOS takes effect, moving the other limit to it as on
-  Wayland. SDL rejected the pair and the new limit was lost.
-- Resizing a Wayland window past its minimum or maximum size no longer
-  stutters under a compositor that ignores the limits, such as sway's tiling.
-  SDL clamped each such configure back to the current size without reporting
-  it, so no frame committed it and sway waited out its 200 ms transaction
-  timeout on every step of the drag. The limits now go to the compositor
-  without SDL clamping to them, and the window takes the size it is given.
-
-- Partial redraws retain independent triangles and a command's final triangle.
-  Damage rejection checks all three vertices rather than assuming quad pairs.
-
-- A failed window/renderer acquisition shuts down SDL's initialized subsystems.
-  Resources acquired before later startup failures are released too.
-
-- `saveScreenshot` reads the retained frame. It read the window
-  backbuffer, which SDL leaves undefined after a present.
-- A frame asked for while the window opens is drawn. The opening frames are
-  drawn before the loop starts, and the session then cleared the dirty flag
-  and drained the wakes they had queued, so a view that asked for another
-  frame, or a thread that finished its work that early, sat unseen until the
-  pointer crossed the window.
-- Waking the loop from another thread runs a frame and presents what that
-  frame damaged, which is nothing when the change is not on screen. Every
-  wake used to repaint and present the whole window. A font or UI scale
-  switch, which does change every pixel, asks for the full repaint itself.
-- Wakes are coalesced: while one is queued, another costs an atomic swap and
-  no `SDL_PushEvent`. The core wakes the loop on every `markDirty`, most of
-  them made by the loop's own thread in the middle of a frame.
-- The grab hands show the move arrows. The backend asked SDL 3.2 for cursors
-  it does not have, which showed the arrow on X11.
-- Font search, for `FontSearch` and for fallback fonts, finds the Windows and
-  macOS families whose files are not named after them: Segoe UI Symbol,
-  Nirmala UI, Leelawadee UI, Microsoft YaHei, Yu Gothic, Malgun Gothic, Arial
-  Unicode MS, PingFang SC, Kohinoor Devanagari and Times New Roman. On a
-  stock Windows non-Latin text drew as boxes, and the serif generic found
-  nothing.
-- Of a family's files, font search prefers `-Regular` over `-Medium`, counts
-  `-Book` and `-Roman` as regular, and ranks an upright face above its
-  italic however the files are named (`NotoSans[wght].ttf` over
-  `NotoSans-Italic[wght].ttf`). The UI could come out in Roboto Medium or in
-  an italic face.
-- A `FontFilePath` that will not open is recorded as the bundled Inter it
-  draws in, so the debug readout names Inter and other sizes no longer try
-  the file again. Animating a font size clears the text caches once per 17
-  new sizes instead of on every frame.
-- Colour glyphs (emoji) draw as a tinted silhouette, not a tinted box with the
-  glyph cut out of it.
-- A quick Ctrl+click, whose Ctrl is let go just after the click, no longer
-  arrives as a plain click: a frame's modifiers come only from key events.
-- File-dialog filter names and patterns go to SDL as UTF-8 on every platform.
-  A non-ASCII filter name threw under a C locale, and the dialog never opened.
-- On a Wayland desktop with no `SDL_VIDEO_DRIVER` set, SDL falls back to X11
-  when the Wayland video driver cannot start, instead of failing to
-  initialize.
-- Frame pacing keeps a fractional refresh rate: 59.94 Hz paced as 59 Hz,
-  and with vsync off a frame repeated about once a second.
-- Input taken while the window opens is seen exactly once, neither replayed
-  by the next opening frame (flipping a toggle back) nor dropped, and a close
-  request taken then closes the window.
-- During a live window resize, animations advance by the time that passed
-  (on Windows a spinner or transition ran several times too fast), and an
-  exception thrown by a frame propagates out of `runSdlApp`, through the
-  session's releases and the application's own handlers, instead of ending
-  the process.
-- The window repaints in full when SDL resets its render targets, and a
-  glyph-atlas reset no longer leaves continuous or transparent sessions
-  drawing blank text. A render device reset (Direct3D) makes the session's
-  textures again and repaints, where text and images went blank or corrupt;
-  it decodes as the new `EvRenderDeviceReset` of `NanoUI.Sdl.Internal.Input`,
-  and a host that polls SDL events itself calls the new
-  `resetRenderTextures` from `NanoUI.Backend.Sdl` when it reads one.
-  A lost render device ends the session with an `IOError`.
-- Retained frames take the backbuffer's own size, so a fractional scale on
-  Wayland no longer draws a frame a pixel off and stretches it, which blurred
-  all text. The pixel density is rounded to the nearest 1/120, so a resize
-  no longer reloads the fonts at each step.
-- `setSdlUiScale` with NaN no longer asks for a frame on every call, which
-  kept the loop spinning.
-
-### Removed
-
-- The `simd` Cabal flag and AVX2-only damage culler. Remove `+simd`/`-simd`
-  from local project flags; the triangle culler works on every supported CPU.
+- Paced animations and continuous sessions by the active display's refresh
+  rate (including fractional rates and monitor moves) when drivers disable
+  vsync.
+- Fixed OpenGL ES 2 framebuffer errors after closing secondary windows,
+  Direct3D render device resets (`EvRenderDeviceReset`), fractional-DPI
+  retained framebuffer and clip alignment, Wayland-to-X11 driver fallback,
+  un-clamped Wayland tiling resizes, UTF-8 file-dialog filters under C
+  locales, coalesced cross-thread wakes, color-emoji tinting, and exception
+  propagation out of live-resize callbacks.
 
 ## 0.1.0.1 -- 2026-09-18
 

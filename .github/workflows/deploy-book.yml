@@ -11,6 +11,7 @@ on:
       - 'site/**'
       - 'packages/nano-ui/**'
       - 'packages/nano-ui-emit/**'
+      - 'packages/nano-ui-shader/**'
       - 'packages/nano-ui-ttf/**'
       - 'packages/nano-ui-sdl-web/**'
       - 'packages/nano-ui-diagrams/**'

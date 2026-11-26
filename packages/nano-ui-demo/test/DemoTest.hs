@@ -18,7 +18,7 @@ main :: IO ()
 main = do
   display <- (<|>) <$> lookupEnv "DISPLAY" <*> lookupEnv "WAYLAND_DISPLAY"
   when (os `notElem` ["mingw32", "darwin"] && isNothing display) $ do
-    setEnv "SDL_VIDEODRIVER" "dummy"
+    setEnv "SDL_VIDEO_DRIVER" "dummy"
     setEnv "SDL_RENDER_DRIVER" "software"
   Demo.selftest False
   Demo.selftest True

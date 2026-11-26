@@ -8,16 +8,25 @@ You will need:
 
 - GHC 9.10 through 9.14 (development uses 9.14)
 - Cabal 3.12 or newer
-- SDL3 and SDL3_ttf 3.2+ (for the SDL desktop backend)
-- `pkg-config`
+- For `nano-ui-sdl` (full desktop backend: TrueType fonts, HarfBuzz shaping, native file dialogs): SDL3, SDL3_ttf 3.2+, and `pkg-config`
+- For `nano-ui-rgfw` (zero-SDL backend for quick experiments): no third-party C libraries. On Windows and macOS it links only OS libraries; on Linux it needs X11 development headers (`libx11-dev`, `libxcursor-dev`, `libxrandr-dev`, `libxi-dev`, `libgl1-mesa-dev`).
+
+### Starter templates
+
+The repository ships two minimal starter projects under [`templates/sdl`](https://github.com/goolord/nano-ui/tree/main/templates/sdl) and [`templates/rgfw`](https://github.com/goolord/nano-ui/tree/main/templates/rgfw). With Nix flakes:
+
+```sh
+nix flake init -t github:goolord/nano-ui#sdl   # full SDL3 desktop app
+nix flake init -t github:goolord/nano-ui#rgfw  # zero-SDL RGFW starter
+```
 
 ### Nix (Linux and macOS)
 
-Inside a checkout of the `nano-ui` repository, `nix develop` drops you into a shell with GHC, Cabal, SDL3, SDL3_ttf, and `pkg-config` already configured.
+Inside a checkout of the `nano-ui` repository (or either template), `nix develop` drops you into a shell with GHC, Cabal, and the backend dependencies already configured.
 
 ### Windows
 
-Install SDL3 and SDL3_ttf through MSYS2 UCRT64:
+To use `nano-ui-rgfw`, no extra libraries are needed. To use `nano-ui-sdl`, install SDL3 and SDL3_ttf through MSYS2 UCRT64:
 
 ```sh
 pacman -S mingw-w64-ucrt-x86_64-sdl3 mingw-w64-ucrt-x86_64-sdl3-ttf mingw-w64-ucrt-x86_64-pkg-config
@@ -31,7 +40,22 @@ $env:PKG_CONFIG_PATH = "C:\msys64\ucrt64\lib\pkgconfig"
 
 ## Adding nano-ui to your project
 
-Although `nano-ui` is published on Hackage, this book tracks the git repository, which is often ahead of the latest release. Pin the repository in your `cabal.project`:
+Add `nano-ui` and a backend (`nano-ui-sdl` or `nano-ui-rgfw`) to your `.cabal` file:
+
+```cabal
+executable my-app
+  main-is: Main.hs
+  default-language: GHC2024
+  default-extensions: OverloadedStrings
+  ghc-options: -threaded -Wall
+  build-depends:
+      base >= 4.20 && < 5
+    , nano-ui ^>= 0.2
+    , nano-ui-sdl ^>= 0.2   -- or nano-ui-rgfw ^>= 0.2 (no SDL3 required)
+    , text
+```
+
+To track the git repository instead of Hackage, pin the packages you use in `cabal.project` (`nano-ui-sdl` also needs `nano-ui-emit` and `nano-ui-ttf`; `nano-ui-rgfw` needs `nano-ui-emit` and `nano-ui-rgfw-bindings`):
 
 ```cabal
 source-repository-package
@@ -42,27 +66,9 @@ source-repository-package
     packages/nano-ui-emit
     packages/nano-ui-ttf
     packages/nano-ui-sdl
-
-package nano-ui-sdl
-  flags: +sdl
 ```
 
-If you want optional companion packages such as `nano-ui-emit` or `nano-ui-diagrams`, list them in both `subdir` and your `.cabal` file's `build-depends`.
-
-Next, configure your executable in `my-app.cabal`:
-
-```cabal
-executable my-app
-  main-is: Main.hs
-  default-language: GHC2024
-  default-extensions: OverloadedStrings
-  ghc-options: -threaded -Wall
-  build-depends:
-      base >= 4.20 && < 5
-    , nano-ui
-    , nano-ui-sdl
-    , text
-```
+If you want optional companion packages such as `nano-ui-diagrams`, `nano-ui-form`, `nano-ui-markdown`, `nano-ui-shader`, or `nano-ui-svg`, list them in `build-depends` (and in `subdir` when building from git).
 
 > [!IMPORTANT]
 > Always compile executables with `-threaded`. Between frames, the backend sleeps inside SDL's foreign event-wait call. On the non-threaded runtime, that foreign call stalls every Haskell thread, so `Task` and `Stream` workers freeze whenever the window is idle.

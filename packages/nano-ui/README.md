@@ -27,10 +27,10 @@ This package provides the widgets, layout solver, input handling, theming, and d
 | Package | Description |
 | --- | --- |
 | [nano-ui-sdl](https://hackage.haskell.org/package/nano-ui-sdl) | Desktop SDL3 backend with HarfBuzz TrueType fonts, system font lookup, and native file dialogs |
-| [nano-ui-rgfw](https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-rgfw) | RGFW + OpenGL 3.2 backend with a bundled bitmap font and no extra library dependencies |
-| [nano-ui-sdl-web](https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-sdl-web) | Browser backend for GHC's WebAssembly target using SDL_ttf and WebGL2 |
+| [nano-ui-rgfw](https://hackage.haskell.org/package/nano-ui-rgfw) | RGFW + OpenGL 3.2 backend with a bundled bitmap font and no extra library dependencies |
+| [nano-ui-sdl-web](https://hackage.haskell.org/package/nano-ui-sdl-web) | Browser backend for GHC's WebAssembly target using SDL_ttf and WebGL2 |
 
-Optional companion packages add [typed GPU fragment shaders](https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-shader) (`nano-ui-shader`), [charts and diagrams](https://hackage.haskell.org/package/nano-ui-diagrams) (`nano-ui-diagrams`), [validated forms](https://hackage.haskell.org/package/nano-ui-form) (`nano-ui-form`), [streamable Markdown](https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-markdown) (`nano-ui-markdown`), [SVG export](https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-svg) (`nano-ui-svg`), and [Elm-style message reducers](https://github.com/goolord/nano-ui/tree/main/packages/nano-ui-emit) (`nano-ui-emit`).
+Optional companion packages add [typed GPU fragment shaders](https://hackage.haskell.org/package/nano-ui-shader) (`nano-ui-shader`), [charts and diagrams](https://hackage.haskell.org/package/nano-ui-diagrams) (`nano-ui-diagrams`), [validated forms](https://hackage.haskell.org/package/nano-ui-form) (`nano-ui-form`), [streamable Markdown](https://hackage.haskell.org/package/nano-ui-markdown) (`nano-ui-markdown`), [SVG export](https://hackage.haskell.org/package/nano-ui-svg) (`nano-ui-svg`), and [Elm-style message reducers](https://hackage.haskell.org/package/nano-ui-emit) (`nano-ui-emit`).
 
 Inside `nano-ui` itself, `NanoUI.Testing` runs frames headlessly on scripted input, and `NanoUI.Backend` exports the hooks needed to implement custom backends. Regular application code only needs `import NanoUI`.
 

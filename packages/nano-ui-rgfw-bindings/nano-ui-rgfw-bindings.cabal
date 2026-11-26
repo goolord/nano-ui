@@ -61,7 +61,7 @@ library
     if os(windows)
         extra-libraries: gdi32 user32 shell32
     elif os(osx)
-        frameworks: Cocoa
+        frameworks: Cocoa CoreVideo IOKit OpenGL
     else
         extra-libraries: X11 Xcursor Xrandr Xi
 

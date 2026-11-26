@@ -1177,7 +1177,7 @@ counter = row <span class="k">$ do</span>
 numbers = <span class="k">do</span>
   volume &lt;- useVar <span class="n">40</span>
   count &lt;- useVar (<span class="n">12</span> :: <span class="t">Double</span>)
-  field <span class="s">"Volume"</span> <span class="k">$</span> rowWith (tight . gap <span class="n">10</span> . alignMid . fillW) <span class="k">$ do</span>
+  field <span class="s">"Volume"</span> <span class="k">$</span> rowWith (tight . gap <span class="n">10</span> . alignMiddle . fillW) <span class="k">$ do</span>
     sliderWith fillW <span class="n">0</span> <span class="n">100</span> volume
     labelWith (tight . fixedW <span class="n">36</span> . alignEnd) . percentage =&lt;&lt; readVar volume
   <span class="c">-- Reads the value written by the slider in the same frame.</span>
@@ -1279,6 +1279,7 @@ when (dragActive drag) (modifyVar angle (+ turned (respRect resp) drag))</code><
           <div class="code-bar">
             <div class="tablist" role="tablist" aria-label="Setup commands">
               <button class="tab-btn" type="button" role="tab" id="tab-nix" aria-selected="true" aria-controls="pane-nix" tabindex="0">Desktop demo (Nix)</button>
+              <button class="tab-btn" type="button" role="tab" id="tab-rgfw" aria-selected="false" aria-controls="pane-rgfw" tabindex="-1">No SDL3 (RGFW)</button>
               <button class="tab-btn" type="button" role="tab" id="tab-cabal" aria-selected="false" aria-controls="pane-cabal" tabindex="-1">Add to .cabal</button>
             </div>
             <div class="code-tools">
@@ -1293,18 +1294,25 @@ nix develop
 cabal run nano-ui-sdl-demo</code></pre>
           </div>
 
+          <div class="code-pane" role="tabpanel" id="pane-rgfw" aria-labelledby="tab-rgfw" hidden>
+<pre tabindex="0" role="region" aria-label="Clone and run RGFW demo without SDL3"><code>git clone https://github.com/goolord/nano-ui
+cd nano-ui
+cabal run -j1 nano-ui-rgfw-demo</code></pre>
+          </div>
+
           <div class="code-pane" role="tabpanel" id="pane-cabal" aria-labelledby="tab-cabal" hidden>
 <pre tabindex="0" role="region" aria-label="Cabal build-depends snippet"><code>build-depends:
   base &gt;= <span class="n">4.20</span>,
   text,
   nano-ui ^&gt;= <span class="n">0.2</span>,
-  nano-ui-sdl ^&gt;= <span class="n">0.2</span></code></pre>
+  nano-ui-sdl ^&gt;= <span class="n">0.2</span>  <span class="c">-- or nano-ui-rgfw ^&gt;= 0.2 (no SDL3 needed)</span></code></pre>
           </div>
         </div>
 
         <div class="start-info">
           <p>
             <code>nix develop</code> supplies GHC, Cabal, SDL3, and SDL3_ttf so <code>cabal run nano-ui-sdl-demo</code> can launch the desktop widget sampler.
+            Want to try a window without installing SDL3? Run <code>nano-ui-rgfw-demo</code>, or scaffold a starter project with <code>nix flake init -t github:goolord/nano-ui#rgfw</code> (or <code>#sdl</code>).
           </p>
           <p>
             See the <a href="book/getting-started/quickstart.html">quick start</a> for Windows MSYS2 and non-Nix setups,

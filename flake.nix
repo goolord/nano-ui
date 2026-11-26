@@ -20,6 +20,18 @@
         haskell-flake.flakeModule
       ];
 
+      flake.templates = {
+        default = self.templates.sdl;
+        sdl = {
+          path = ./templates/sdl;
+          description = "nano-ui desktop app with the SDL3 backend (TrueType fonts, dialogs)";
+        };
+        rgfw = {
+          path = ./templates/rgfw;
+          description = "nano-ui desktop app with the RGFW + OpenGL backend (no SDL3 required)";
+        };
+      };
+
       perSystem = { config, pkgs, ... }: {
         formatter = pkgs.nixpkgs-fmt;
 

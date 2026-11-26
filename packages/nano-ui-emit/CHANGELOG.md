@@ -2,27 +2,10 @@
 
 ## 0.2.0.0 -- Unreleased
 
-- `reduceFrame` keeps the late messages it took when the view throws, so
-  they are reduced on the next frame instead of being lost, and drops the
-  messages the failed frame emitted.
+Initial release.
 
-- `NanoUIE msg a` is now a `NanoUI a` action with the view's message sink in
-  scope as the implicit parameter `?emit`, so every core widget, container,
-  overlay and callback-taking widget runs in an emitting view unchanged.
-  `NanoUI.Emit` re-exports `NanoUI`; `NanoUI.Emit.Widgets` is a deprecated
-  re-export of it. `liftNanoUI`, `withNanoUI`, `withRunInNanoUIE`,
-  `emitWhenE`, `emitChangedE` and `emitEditedE` are deprecated identities or
-  aliases. Views passed to the runners need a `model -> NanoUIE msg ()`
-  signature.
-
-- `emitChanged` and `emitEdited` take an input of type `Var a -> NanoUI r`,
-  such as `slider 0 100`, with the current value; they run it on a temporary
-  `Var` and emit the value it leaves.
-
-- `mapMessages` embeds child components' messages in a parent's message type.
-
-- Extracted `NanoUI.Emit` from core with `NanoUIE msg a` and statically typed
-  emission, replacing the runtime-typed context queue.
-- Widget adapters, UI lifting/scopes, typed frame and reducer runners, and
-  reducer testing helpers.
-- Ordered per-frame messages survive rebuilds and are isolated on exceptions.
+- Extracted typed Elm-style message emission from `nano-ui` into `NanoUI.Emit`.
+- `NanoUIE msg a` is a `NanoUI a` view with a typed message sink (`?emit`) in scope, so every core widget, container, overlay, and callback-taking widget runs inside an emitting view without wrappers or `Typeable`.
+- Message adapters `emit`, `emitWhen`, `emitChanged`, `emitEdited`, and `mapMessages` for composing child components into a parent message type.
+- Typed frame and reducer runners (`runFrameE`, `reduceFrame`, `reduceMessages`, `reduceUpdates`) and headless reducer testing helpers (`runClickReduce`).
+- Per-frame messages stay ordered across view rebuilds, retain queued background messages on view exceptions, and discard messages from a failed pass.

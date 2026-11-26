@@ -4,6 +4,7 @@
 
 # Getting Started
 - [Quick Start](getting-started/quickstart.md)
+- [Migrating from 0.1 to 0.2](getting-started/migrating-0.2.md)
 - [Tutorials](tutorials/index.md)
   - [Build a Todo List](tutorials/todo-list.md)
   - [Build a Notepad](tutorials/notepad.md)

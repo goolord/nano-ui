@@ -41,7 +41,7 @@ quadFloats = maybe 0 (\(ShapedGlyphs q) -> sizeofPrimArray q)
 
 main :: IO ()
 main = do
-  setEnv "SDL_VIDEODRIVER" "dummy"
+  setEnv "SDL_VIDEO_DRIVER" "dummy"
   setEnv "SDL_RENDER_DRIVER" "software"
   ctx0 <- newPixelContext
   runChecks [("failed-start", failedStartChecks ctx0), ("session-fonts", sessionFontChecks ctx0)]

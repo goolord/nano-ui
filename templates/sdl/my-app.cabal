@@ -1,0 +1,22 @@
+cabal-version:      3.4
+name:               my-app
+version:            0.1.0.0
+synopsis:           Starter desktop application using nano-ui and SDL3
+license:            MIT
+build-type:         Simple
+
+executable my-app
+    main-is:            Main.hs
+    hs-source-dirs:     app
+    default-language:   GHC2024
+    default-extensions: OverloadedStrings
+    ghc-options:
+        -Wall
+        -threaded
+        -rtsopts
+        "-with-rtsopts=-N1 -A64m -I0"
+    build-depends:
+        base >=4.20 && <4.23,
+        nano-ui ^>=0.2,
+        nano-ui-sdl ^>=0.2,
+        text ^>=2.1

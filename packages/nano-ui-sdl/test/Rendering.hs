@@ -3,7 +3,7 @@
 
 module Main (main) where
 
-import Control.Exception (IOException, bracket, throwIO, try)
+import Control.Exception (IOException, SomeException, bracket, catch, displayException, throwIO, try)
 import Control.Monad (forM_, replicateM_, unless, void, when)
 import Data.ByteString qualified as BS
 import Data.Functor ((<&>))
@@ -58,7 +58,7 @@ import SDL3.Sys.Mouse (cursorVisibleSafe)
 import SDL3.Sys.Render (renderPresentSafe, renderReadPixels)
 import SDL3.Sys.Video (getSystemTheme)
 import System.Environment (getArgs, lookupEnv, setEnv)
-import System.IO (BufferMode (LineBuffering), hSetBuffering, stdout)
+import System.IO (BufferMode (LineBuffering), hFlush, hPutStrLn, hSetBuffering, stderr, stdout)
 import System.Mem (performGC)
 import Text.Printf (printf)
 import Text.Read (readMaybe)
@@ -462,13 +462,14 @@ shaderChecks env ctx draw = do
 main :: IO ()
 main = do
   hSetBuffering stdout LineBuffering
+  hSetBuffering stderr LineBuffering
   args <- getArgs
   iterations <- max 1 . fromMaybe 500 . (>>= readMaybe) <$> lookupEnv "NANO_RENDER_ITERATIONS"
   let bench = args == ["--bench"] || args == ["--atlas-bench"]
       gpuShadersOnly = args == ["--gpu-shaders"]
       native = args == ["--native"] || gpuShadersOnly
   unless (bench || native) $ do
-    setEnv "SDL_VIDEODRIVER" "dummy"
+    setEnv "SDL_VIDEO_DRIVER" "dummy"
     setEnv "SDL_RENDER_DRIVER" "software"
   unless (bench || gpuShadersOnly) inputChecks
   ctx <- newPixelContext
@@ -482,7 +483,12 @@ main = do
           drawWithGlyph = drawScaled 1
           draw = drawWithGlyph nullPtr
           damage = DamageClip (Rect 15 15 10 10)
-          step name act = act >> putStrLn ("SDL " ++ name ++ ": ok")
+          step name act =
+            (act >> putStrLn ("SDL " ++ name ++ ": ok")) `catch` \(e :: SomeException) -> do
+              hPutStrLn stderr ("SDL " ++ name ++ ": FAIL: " ++ displayException e)
+              hFlush stderr
+              hFlush stdout
+              throwIO e
       case args of
         ["--gpu-shaders"] ->
           step "surface shader GPU/fallback readback" (shaderChecks env ctx (`draw` DamageFull))
@@ -533,7 +539,7 @@ main = do
     display <- lookupEnv "DISPLAY"
     when (isJust display && not native) $
       forM_ ["opengl", "opengles2"] $ \renderer -> do
-        setEnv "SDL_VIDEODRIVER" "x11"
+        setEnv "SDL_VIDEO_DRIVER" "x11"
         setEnv "SDL_RENDER_DRIVER" renderer
         try (windowChecks ("x11, " ++ renderer) True) >>= \case
           Left (err :: IOException)

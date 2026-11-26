@@ -124,9 +124,7 @@ jobs:
           done
 
       # The suites that open windows, in an X server with Mesa's software
-      # GL, one step each. A step with continue-on-error has not yet been
-      # seen passing on this runner, so its failure reports without failing
-      # the job; drop continue-on-error from a step once that suite is green.
+      # GL, one step each.
       - name: Install Xvfb and Mesa
         if: matrix.ghc == '9.14.1'
         run: |
@@ -135,43 +133,85 @@ jobs:
 
       - name: Native suite nano-ui-render-test (Xvfb)
         if: matrix.ghc == '9.14.1'
-        run: xvfb-run -a -s "-screen 0 1920x1080x24" cabal test -j1 nano-ui-sdl:test:nano-ui-render-test --test-show-details=failures
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" cabal test -j1 nano-ui-sdl:test:nano-ui-render-test --test-show-details=direct
 
       - name: Native suite nano-ui-font-effects-test (Xvfb)
         if: matrix.ghc == '9.14.1'
-        continue-on-error: true
-        run: xvfb-run -a -s "-screen 0 1920x1080x24" cabal test -j1 nano-ui-sdl:test:nano-ui-font-effects-test --test-show-details=failures
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" cabal test -j1 nano-ui-sdl:test:nano-ui-font-effects-test --test-show-details=direct
 
       - name: Native suite nano-ui-demo-test (Xvfb)
         if: matrix.ghc == '9.14.1'
-        continue-on-error: true
-        run: xvfb-run -a -s "-screen 0 1920x1080x24" cabal test -j1 nano-ui-demo:test:nano-ui-demo-test --test-show-details=failures
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" cabal test -j1 nano-ui-demo:test:nano-ui-demo-test --test-show-details=direct
 
       - name: Native suite nano-ui-terminal-test (Xvfb)
         if: matrix.ghc == '9.14.1'
-        continue-on-error: true
-        run: xvfb-run -a -s "-screen 0 1920x1080x24" cabal test -j1 nano-ui-demo:test:nano-ui-terminal-test --test-show-details=failures
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" cabal test -j1 nano-ui-demo:test:nano-ui-terminal-test --test-show-details=direct
 
       - name: Native suite nano-ui-rgfw-test (Xvfb)
         if: matrix.ghc == '9.14.1'
-        continue-on-error: true
-        run: xvfb-run -a -s "-screen 0 1920x1080x24" cabal test -j1 nano-ui-rgfw:test:nano-ui-rgfw-test --test-show-details=failures
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" cabal test -j1 nano-ui-rgfw:test:nano-ui-rgfw-test --test-show-details=direct
 
       - name: Native suite nano-ui-rgfw-bindings-test (Xvfb)
         if: matrix.ghc == '9.14.1'
-        continue-on-error: true
-        run: xvfb-run -a -s "-screen 0 1920x1080x24" cabal test -j1 nano-ui-rgfw-bindings:test:nano-ui-rgfw-bindings-test --test-show-details=failures
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" cabal test -j1 nano-ui-rgfw-bindings:test:nano-ui-rgfw-bindings-test --test-show-details=direct
 
-      - name: cabal check
+      - name: cabal check and sdist
         run: |
           for dir in packages/*/; do
             echo "== $dir"
             (cd "$dir" && cabal check)
           done
+          cabal sdist all
 
       - name: Haddock
         if: matrix.ghc == '9.14.1'
-        run: cabal haddock -j1 nano-ui
+        run: >-
+          cabal haddock -j1
+          nano-ui nano-ui-emit nano-ui-ttf nano-ui-sdl nano-ui-sdl-web
+          nano-ui-rgfw-bindings nano-ui-rgfw nano-ui-shader
+          nano-ui-diagrams nano-ui-form nano-ui-markdown nano-ui-svg
+
+  macos:
+    name: macOS / GHC 9.14.1
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SDL3, SDL3_ttf, and pkg-config
+        run: |
+          brew install sdl3 sdl3_ttf pkg-config
+          prefix="$(brew --prefix)"
+          echo "PKG_CONFIG_PATH=$prefix/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - uses: haskell-actions/setup@v2
+        id: setup
+        with:
+          ghc-version: '9.14.1'
+          cabal-version: '3.14'
+
+      - name: Resolve dependencies
+        run: |
+          cabal update
+          cabal build all --dry-run
+
+      - name: Cache Cabal store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.setup.outputs.cabal-store }}
+          key: store-${{ runner.os }}-9.14.1-${{ hashFiles('dist-newstyle/cache/plan.json') }}
+          restore-keys: store-${{ runner.os }}-9.14.1-
+
+      - name: Build
+        run: cabal build -j1 all
+
+      - name: Headless test suites
+        run: |
+          for suite in $HEADLESS_SUITES; do
+            case "$suite" in *book-test) continue ;; esac
+            echo "::group::$suite"
+            cabal test -j1 "$suite" --test-show-details=failures
+            echo "::endgroup::"
+          done
 
   windows:
     name: Windows / GHC 9.14.1

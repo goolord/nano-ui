@@ -43,7 +43,7 @@ Try the full widget sampler in your browser at **[goolord.github.io/nano-ui/demo
 
 Browse [`nano-ui-demo`](packages/nano-ui-demo/README.md) for all full apps and focused single-topic examples.
 
-Building locally requires GHC 9.10 through 9.14 (development uses 9.14) and Cabal. The SDL backend also requires SDL3, SDL3_ttf 3.2+, and `pkg-config`, all included in the `nix develop` shell.
+Building locally requires GHC 9.10 through 9.14 (development uses 9.14) and Cabal. The SDL backend also requires SDL3, SDL3_ttf 3.2+, and `pkg-config`, all included in the `nix develop` shell. To try a desktop window without installing SDL3, run `nano-ui-rgfw-demo` or start from [`templates/rgfw`](templates/rgfw/README.md) (`nix flake init -t github:goolord/nano-ui#rgfw`, or `#sdl` for SDL3).
 
 ```sh
 cabal run nano-ui-sdl-demo          # full widget and chart sampler

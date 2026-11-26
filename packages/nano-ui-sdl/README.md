@@ -96,4 +96,4 @@ pkg-config --modversion sdl3 sdl3-ttf
 
 ## License
 
-MIT, except the bundled Inter font under the SIL Open Font License 1.1 (`LICENSE-Inter`). Because every binary built with `nano-ui-sdl` embeds Inter, ship `LICENSE-Inter` alongside your application.
+MIT. The bundled Inter font ships through the `nano-ui-ttf` dependency under the SIL Open Font License 1.1 (`LICENSE-Inter`). Because binaries built with `nano-ui-sdl` embed Inter, include `LICENSE-Inter` alongside distributed applications.
