@@ -36,10 +36,10 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-b4022fab.js";
+            window.path_to_searchindex_js = "../searchindex-3d3bc8da.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-2886a539.js"></script>
+        <script src="../toc-aa96699d.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -185,20 +185,37 @@
 <ul>
 <li>GHC 9.10 through 9.14 (development uses 9.14)</li>
 <li>Cabal 3.12 or newer</li>
-<li>SDL3 and SDL3_ttf 3.2+ (for the SDL desktop backend)</li>
-<li><code>pkg-config</code></li>
+<li>For <code>nano-ui-sdl</code> (full desktop backend: TrueType fonts, HarfBuzz shaping, native file dialogs): SDL3, SDL3_ttf 3.2+, and <code>pkg-config</code></li>
+<li>For <code>nano-ui-rgfw</code> (zero-SDL backend for quick experiments): no third-party C libraries. On Windows and macOS it links only OS libraries; on Linux it needs X11 development headers (<code>libx11-dev</code>, <code>libxcursor-dev</code>, <code>libxrandr-dev</code>, <code>libxi-dev</code>, <code>libgl1-mesa-dev</code>).</li>
 </ul>
+<h3 id="starter-templates"><a class="header" href="#starter-templates">Starter templates</a></h3>
+<p>The repository ships two minimal starter projects under <a href="https://github.com/goolord/nano-ui/tree/main/templates/sdl"><code>templates/sdl</code></a> and <a href="https://github.com/goolord/nano-ui/tree/main/templates/rgfw"><code>templates/rgfw</code></a>. With Nix flakes:</p>
+<pre><code class="language-sh">nix flake init -t github:goolord/nano-ui#sdl   # full SDL3 desktop app
+nix flake init -t github:goolord/nano-ui#rgfw  # zero-SDL RGFW starter
+</code></pre>
 <h3 id="nix-linux-and-macos"><a class="header" href="#nix-linux-and-macos">Nix (Linux and macOS)</a></h3>
-<p>Inside a checkout of the <code>nano-ui</code> repository, <code>nix develop</code> drops you into a shell with GHC, Cabal, SDL3, SDL3_ttf, and <code>pkg-config</code> already configured.</p>
+<p>Inside a checkout of the <code>nano-ui</code> repository (or either template), <code>nix develop</code> drops you into a shell with GHC, Cabal, and the backend dependencies already configured.</p>
 <h3 id="windows"><a class="header" href="#windows">Windows</a></h3>
-<p>Install SDL3 and SDL3_ttf through MSYS2 UCRT64:</p>
+<p>To use <code>nano-ui-rgfw</code>, no extra libraries are needed. To use <code>nano-ui-sdl</code>, install SDL3 and SDL3_ttf through MSYS2 UCRT64:</p>
 <pre><code class="language-sh">pacman -S mingw-w64-ucrt-x86_64-sdl3 mingw-w64-ucrt-x86_64-sdl3-ttf mingw-w64-ucrt-x86_64-pkg-config
 </code></pre>
 <p>Then point <code>PKG_CONFIG_PATH</code> at the MSYS2 <code>pkgconfig</code> directory:</p>
 <pre><code class="language-powershell">$env:PKG_CONFIG_PATH = "C:\msys64\ucrt64\lib\pkgconfig"
 </code></pre>
 <h2 id="adding-nano-ui-to-your-project"><a class="header" href="#adding-nano-ui-to-your-project">Adding nano-ui to your project</a></h2>
-<p>Although <code>nano-ui</code> is published on Hackage, this book tracks the git repository, which is often ahead of the latest release. Pin the repository in your <code>cabal.project</code>:</p>
+<p>Add <code>nano-ui</code> and a backend (<code>nano-ui-sdl</code> or <code>nano-ui-rgfw</code>) to your <code>.cabal</code> file:</p>
+<pre><code class="language-cabal">executable my-app
+  main-is: Main.hs
+  default-language: GHC2024
+  default-extensions: OverloadedStrings
+  ghc-options: -threaded -Wall
+  build-depends:
+      base &gt;= 4.20 &amp;&amp; &lt; 5
+    , nano-ui ^&gt;= 0.2
+    , nano-ui-sdl ^&gt;= 0.2   -- or nano-ui-rgfw ^&gt;= 0.2 (no SDL3 required)
+    , text
+</code></pre>
+<p>To track the git repository instead of Hackage, pin the packages you use in <code>cabal.project</code> (<code>nano-ui-sdl</code> also needs <code>nano-ui-emit</code> and <code>nano-ui-ttf</code>; <code>nano-ui-rgfw</code> needs <code>nano-ui-emit</code> and <code>nano-ui-rgfw-bindings</code>):</p>
 <pre><code class="language-cabal">source-repository-package
   type: git
   location: https://github.com/goolord/nano-ui
@@ -207,23 +224,8 @@
     packages/nano-ui-emit
     packages/nano-ui-ttf
     packages/nano-ui-sdl
-
-package nano-ui-sdl
-  flags: +sdl
 </code></pre>
-<p>If you want optional companion packages such as <code>nano-ui-emit</code> or <code>nano-ui-diagrams</code>, list them in both <code>subdir</code> and your <code>.cabal</code> file’s <code>build-depends</code>.</p>
-<p>Next, configure your executable in <code>my-app.cabal</code>:</p>
-<pre><code class="language-cabal">executable my-app
-  main-is: Main.hs
-  default-language: GHC2024
-  default-extensions: OverloadedStrings
-  ghc-options: -threaded -Wall
-  build-depends:
-      base &gt;= 4.20 &amp;&amp; &lt; 5
-    , nano-ui
-    , nano-ui-sdl
-    , text
-</code></pre>
+<p>If you want optional companion packages such as <code>nano-ui-diagrams</code>, <code>nano-ui-form</code>, <code>nano-ui-markdown</code>, <code>nano-ui-shader</code>, or <code>nano-ui-svg</code>, list them in <code>build-depends</code> (and in <code>subdir</code> when building from git).</p>
 <blockquote class="blockquote-tag blockquote-tag-important">
 <p class="blockquote-tag-title"><svg viewbox="0 0 16 16" width="18" height="18"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Zm7 2.25v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z"></path></svg>Important</p>
 <p>Always compile executables with <code>-threaded</code>. Between frames, the backend sleeps inside SDL’s foreign event-wait call. On the non-threaded runtime, that foreign call stalls every Haskell thread, so <code>Task</code> and <code>Stream</code> workers freeze whenever the window is idle.</p>
@@ -294,7 +296,7 @@ appView = columnWith (gap 12 . padAll 20 . alignCenter) $ do
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../tutorials/index.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../getting-started/migrating-0.2.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -308,7 +310,7 @@ appView = columnWith (gap 12 . padAll 20 . alignCenter) $ do
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../tutorials/index.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../getting-started/migrating-0.2.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

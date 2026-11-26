@@ -1,0 +1,428 @@
+<!DOCTYPE HTML>
+<html lang="en" class="coal sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Migrating from 0.1 to 0.2 - nano-ui Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-e96d0476.css">
+        <link rel="stylesheet" href="../css/chrome-d279d366.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="../theme/nano-ui-book-0b1cafdd.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "coal";
+            const default_dark_theme = "coal";
+            window.path_to_searchindex_js = "../searchindex-3d3bc8da.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc-aa96699d.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('coal')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">nano-ui Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+                        <a href="https://github.com/goolord/nano-ui" title="Git repository" aria-label="Git repository">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="migrating-from-01-to-02"><a class="header" href="#migrating-from-01-to-02">Migrating from 0.1 to 0.2</a></h1>
+<p>Version 0.2 brings a concrete <code>NanoUI</code> monad, <code>Var</code>-based state, an opaque
+<code>Layout</code> API, typed fragment shaders, and cleaner package boundaries. This
+guide lists the breaking changes encountered when porting real applications
+from 0.1 to 0.2.</p>
+<h2 id="cabal-dependencies-and-project-setup"><a class="header" href="#cabal-dependencies-and-project-setup">Cabal dependencies and project setup</a></h2>
+<p>All <code>nano-ui*</code> packages now version in lockstep at <code>0.2.0.0</code> with <code>^&gt;=0.2</code>
+bounds.</p>
+<pre><code class="language-cabal">build-depends:
+  , nano-ui      ^&gt;=0.2
+  , nano-ui-sdl  ^&gt;=0.2
+  -- optional, if you use NanoUI.Emit or runSdlAppReduce:
+  , nano-ui-emit ^&gt;=0.2
+</code></pre>
+<p>If you pin this repository from Git in a <code>cabal.project</code>, add
+<code>packages/nano-ui-ttf</code> to your <code>subdir:</code> list because <code>nano-ui-sdl</code> now shares
+its SDL3_ttf text layer through <code>nano-ui-ttf</code> (its <code>+sdl</code> flag defaults to
+true). If you have <code>tests: True</code> globally in <code>cabal.project</code>, also include
+<code>packages/nano-ui-shader</code> (or set <code>tests: False</code> on <code>package nano-ui-sdl</code>).
+Remove any stale <code>+simd</code> or <code>-simd</code> flag on <code>nano-ui-sdl</code>.</p>
+<h2 id="monad-and-io"><a class="header" href="#monad-and-io">Monad and IO</a></h2>
+<p>Views no longer carry an <code>effectful</code> constraint.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>0.1</th><th>0.2</th></tr>
+</thead>
+<tbody>
+<tr><td><code>Ui :&gt; es =&gt; Eff es a</code></td><td><code>NanoUI a</code></td></tr>
+<tr><td><code>uiIO action</code></td><td><code>liftIO action</code></td></tr>
+<tr><td>Mixing other <code>effectful</code> effects directly</td><td>Import <code>NanoUI.Effectful</code> (<code>NanoUIEs</code>, <code>Ui</code>, <code>embedNanoUI</code>, <code>withRunInNanoUI</code>)</td></tr>
+<tr><td><code>runUi</code> from <code>NanoUI</code> / <code>NanoUI.Backend</code></td><td><code>runUi</code> from <code>NanoUI.Effectful</code>, or <code>runNanoUI</code> from <code>NanoUI.Backend</code></td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="state-and-var"><a class="header" href="#state-and-var">State and <code>Var</code></a></h2>
+<p>Hooks (<code>useState</code>, <code>useInt</code>, <code>useFloat</code>, <code>useFlag</code>, <code>useText</code>, <code>useEnum</code>,
+<code>useToggle</code>, <code>useTableSort</code>, <code>useContextMenu</code>) and <code>StateCell</code> are replaced
+by <code>Var</code>. Interactive controls and overlays take a <code>Var</code> directly and write
+edits back to it; primed variants return <code>Response</code>.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>0.1</th><th>0.2</th></tr>
+</thead>
+<tbody>
+<tr><td><code>StateCell a</code>, <code>newState x</code></td><td><code>Var a</code>, <code>newVar x</code></td></tr>
+<tr><td><code>(v, setV) &lt;- useState cell</code></td><td><code>v &lt;- readVar var</code>, <code>writeVar var v'</code></td></tr>
+<tr><td><code>modifyState cell f</code></td><td><code>modifyVar var f</code></td></tr>
+<tr><td><code>(t, setT) &lt;- useText x; setT =&lt;&lt; textInput t</code></td><td><code>t &lt;- useVar x; textInput t</code></td></tr>
+<tr><td><code>useInt</code>, <code>useFloat</code>, <code>useFlag</code>, <code>useText</code></td><td><code>useVar</code></td></tr>
+<tr><td><code>useEnum</code></td><td><code>useEnumVar</code></td></tr>
+<tr><td><code>useToggle</code></td><td><code>useVar False</code> with <code>modifyVar v not</code></td></tr>
+<tr><td><code>useTableSort</code></td><td><code>useVar (SortCol 0 SortAsc)</code></td></tr>
+<tr><td><code>useContextMenu</code></td><td><code>popup</code> with a <code>Var (Maybe V2)</code> or <code>Var Bool</code></td></tr>
+<tr><td>Value-in, value-out control (<code>x' &lt;- slider 0 1 x</code>)</td><td><code>(_, x') &lt;- withValue x (slider 0 1)</code></td></tr>
+<tr><td>Read-only derived value in a control</td><td><code>constVar x</code></td></tr>
+<tr><td><code>(r, a) &lt;- modal open title body</code></td><td><code>modal openVar title body</code> (or <code>(r, a) &lt;- modal' (constVar open) title body</code>)</td></tr>
+<tr><td><code>window open title body</code></td><td><code>floatingWindow openVar title body</code> (or <code>floatingWindow'</code> for <code>Response</code>)</td></tr>
+<tr><td><code>popup open anchor body</code></td><td><code>popup openVar anchor body</code> (or <code>popup'</code> for <code>Response</code>)</td></tr>
+<tr><td><code>table</code> returning <code>TableResponse</code></td><td><code>table'</code> / <code>tableWith'</code> / <code>tableConfigured'</code></td></tr>
+<tr><td><code>useTask key action</code>, <code>useStream</code>, <code>useImageRgba</code>, <code>useDrag*</code></td><td>Allocate a handle once (<code>newTask</code>, <code>newStream</code>, <code>newImageHandle</code>, <code>newDrag</code>) and pass it first</td></tr>
+</tbody>
+</table>
+</div>
+<p>Keyed scopes (<code>withKey</code>, <code>forEachVar</code>, <code>PaneGrid</code> panes) no longer consume a
+positional sibling id, so widgets declared after a keyed list keep their
+focus and state when the list changes.</p>
+<h2 id="typed-emission-nano-ui-emit"><a class="header" href="#typed-emission-nano-ui-emit">Typed emission (<code>nano-ui-emit</code>)</a></h2>
+<p><code>NanoUI.Emit</code>, reducer runners (<code>runSdlAppReduce</code>, <code>reduceMessages</code>,
+<code>reduceUpdates</code>, <code>runFrameE</code>), and reducer test helpers moved to the
+<code>nano-ui-emit</code> package using <code>NanoUIE msg a</code> without <code>Typeable</code>.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>0.1</th><th>0.2</th></tr>
+</thead>
+<tbody>
+<tr><td><code>Emit.button "Save" Save</code></td><td><code>Emit.emitWhen (button "Save") Save</code></td></tr>
+<tr><td><code>Emit.slider 0 1 val SetVal</code></td><td><code>Emit.emitChanged (slider 0 1) val SetVal</code></td></tr>
+<tr><td><code>Emit.textArea doc SetDoc</code></td><td><code>Emit.emitEdited textArea' doc SetDoc</code></td></tr>
+<tr><td><code>runFrame</code> returning <code>(a, dd, dirty, msgs)</code></td><td><code>runFrame</code> returns <code>(a, dd, dirty)</code>; use <code>runFrameE</code> for typed messages</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="module-splits"><a class="header" href="#module-splits">Module splits</a></h2>
+<p>Top-level <code>NanoUI</code> now focuses on view code. Specialized widgets, themes,
+custom drawing, and backend helpers live in dedicated modules:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Symbols</th><th>0.2 module</th></tr>
+</thead>
+<tbody>
+<tr><td>Built-in themes (<code>tomorrowNightMinDarkTheme</code>, <code>nordTheme</code>, …)</td><td><code>NanoUI.Themes</code></td></tr>
+<tr><td><code>paneGrid</code>, <code>GridNode</code>, <code>PaneGridConfig</code>, <code>PaneGridCtx</code>, <code>PaneDropLocation</code>, <code>paneDragHandle</code></td><td><code>NanoUI.Widgets.PaneGrid</code></td></tr>
+<tr><td><code>customWidget</code>, <code>CustomWidgetSpec</code>, <code>defaultCustomWidgetSpec</code>, <code>DrawOp</code>, <code>KeyClaim</code>, <code>runCanvasFor</code>, <code>bindVar</code></td><td><code>NanoUI.Widgets.Custom</code></td></tr>
+<tr><td><code>captionButtons</code>, <code>dragSpans</code>, <code>windowFrame</code>, <code>WindowFrame</code></td><td><code>NanoUI.Chrome</code></td></tr>
+<tr><td><code>TextDocument</code>, <code>replaceDocumentRange</code>, <code>editDocument</code></td><td><code>NanoUI.Widgets.TextDocument</code></td></tr>
+<tr><td><code>colorToWord32</code>, <code>emptyInput</code>, <code>buttonsFromList</code>, <code>inputKeysFromList</code>, <code>setThemeIO</code>, <code>withTheme</code>, <code>mix64</code>, <code>Layout (..)</code></td><td><code>NanoUI.Backend</code></td></tr>
+<tr><td><code>shortcut</code>, <code>shortcutOnce</code>, <code>ctrl</code>, <code>shift</code>, <code>alt</code>, <code>super</code>, <code>cmdOrCtrl</code>, <code>key</code>, <code>parseShortcut</code></td><td><code>NanoUI.Shortcut</code></td></tr>
+<tr><td><code>NanoUI.Context</code>, <code>NanoUI.Store</code>, <code>NanoUI.Layout.*</code>, <code>NanoUI.Id</code>, <code>NanoUI.Debug</code></td><td><code>NanoUI.Internal.*</code></td></tr>
+</tbody>
+</table>
+</div>
+<p><code>NanoUI</code> also exports <code>selectableRow</code>, <code>collapsing</code>, <code>SortKey</code>, and
+<code>textCell</code>. If your view defines helpers with those names, hide them on the
+<code>import NanoUI</code> line or switch to the built-ins.</p>
+<h2 id="layout-and-widget-configs"><a class="header" href="#layout-and-widget-configs">Layout and widget configs</a></h2>
+<p><code>Layout</code> constructors and fields are no longer exported from <code>NanoUI</code>. Use
+layout modifiers instead, and pass <code>LayoutModifier</code> (<code>Layout -&gt; Layout</code>)
+directly to widget config layout fields without applying <code>defaultLayout</code>.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>0.1</th><th>0.2</th></tr>
+</thead>
+<tbody>
+<tr><td><code>defaultLayout { layoutPadding = Padding l r t b }</code></td><td><code>padLRTB l r t b</code> (or <code>padLeft</code>, <code>padRight</code>, <code>padTop</code>, <code>padBottom</code>, <code>padAll</code>, <code>padXY</code>)</td></tr>
+<tr><td><code>defaultLayout { layoutDir = Row }</code></td><td><code>direction Row</code></td></tr>
+<tr><td><code>defaultLayout { layoutWidth = Grow }</code></td><td><code>growW</code> (or <code>fillW</code>)</td></tr>
+<tr><td><code>ticLayout = fillW defaultLayout</code> (same for <code>sicLayout</code>, <code>bcLayout</code>, <code>canvasLayout</code>, <code>widgetLayout</code>, <code>scLayout</code>, <code>pgLayout</code>)</td><td><code>ticLayout = fillW</code> (a <code>LayoutModifier</code>, not a <code>Layout</code>)</td></tr>
+<tr><td><code>alignMid</code></td><td><code>alignMiddle</code></td></tr>
+<tr><td><code>fixedWH w h</code> allowing <code>minW</code> overrides</td><td><code>fixedWH w h</code> sets <code>minW</code>/<code>maxW</code> to <code>w</code> and <code>minH</code>/<code>maxH</code> to <code>h</code></td></tr>
+<tr><td><code>muted</code> / <code>danger</code> filling row width</td><td><code>muted</code> / <code>danger</code> no longer imply <code>fillW</code>; add <code>fillW</code> where needed</td></tr>
+<tr><td><code>scrollArea</code> / <code>scrollArea2D</code> / <code>scrollAreaConfigured</code></td><td><code>scrollWith'</code> / <code>scroll2DWith'</code> / <code>scrollConfigured'</code> (return <code>(a, Response)</code>)</td></tr>
+<tr><td><code>defaultScrollConfig</code> allowing 2D scroll</td><td><code>defaultScrollConfig</code> is vertical-only; use <code>scroll2DConfig</code> for 2D</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="widget-and-input-renames"><a class="header" href="#widget-and-input-renames">Widget and input renames</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>0.1</th><th>0.2</th></tr>
+</thead>
+<tbody>
+<tr><td><code>searchField*</code>, <code>SearchFieldConfig</code>, <code>sfc*</code></td><td><code>searchInput*</code>, <code>SearchInputConfig</code>, <code>sic*</code></td></tr>
+<tr><td><code>boundedSelect</code>, <code>boundedRadio</code>, <code>boundedTabs*</code>, <code>boundedTabBar*</code></td><td><code>enumSelectBy</code>, <code>enumRadioBy</code>, <code>enumTabsBy*</code>, <code>enumTabBarBy*</code></td></tr>
+<tr><td><code>PopupConfig</code>: <code>cfgPlacement</code>, <code>cfgOffset</code>, <code>cfgDismissable</code></td><td><code>popupPlacement</code>, <code>popupOffset</code>, <code>popupDismissable</code></td></tr>
+<tr><td><code>Cell</code> width override <code>withText</code></td><td><code>cellWidthText</code></td></tr>
+<tr><td><code>getScrollMetricsUi</code>, <code>scrollToUi</code>, <code>setScrollOffsetUi</code>, <code>scrollPagesUi</code>, <code>scrollToEndUi</code>, <code>scrollRectIntoViewUi</code>, <code>setScrollStepUi</code></td><td>Same names without the <code>Ui</code> suffix (<code>getScrollMetrics</code>, <code>scrollTo</code>, …)</td></tr>
+<tr><td><code>setWindowTitleUi</code>, <code>resizeWindowUi</code>, <code>moveWindowUi</code>, <code>maximizeWindowUi</code>, <code>quitUi</code>, <code>setUiTheme</code></td><td>Same names without <code>Ui</code> (<code>setWindowTitle</code>, <code>resizeWindow</code>, <code>moveWindow</code>, <code>maximizeWindow</code>, <code>quit</code>, <code>setTheme</code>)</td></tr>
+<tr><td><code>inputMousePressed</code> / <code>inputMouseReleased</code> fields</td><td><code>mousePressed MouseLeft</code> / <code>mouseReleased MouseLeft</code>, or <code>pressedIn</code> / <code>releasedIn</code> on <code>Input</code></td></tr>
+<tr><td><code>textFieldActive</code> / <code>floatingPanelActive</code> shortcut guards</td><td>Use <code>shortcut</code> / <code>shortcutOnce</code> / <code>keyPressed</code>, which respect modals, <code>disabledWhen</code>, and focused widget <code>KeyClaim</code>s</td></tr>
+<tr><td><code>runCanvas</code> inside <code>CustomWidgetSpec</code></td><td><code>runCanvasFor dc</code></td></tr>
+<tr><td><code>widgetCursor :: CustomDrawContext -&gt; UiCursorKind</code></td><td><code>widgetCursor :: CustomDrawContext -&gt; Rect -&gt; V2 -&gt; UiCursorKind</code></td></tr>
+<tr><td><code>parseSvg :: Text -&gt; Either Text Svg</code></td><td><code>parseSvg :: ByteString -&gt; Either Text Svg</code> (UTF-8)</td></tr>
+<tr><td><code>Theme { ... }</code> record construction</td><td>Update <code>defaultTheme { ... }</code> or <code>defaultLightTheme { ... }</code> (<code>themePage</code>, <code>themePopup</code>, <code>themeSuccess</code>, <code>themeWarning</code>, <code>themeDanger</code> were added)</td></tr>
+<tr><td><code>Style { ... }</code> record construction</td><td>Update <code>defaultStyle</code> or an existing theme style (<code>styleBorderSides</code> was added)</td></tr>
+<tr><td><code>TextFont</code> positional construction</td><td>Gained a trailing <code>Bool</code> field (<code>textFontTabular</code>, pass <code>False</code> for proportional digits)</td></tr>
+<tr><td><code>foldInputKeys</code> / <code>inputKeysElem</code> from <code>NanoUI</code></td><td>Import from <code>NanoUI.Input</code></td></tr>
+<tr><td><code>nextId</code> from <code>NanoUI</code></td><td>Import from <code>NanoUI.Monad</code></td></tr>
+<tr><td><code>getScrollMetrics ctx wid</code> in <code>IO</code></td><td><code>getScrollMetricsIO ctx wid</code> from <code>NanoUI.Testing</code> / <code>NanoUI.Backend</code></td></tr>
+<tr><td><code>tabKey</code> requiring <code>Eq</code> only</td><td><code>tabKey</code> requires <code>Hashable</code></td></tr>
+<tr><td><code>pvDragPick</code> in <code>PaneGrid</code></td><td>Wrap the pane header in <code>paneDragHandle</code></td></tr>
+<tr><td><code>useListNav</code> index (<code>Int</code> with <code>-1</code> sentinel)</td><td><code>Maybe Int</code></td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="sdl-backend-nano-ui-sdl"><a class="header" href="#sdl-backend-nano-ui-sdl">SDL backend (<code>nano-ui-sdl</code>)</a></h2>
+<p>Views no longer thread an <code>SdlEnv</code> handle.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>0.1</th><th>0.2</th></tr>
+</thead>
+<tbody>
+<tr><td><code>runSdlAppWith setup view</code></td><td>Allocate state in <code>IO</code> (<code>s &lt;- setup</code>) and call <code>runSdlApp opts (view s)</code></td></tr>
+<tr><td><code>sdlWindowTitle</code>, <code>sdlWindowSize</code>, <code>sdlWindowResizable</code>, <code>sdlWindowFullscreen</code>, <code>sdlWindowHidden</code></td><td><code>sdlWindowSettings = defaultWindowSettings { wsTitle = ..., wsSize = ..., wsResizable = ..., wsMode = ... }</code></td></tr>
+<tr><td><code>sdlWindowBorderless = True</code></td><td><code>sdlWindowDecorations = DecorationsNone</code> (or <code>DecorationsFrame</code> for custom title bars with native resize edges)</td></tr>
+<tr><td><code>askOpenFileDialog env opts</code> returning <code>Maybe FileDialogId</code></td><td><code>askOpenFileDialog opts</code> returning <code>FileDialogId</code> directly (same for save/folder dialogs)</td></tr>
+<tr><td><code>setSdlUiFont env ...</code>, <code>setSdlUiScale env ...</code>, <code>askSdlDebug env</code></td><td>Same functions without the <code>env</code> argument (<code>askSdlDebug</code> returns <code>Maybe SdlDebugSnapshot</code>)</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="companion-packages"><a class="header" href="#companion-packages">Companion packages</a></h2>
+<ul>
+<li><strong>nano-ui-diagrams:</strong> Pass a <code>PlotCache</code> allocated once with <code>newPlotCache</code>
+to plotting functions.</li>
+<li><strong>nano-ui-form:</strong> Pass a <code>FormState</code> allocated once with <code>newFormState</code>.
+<code>NanoUI.Form.Named</code> and <code>NanoUI.Form.Unnamed</code> merged into
+<code>NanoUI.Form.Input</code> using <code>FieldName</code>, and <code>label</code> / <code>separator</code> became
+<code>formLabel</code> / <code>formSeparator</code>.</li>
+<li><strong>nano-ui-markdown:</strong> Use <code>markdownWith</code> for custom layout modifiers.</li>
+<li><strong>nano-ui-shader:</strong> Renamed <code>select</code> to <code>selectE</code> to avoid clashing with
+<code>NanoUI.select</code>.</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../getting-started/quickstart.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../tutorials/index.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../getting-started/quickstart.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../tutorials/index.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-09f2665d.js"></script>
+
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-609e4cb8.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../theme/nano-ui-banks-28c9304c.js"></script>
+        <script src="../theme/nano-ui-components-6e817ca2.js"></script>
+
+
+
+    </div>
+    </body>
+</html>
