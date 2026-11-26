@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               nano-ui-emit
-version:            0.1.0.0
+version:            0.2.0.0
 synopsis:           Statically typed messages and reducers for nano-ui
 description:        Typed emitting views, widget adapters, and headless reducer runners.
 license:            MIT
@@ -56,6 +56,6 @@ test-suite nano-ui-emit-test
     hs-source-dirs:   test
     build-depends:
         base >=4.20 && <4.23,
-        nano-ui,
+        nano-ui ^>=0.2,
         nano-ui-emit,
         text ^>=2.1

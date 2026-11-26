@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0.0 -- Unreleased
+## 0.2.0.0 -- Unreleased
 
 - `NanoUI.Draw.FrameSvg` with `frameToSvg`: renders a whole painted frame of
   any view from its `DrawData`, draw-op caches, and raster spans: widget

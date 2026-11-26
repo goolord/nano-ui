@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0.0 -- Unreleased
+## 0.2.0.0 -- Unreleased
 
 - Initial release of the typed fragment shader EDSL (`NanoUI.Shader`, `NanoUI.Shader.Expr`, `NanoUI.Shader.Compose`, `NanoUI.Shader.Effects`).
 - Compiles lowered SSA IR to GLSL 150, GLSL ES 300, SPIR-V, MSL, and a pure-Haskell CPU reference evaluator.

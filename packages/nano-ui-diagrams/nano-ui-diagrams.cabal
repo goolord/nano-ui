@@ -85,7 +85,7 @@ test-suite nano-ui-diagrams-test
         colour >=2.3.2 && <2.4,
         diagrams-lib >=1.6 && <1.7,
         hspec ^>=2.11,
-        nano-ui,
+        nano-ui ^>=0.2,
         nano-ui-diagrams,
         primitive ^>=0.9,
         text ^>=2.1,

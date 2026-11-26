@@ -103,7 +103,7 @@ test-suite nano-ui-form-test
         base >=4.20 && <4.23,
         containers >=0.7 && <0.9,
         ditto ^>=0.5.0,
-        nano-ui,
+        nano-ui ^>=0.2,
         nano-ui-form,
         text ^>=2.1
     hs-source-dirs:   test

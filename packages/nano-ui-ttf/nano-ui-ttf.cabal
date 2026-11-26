@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               nano-ui-ttf
-version:            0.1.0.0
+version:            0.2.0.0
 synopsis:           Shared SDL3_ttf shaping, glyph atlas, and font cache for nano-ui
 description:
     Internal shared TrueType shaping, glyph atlas bookkeeping, font caching,

@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               nano-ui-sdl-web
-version:            0.1.0.0
+version:            0.2.0.0
 synopsis:           Browser backend for nano-ui with SDL_ttf text and WebGL2
 description:
     Runs nano-ui views in a browser canvas. Built with GHC's WebAssembly
@@ -80,8 +80,8 @@ library
         bytestring ^>=0.12,
         containers >=0.7 && <0.9,
         nano-ui ^>=0.2,
-        nano-ui-emit ^>=0.1,
-        nano-ui-ttf ^>=0.1,
+        nano-ui-emit ^>=0.2,
+        nano-ui-ttf ^>=0.2,
         primitive ^>=0.9,
         text >=2.1.2 && <2.2,
         vector ^>=0.13
@@ -103,7 +103,7 @@ executable nano-ui-sdl-web-demo
     hs-source-dirs:   examples
     build-depends:
         base >=4.20 && <4.23,
-        nano-ui,
+        nano-ui ^>=0.2,
         nano-ui-sdl-web,
         text ^>=2.1
     if arch(wasm32)
@@ -123,9 +123,9 @@ test-suite nano-ui-sdl-web-test
         base >=4.20 && <4.23,
         bytestring ^>=0.12,
         containers >=0.7 && <0.9,
-        nano-ui,
+        nano-ui ^>=0.2,
         nano-ui-sdl-web,
-        nano-ui-ttf,
+        nano-ui-ttf ^>=0.2,
         primitive ^>=0.9,
         text ^>=2.1,
         vector ^>=0.13

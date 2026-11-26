@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               nano-ui-demo
-version:            0.1.0.0
+version:            0.2.0.0
 synopsis:           Example applications for nano-ui
 description:
     SDL3 examples for nano-ui: a widget tour, a text editor, a log viewer, a
@@ -126,13 +126,13 @@ library book-examples
     build-depends:
         bytestring ^>=0.12,
         nano-ui ^>=0.2,
-        nano-ui-emit ^>=0.1,
+        nano-ui-emit ^>=0.2,
         nano-ui-form ^>=0.2,
-        nano-ui-markdown ^>=0.1,
-        nano-ui-rgfw ^>=0.1,
+        nano-ui-markdown ^>=0.2,
+        nano-ui-rgfw ^>=0.2,
         nano-ui-sdl ^>=0.2,
-        nano-ui-shader ^>=0.1,
-        nano-ui-svg ^>=0.1,
+        nano-ui-shader ^>=0.2,
+        nano-ui-svg ^>=0.2,
         primitive ^>=0.9,
         text ^>=2.1
 
@@ -210,7 +210,7 @@ executable nano-ui-web-sampler
         nano-ui ^>=0.2,
         nano-ui-demo:sampler-files,
         nano-ui-diagrams ^>=0.2,
-        nano-ui-sdl-web ^>=0.1,
+        nano-ui-sdl-web ^>=0.2,
         text ^>=2.1,
         vector ^>=0.13
     if arch(wasm32)
@@ -230,8 +230,8 @@ executable nano-ui-web-landing
     build-depends:
         base >=4.20 && <4.23,
         nano-ui ^>=0.2,
-        nano-ui-sdl-web ^>=0.1,
-        nano-ui-shader ^>=0.1,
+        nano-ui-sdl-web ^>=0.2,
+        nano-ui-shader ^>=0.2,
         text ^>=2.1
     if arch(wasm32)
         ghc-options: -no-hs-main -optl-mexec-model=reactor "-optl-Wl,--export=hs_init,--export=nanoMain"
@@ -253,7 +253,7 @@ executable nano-ui-demo-svg
     import:           demo-module
     main-is:          DemoSvg.hs
     other-modules:    Demo
-    build-depends:    nano-ui-svg ^>=0.1
+    build-depends:    nano-ui-svg ^>=0.2
 
 executable nano-ui-sdl-notepad
     import:           sdl-exe
@@ -356,7 +356,7 @@ executable nano-ui-example-bloom
     main-is:          BloomMain.hs
     other-modules:    Bloom
     build-depends:
-        nano-ui-shader ^>=0.1,
+        nano-ui-shader ^>=0.2,
         text ^>=2.1
 
 -- The landing page's program in an SDL window; nano-ui-web-landing is the
@@ -367,7 +367,7 @@ executable nano-ui-sdl-landing
     main-is:          LandingMain.hs
     other-modules:    Bloom, Landing
     build-depends:
-        nano-ui-shader ^>=0.1,
+        nano-ui-shader ^>=0.2,
         text ^>=2.1
 
 executable nano-ui-example-images
@@ -385,7 +385,7 @@ executable nano-ui-example-shaders
     import:           example
     main-is:          Shaders.hs
     build-depends:
-        nano-ui-shader ^>=0.1,
+        nano-ui-shader ^>=0.2,
         text ^>=2.1
 
 executable nano-ui-example-tasks
@@ -418,7 +418,7 @@ executable nano-ui-example-elm
     import:           sdl-exe
     main-is:          Elm.hs
     build-depends:
-        nano-ui-emit ^>=0.1,
+        nano-ui-emit ^>=0.2,
         nano-ui-sdl ^>=0.2,
         text ^>=2.1
 

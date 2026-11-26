@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               nano-ui-rgfw
-version:            0.1.0.0
+version:            0.2.0.0
 synopsis:           RGFW and OpenGL window backend for nano-ui
 description:
     Runs nano-ui views in a native window through RGFW and OpenGL 3.2, with
@@ -63,9 +63,9 @@ library
         bytestring ^>=0.12,
         containers >=0.7 && <0.9,
         file-embed ^>=0.0.16,
-        nano-ui-rgfw-bindings ^>=0.1,
         nano-ui ^>=0.2,
-        nano-ui-emit ^>=0.1,
+        nano-ui-emit ^>=0.2,
+        nano-ui-rgfw-bindings ^>=0.2,
         primitive ^>=0.9,
         text ^>=2.1,
         vector ^>=0.13
@@ -81,8 +81,8 @@ executable nano-ui-rgfw-demo
     build-depends:
         base >=4.20 && <4.23,
         hashable ^>=1.5,
-        nano-ui,
-        nano-ui-emit,
+        nano-ui ^>=0.2,
+        nano-ui-emit ^>=0.2,
         nano-ui-rgfw,
         text ^>=2.1
     hs-source-dirs:   examples
@@ -97,10 +97,10 @@ executable nano-ui-rgfw-profile
         base >=4.20 && <4.23,
         bytestring ^>=0.12,
         hashable ^>=1.5,
-        nano-ui,
-        nano-ui-emit,
+        nano-ui ^>=0.2,
+        nano-ui-emit ^>=0.2,
         nano-ui-rgfw,
-        nano-ui-rgfw-bindings,
+        nano-ui-rgfw-bindings ^>=0.2,
         text ^>=2.1
     hs-source-dirs:   examples
 
@@ -118,11 +118,11 @@ test-suite nano-ui-rgfw-test
     build-depends:
         base >=4.20 && <4.23,
         bytestring ^>=0.12,
-        nano-ui,
-        nano-ui-emit,
+        nano-ui ^>=0.2,
+        nano-ui-emit ^>=0.2,
         nano-ui-rgfw,
-        nano-ui-rgfw-bindings,
-        nano-ui-shader,
+        nano-ui-rgfw-bindings ^>=0.2,
+        nano-ui-shader ^>=0.2,
         primitive ^>=0.9,
         text ^>=2.1
     hs-source-dirs:   test

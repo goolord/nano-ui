@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               nano-ui-rgfw-bindings
-version:            0.1.0.0
+version:            0.2.0.0
 synopsis:           Haskell bindings to RGFW
 description:
     Bindings to RGFW, a single-header C library for windows, input, and

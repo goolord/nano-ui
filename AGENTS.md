@@ -57,9 +57,9 @@ winget-gui) pin this repository as a Cabal `source-repository-package`.
   `-Wunused-packages`: remove a stale `build-depends` entry along with its
   last import. The stanza is copied into each `.cabal` file;
   `scripts/check-cabal-common.py` (run in CI) fails when the copies differ.
-- Companion packages depend on `nano-ui ^>=0.2`. They also import
-  `NanoUI.Internal.*` modules; change those modules and their companion
-  callers in the same commit.
+- All `nano-ui*` packages version in lockstep (`0.2.0.0`) and depend on each
+  other with `^>=0.2`. Companion packages also import `NanoUI.Internal.*`
+  modules; change those modules and their companion callers in the same commit.
 - No formatter is enforced. Match the surrounding layout by hand, and do not
   run fourmolu or ormolu over existing files: the result rewrites most of a
   module.

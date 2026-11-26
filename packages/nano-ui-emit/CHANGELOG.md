@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0.0 -- Unreleased
+## 0.2.0.0 -- Unreleased
 
 - `reduceFrame` keeps the late messages it took when the view throws, so
   they are reduced on the next frame instead of being lost, and drops the

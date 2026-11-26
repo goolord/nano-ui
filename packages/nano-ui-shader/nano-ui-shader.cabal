@@ -1,6 +1,6 @@
 cabal-version:      3.4
 name:               nano-ui-shader
-version:            0.1.0.0
+version:            0.2.0.0
 synopsis:           Typed fragment shader EDSL and multi-target compiler for nano-ui
 description:
     A pure-Haskell typed fragment shader EDSL for nano-ui nodes. Author
@@ -83,7 +83,7 @@ test-suite nano-ui-shader-test
     build-depends:
         base >=4.20 && <4.23,
         bytestring ^>=0.12,
-        nano-ui,
+        nano-ui ^>=0.2,
         nano-ui-shader,
         text ^>=2.1,
         vector ^>=0.13
