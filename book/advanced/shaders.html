@@ -36,7 +36,7 @@
             const path_to_root = "../";
             const default_light_theme = "coal";
             const default_dark_theme = "coal";
-            window.path_to_searchindex_js = "../searchindex-4929b437.js";
+            window.path_to_searchindex_js = "../searchindex-b4022fab.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-2886a539.js"></script>
@@ -179,7 +179,7 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="shaders"><a class="header" href="#shaders">Shaders</a></h1>
-<p><code>nano-ui</code> supports typed, composable GPU fragment shaders on layout nodes across all three GPU backends: SDL 3.4+ (Vulkan/Metal via SPIR-V and MSL), RGFW (OpenGL 3.2 via GLSL 150), and the browser backend (WebGL2 via GLSL ES 300).</p>
+<p><code>nano-ui</code> supports typed, composable GPU fragment shaders on layout nodes across all three GPU backends: SDL (OpenGL 3.2+ via GLSL 150 on Windows, and SDL 3.4+ Metal/Vulkan via MSL and SPIR-V elsewhere), RGFW (OpenGL 3.2 via GLSL 150), and the browser backend (WebGL2 via GLSL ES 300).</p>
 <p>The core <code>nano-ui</code> package defines the shader types, std140 uniform packing (<code>Uniforms</code>), and the two widget entry points (<code>shaderBox</code> and <code>withShader</code>). The companion <code>nano-ui-shader</code> package adds a pure-Haskell typed fragment EDSL, compilers for all four GPU formats plus a CPU reference evaluator, algebraic pass fusion, and 21 standard effects.</p>
 <h2 id="two-tiers"><a class="header" href="#two-tiers">Two tiers</a></h2>
 <p>Every shader has a type-level kind (<code>ShaderKind</code>) that separates leaf fills from subtree post-processing:</p>
@@ -284,7 +284,7 @@ boxAverage5 =
 </table>
 </div>
 <h2 id="capabilities-fallbacks-and-svg-export"><a class="header" href="#capabilities-fallbacks-and-svg-export">Capabilities, fallbacks, and SVG export</a></h2>
-<p>On SDL 3.4+, <code>RenderDriverAuto</code> selects SDL’s <code>"gpu"</code> render driver when available (falling back to standard drivers or software rendering when unavailable). Inspect live GPU support inside a view with <code>askShaderCapabilities</code>:</p>
+<p>Under <code>RenderDriverAuto</code>, Windows uses SDL’s <code>"opengl"</code> driver (which runs GLSL 150 shaders directly with higher frame rates and smooth live window resizing), while macOS and Linux prefer SDL 3.4’s <code>"gpu"</code> driver (falling back to standard drivers or software rendering when unavailable). Inspect live GPU support inside a view with <code>askShaderCapabilities</code>:</p>
 <pre><code class="language-haskell">shaderStatus :: NanoUI ()
 shaderStatus = do
   caps &lt;- askShaderCapabilities
