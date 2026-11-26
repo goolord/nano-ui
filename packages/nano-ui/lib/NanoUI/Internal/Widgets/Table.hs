@@ -55,7 +55,7 @@ import Data.Primitive.SmallArray (SmallArray, SmallMutableArray, emptySmallArray
 import Data.Primitive.Types (Prim)
 import Data.Vector qualified as V
 import Data.Vector.Mutable qualified as MV
-import NanoUI.Internal.Context (Context (..), InteractionState (..), ScrollMetrics (..), getPrevRect, readScrollMetrics, recordLayoutRead, getPrevClipRect, pointerCovered, isDisabled, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyInteraction, writeSlot, writeSlots)
+import NanoUI.Internal.Context (Context (..), InteractionState (..), ScrollMetrics (..), getPrevRect, readScrollMetrics, recordLayoutRead, getPrevClipRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, modifyInteraction, writeSlot, writeSlots)
 import NanoUI.Internal.Var (Binding (..), bindVarOn, useVar)
 import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Derived (TableDerived (..), Opaque (..), SortCol (..), SortDir (..), SortKey (..), tableCache)
@@ -64,8 +64,9 @@ import NanoUI.Internal.Input (Input (..), MouseButton (..), Pressable (..), UiCu
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
 import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, lastRect, nextId, liftIO, scope, withKey)
-import NanoUI.Internal.Store (SlotSpec, SlotWrites, WidgetStore, encodedSpec, eqByPtr, ptrEq, fieldFloat, fieldInt, fieldIntSet, fieldTableColumns, findSpec, lookupSpec, ownSlotSpec, specKey, specWrite)
-import NanoUI.Internal.Store.Slots (slotDragItem, slotDragStartW, slotScrollRange)
+import NanoUI.Internal.Store (SlotWrites, WidgetStore, eqByPtr, fieldInt, fieldTableState, lookupSlot, ptrEq, slotWrite, specKey)
+import NanoUI.Internal.Store.Slots (slotScrollRange)
+import NanoUI.Internal.Store.Types (TableState (..))
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Sizing (..), defaultLayout, fillH, fillW, minW, tight)
 import Data.Bits ((.|.))
 import Data.String (IsString (..))
@@ -76,7 +77,7 @@ import NanoUI.Internal.Widgets.Button (buttonContentStyled)
 import NanoUI.Internal.Widgets.Behavior (Reorder (..), useReorder)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx, readDerived, writeDerived)
 import NanoUI.Internal.Widgets.Layout (column', panel', row', scrollAreaIdConfigured, separator, spacer)
-import NanoUI.Internal.Layout.ScrollGeometry (scroll2DConfig, scrollHorizontalHidden, scrollVerticalAuto, scrollVerticalHidden)
+import NanoUI.Internal.Layout.ScrollGeometry (defaultScrollConfig, scroll2DConfig, scrollHorizontalHidden, scrollVerticalHidden)
 import NanoUI.Internal.Widgets.Node
 
 -- | Size to content, share spare space, or request a fixed logical-pixel width.
@@ -142,28 +143,6 @@ sortMarkStyle sort idx
 
 minColW :: Float
 minColW = 40
-
--- | The table's column order and the widths columns were dragged to, under
--- the table's own key.
-{-# INLINE tableColumnsSlot #-}
-tableColumnsSlot :: SlotSpec ([Int], [Float])
-tableColumnsSlot = ownSlotSpec fieldTableColumns
-
--- | The table's hidden columns, under its own key.
-{-# INLINE tableHiddenSlot #-}
-tableHiddenSlot :: SlotSpec IntSet
-tableHiddenSlot = ownSlotSpec fieldIntSet
-
--- | The column a header-edge drag resizes, or -1. Stored plus one, so an
--- empty slot reads as idle.
-{-# INLINE tableResizeColSlot #-}
-tableResizeColSlot :: SlotSpec Int
-tableResizeColSlot = encodedSpec (subtract 1) (+ 1) slotDragItem
-
--- | The pointer's x when a column resize started, under the table's own key.
-{-# INLINE tableResizeXSlot #-}
-tableResizeXSlot :: SlotSpec Float
-tableResizeXSlot = ownSlotSpec fieldFloat
 
 -- | The sort the headers show, as an int on the table's container: twice the
 -- column, plus one when descending. The headers show the sort only through
@@ -295,7 +274,7 @@ sortKey sort row = fromMaybe (SortText T.empty) (row V.!? sortColIndex sort)
 
 sameSortKey :: SortKey -> SortKey -> Bool
 sameSortKey a b = case (a, b) of
-  (SortText x, SortText y) -> eqByPtr x y || x == y
+  (SortText x, SortText y) -> eqByPtr x y
   (SortNum x, SortNum y) -> (isNaN x && isNaN y) || x == y
   (SortInt x, SortInt y) -> x == y
   _ -> False
@@ -362,7 +341,6 @@ rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort
   keysM <- newSmallArray n V.empty
   changedM <- newPrimArray n
   diffM <- newPrimArray n
-  countM <- newPrimArray 1
   sortableM <- newSmallArray c False
   viewsM <- newSmallArray c False
   case old of
@@ -374,12 +352,11 @@ rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort
       encodeNew = encodeRow sortableM viewsM encoders
       note k i d = writePrimArray changedM k i >> writePrimArray diffM k d
       -- Lists the rows whose text changed or is new, each with its first
-      -- changed cell (0 for a new row), and stores their count in countM,
-      -- which keeps the counter unboxed. Rows are compared evaluated: a
-      -- list's elements are often fresh thunks over the same objects. Old
-      -- entries are read strictly, so kept text does not hold on to last
-      -- frame's arrays.
-      walk !_ !k [] = writePrimArray countM 0 k
+      -- changed cell (0 for a new row), and returns their count. Rows are
+      -- compared evaluated: a list's elements are often fresh thunks over the
+      -- same objects. Old entries are read strictly, so kept text does not
+      -- hold on to last frame's arrays.
+      walk !_ !k [] = pure k
       walk !i !k (!r : rs)
         | i < oldN = do
             let !o = indexSmallArray oldObjs i
@@ -402,8 +379,7 @@ rederive Context {ctxFontMetrics = fm, ctxMonoFontMetrics = mono} cols rows sort
         | otherwise = do
             (!e', !ky') <- encodeNew r
             store i (Opaque r) e' ky' >> note k i 0 >> walk (i + 1) (k + 1) rs
-  walk (0 :: Int) (0 :: Int) (toList rows)
-  nChanged <- readPrimArray countM 0
+  nChanged <- walk (0 :: Int) (0 :: Int) (toList rows)
   objs <- unsafeFreezeSmallArray objsM
   sortable <- unsafeFreezeSmallArray sortableM
   views <- unsafeFreezeSmallArray viewsM
@@ -664,44 +640,15 @@ tableConfigured' ::
 tableConfigured' cfg f key cols rows v =
   bindVarOn Conservative tableSort v (tableCore cfg f key cols rows)
 
--- | A table's state between frames, as 'readTableState' reads it from the
--- store and 'writeTableState' writes it back.
-data TableState = TableState
-  { tsOrder :: ![Int]
-  -- ^ Every source column in display order, hidden ones included.
-  , tsWidths :: ![Float]
-  -- ^ The width each source column was dragged to, 0 for none.
-  , tsHidden :: !IntSet
-  , tsResizeCol :: !Int
-  -- ^ The column a header-edge drag resizes, or -1.
-  , tsResizeX :: !Float
-  -- ^ The pointer's x when that resize started.
-  , tsResizeW :: !Float
-  -- ^ The column's width when that resize started.
-  }
-
 -- | The state of a table of @n@ columns under @stateKey@ in @st@.
 readTableState :: TableConfig -> Int -> Int -> WidgetStore -> TableState
-readTableState cfg n stateKey st =
-  let (storedOrder, storedWidths) = fromMaybe ([0 .. n - 1], []) (lookupSpec tableColumnsSlot stateKey st)
-   in TableState
-        { tsOrder = normalizeOrder n storedOrder
-        , tsWidths = take n (storedWidths ++ repeat 0)
-        , tsHidden = findSpec tableHiddenSlot (tableHidden cfg) stateKey st
-        , tsResizeCol = findSpec tableResizeColSlot (-1) stateKey st
-        , tsResizeX = findSpec tableResizeXSlot 0 stateKey st
-        , tsResizeW = findSpec slotDragStartW 0 stateKey st
-        }
+readTableState cfg n stateKey st = case lookupSlot fieldTableState stateKey st of
+  Nothing -> TableState [0 .. n - 1] (replicate n 0) (tableHidden cfg) (-1) 0 0
+  Just ts -> ts {tsOrder = normalizeOrder n (tsOrder ts), tsWidths = take n (tsWidths ts ++ repeat 0)}
 
--- | Writes of @ts@ under @stateKey@. Each compares before it writes, so an
--- idle table writes nothing.
+-- | Write @ts@ under @stateKey@ when it differs from the stored state.
 writeTableState :: Int -> TableState -> SlotWrites
-writeTableState stateKey ts =
-  specWrite tableColumnsSlot stateKey (tsOrder ts, tsWidths ts)
-    <> specWrite tableHiddenSlot stateKey (tsHidden ts)
-    <> specWrite tableResizeColSlot stateKey (tsResizeCol ts)
-    <> specWrite tableResizeXSlot stateKey (tsResizeX ts)
-    <> specWrite slotDragStartW stateKey (tsResizeW ts)
+writeTableState = slotWrite fieldTableState
 
 -- | The column widths this frame lays out: @ts@'s, with the column a held
 -- resize drags set to its start width plus the pointer's travel, never under
@@ -901,7 +848,7 @@ tablePanes
         scrollAreaIdConfigured
           vWid
           (fillH flatLayout)
-          (if null unfrozenIdx then scrollVerticalAuto else scrollVerticalHidden)
+          (if null unfrozenIdx then defaultScrollConfig else scrollVerticalHidden)
           (bodyBlock frozenIdx)
         pure hs
     unfrozenPane = do
@@ -1082,12 +1029,10 @@ tableCore cfg f key cols inputRows curSort =
           else fmap Just $
             buttonStyledEx True "Show all columns" 0 (tight . fillW $ defaultLayout) 0
       headerPairs <- tablePanes (tableBare cfg) ctx ids encoders rowsVec derived geom sort0 hasVertBar
-      covered <- liftIO (pointerCovered ctx tableWid)
-      clip <- liftIO (getPrevClipRect ctx tableWid)
-      disabled <- liftIO (isDisabled ctx tableWid)
-      headerClips <- liftIO (mapM (getPrevClipRect ctx . rawRespId . snd) headerPairs)
       let mouse = inputMousePos inp
-          reachable = not (covered || disabled) && maybe True (`rectContains` mouse) clip
+      reachable <- liftIO (pointerReachable ctx tableWid mouse)
+      headerClips <- liftIO (mapM (getPrevClipRect ctx . rawRespId . snd) headerPairs)
+      let
           headerRects = [(i, rawRespRect r) | (i, r) <- headerPairs]
           -- Only edges in view: a header scrolled under the frozen pane or
           -- past the body's right edge has its edge outside its clip.

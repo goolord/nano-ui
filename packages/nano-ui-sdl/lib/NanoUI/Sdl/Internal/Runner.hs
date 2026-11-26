@@ -26,6 +26,7 @@ import NanoUI.Sdl.Internal.Display (outPair, queryMouseWindowPos, queryWindowLog
 import NanoUI.Sdl.Internal.Font
 import NanoUI.Sdl.Internal.Input (syncTextInput)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont)
+import NanoUI.Sdl.Internal.Env (dropRetainRef)
 import NanoUI.Sdl.Internal.Error (sdlFail)
 import NanoUI.Sdl.Internal.Render (glyphPageTexture, renderDrawDataPass)
 import NanoUI.Sdl.Internal.Target (setRetainTarget)
@@ -102,7 +103,7 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
   let direct = sdlContinuous env && not transparent && outputOk && fromIntegral ow == pw && fromIntegral oh == ph
   (tex, retainNew) <-
     if direct
-      then (nullPtr, False) <$ dropRetain env
+      then (nullPtr, False) <$ dropRetainRef (sdlRetain env)
       else ensureRetain env pw ph scale
   let presentFull = forceFull || retainNew || sdlContinuous env || inputWindowRedraw inp
   -- Chrome regions a view handed over lapse with the first frame whose view
@@ -265,22 +266,13 @@ ensureRetain env w h scale = do
   where
     roundUp n = max retainBlock (((n + retainBlock - 1) `div` retainBlock) * retainBlock)
 
--- | Destroy the retained texture, if there is one; the next retained frame
--- makes a new one.
-dropRetain :: SdlEnv -> IO ()
-dropRetain env = do
-  tex <- retainTexture <$> readIORef (sdlRetain env)
-  unless (tex == nullPtr) $ do
-    writeIORef (sdlRetain env) (Retain nullPtr 0 0 0 0 0)
-    destroyTexture tex
-
 -- | After a render device reset, which emptied every texture: drop the
 -- retained frame, the image atlas and the glyph pages, so the next frame
 -- makes and fills them again. That frame repaints whole
 -- ('NanoUI.Sdl.Internal.Input.EvRenderDeviceReset' asks for it).
 resetRenderTextures :: SdlEnv -> IO ()
 resetRenderTextures env = do
-  dropRetain env
+  dropRetainRef (sdlRetain env)
   SdlImage.destroyImageAtlas (sdlImages env)
   dropGlyphTextures (sdlFontCache env)
 

@@ -415,15 +415,11 @@ paintGroupedButton da style dir isFirst isLast rect@(Rect x y w h)
       let bw = if styleBorderWidth style > 0 then max 1 (styleBorderWidth style) else 0
           rr = clamp 0 (min (w / 2) (h / 2)) (styleCornerRadius style)
           pad = rr + max 1 bw
+          ext0 = if isFirst then 0 else pad
+          ext1 = if isLast then 0 else pad
           open = case dir of
-            DirRow ->
-              let extL = if isFirst then 0 else pad
-                  extR = if isLast then 0 else pad
-               in Rect (x - extL) y (w + extL + extR) h
-            DirColumn ->
-              let extT = if isFirst then 0 else pad
-                  extB = if isLast then 0 else pad
-               in Rect x (y - extT) w (h + extT + extB)
+            DirRow -> Rect (x - ext0) y (w + ext0 + ext1) h
+            DirColumn -> Rect x (y - ext0) w (h + ext0 + ext1)
       withClip da rect $ do
         if rr <= 0
           then pushRect da open (styleBg style)

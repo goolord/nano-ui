@@ -61,6 +61,7 @@ module NanoUI.Internal.StyleBits
   , packField
   , placeField
   , testField
+  , decodeStyleEnum
   -- * Text font
   , textFace
   , stripe
@@ -80,7 +81,6 @@ module NanoUI.Internal.StyleBits
   , inputNumeric
   -- * Button
   , buttonVisual
-  , buttonVariant
   , buttonTone
   , buttonKind
   , tabStyle
@@ -156,6 +156,14 @@ placeField f v = fromIntegral v `shiftL` bfShift f
 {-# INLINE testField #-}
 testField :: BitField -> Word64 -> Bool
 testField f si = si .&. fieldMask f /= 0
+
+-- | The enum packed in field @f@ of the style bits, or @fallback@ when the
+-- field holds no constructor.
+{-# INLINE decodeStyleEnum #-}
+decodeStyleEnum :: forall a. (Bounded a, Enum a) => BitField -> a -> Word64 -> a
+decodeStyleEnum f fallback si =
+  let v = getField f si
+   in if v >= fromEnum (minBound :: a) && v <= fromEnum (maxBound :: a) then toEnum v else fallback
 
 -- Text font ----------------------------------------------------------------
 

@@ -26,10 +26,11 @@ import NanoUI.Internal.Frame.Select (comboDropPickIndex, comboDropRect, comboScr
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Input (Input, Key (..), MouseButton (..), Pressable (..), inputMousePos, inputScroll, inputWindowSize)
 import NanoUI.Internal.Style (scrollBarThumbColor, scrollBarThumbHoverColor, scrollBarTrackColor, themeInput)
-import NanoUI.Internal.Layout.Arena (setOptions)
+import NanoUI.Internal.Layout.Arena (DirTag (..), setOptions)
+import NanoUI.Internal.Layout.ScrollGeometry (ScrollBarLayout (..), onScrollBar, scrollOffsetFromThumb)
 import NanoUI.Internal.Monad (NanoUI, askContext, liftIO)
-import NanoUI.Internal.Store (SlotSpec, deleteSpec, fieldText, findSpec, insertSlot, insertSpec, lookupSpec, ptrEq, setFieldSelection)
-import NanoUI.Internal.Store.Slots (slotComboCommitted, slotComboContentW, slotComboCount, slotComboDrag, slotComboDragOff, slotComboFocus, slotComboHighlight, slotComboLive, slotComboNavX, slotComboNavY, slotComboScrollX, slotComboWheelRem, slotComboWindow)
+import NanoUI.Internal.Store (fieldCombo, fieldText, insertSlot, lookupSlot, ptrEq, setFieldSelection)
+import NanoUI.Internal.Store.Types (ComboState (..))
 import NanoUI.Internal.Var (Binding (..), bindVar)
 import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Types (Rect (..), Size (..), V2 (..), clamp, rectContains, rectIntersect, rectNonEmpty, v2X, v2Y)
@@ -72,37 +73,6 @@ comboMatches ctx key !opts q =
     _ -> do
       let m = ComboMatches opts q (comboFiltered opts q) Nothing
       m <$ writeDerived comboCache ctx key m
-
--- | A combo's state between frames.
-data ComboState = ComboState
-  { csHighlight :: !Int
-    -- ^ Highlighted row of the filtered list; -1 for none.
-  , csWindow :: !Int
-    -- ^ First visible row.
-  , csScrollX :: !Float
-    -- ^ How far the rows are scrolled left, in pixels, when the widest
-    -- overflows the dropdown.
-  , csContentW :: !Float
-    -- ^ Widest matching row, measured while focused.
-  , csDrag :: !Int
-    -- ^ Scrollbar thumb drag: 0 none, 1 vertical, 2 horizontal.
-  , csDragOff :: !Float
-    -- ^ Pointer offset into the dragged thumb.
-  , csWheelRem :: !Float
-    -- ^ Rows the wheel moved short of a whole row, carried to the next
-    -- frame, so a trackpad's small steps add up.
-  , csCommitted :: !Text
-    -- ^ Last committed value.
-  , csLive :: !Text
-    -- ^ Field text the combo last produced.
-  , csFocused :: !Bool
-    -- ^ The field held focus; the frame that finds it lost commits.
-  , csNavPointer :: !(Maybe V2)
-    -- ^ Pointer position when Up/Down last moved the highlight, cleared once
-    -- the pointer moves or the wheel scrolls. Suppresses hover-highlighting
-    -- while the pointer is stationary during keyboard navigation.
-  }
-  deriving (Eq, Show)
 
 -- | One frame's inputs to 'comboStep'.
 data ComboInput = ComboInput
@@ -228,45 +198,42 @@ comboStep ci cs0 =
     -- is looking at when a drag starts).
     (_, vSb, hSb, usableW) = comboScrollGeom dropRect n vis storedWin storedX contentW
     maxOffX = max 0 (contentW - usableW)
-    (vTrackR, vThumbR) = fromMaybe (Rect 0 0 0 0, Rect 0 0 0 0) vSb
-    (hTrackR, hThumbR) = fromMaybe (Rect 0 0 0 0, Rect 0 0 0 0) hSb
-    onVThumb = rectContains vThumbR mouse
-    onVTrack = rectContains vTrackR mouse
-    onHThumb = rectContains hThumbR mouse
-    onHTrack = rectContains hTrackR mouse
     pressed = isFocus && pressedIn MouseLeft inp
     down = isFocus && heldIn MouseLeft inp
+    hitBar = maybe (False, False) (\l -> (rectContains (sbTrack l) mouse, rectContains (sbThumb l) mouse))
+    (onVTrack, onVThumb) = hitBar vSb
+    (onHTrack, onHThumb) = hitBar hSb
     startV = pressed && overDrop && onVTrack
     startH = pressed && overDrop && not startV && onHTrack
-    vGrab = if onVThumb then v2Y mouse - rectY vThumbR else rectH vThumbR / 2
-    hGrab = if onHThumb then v2X mouse - rectX hThumbR else rectW hThumbR / 2
+    grabOff dir onThumb = maybe 0 $ \l ->
+      let Rect tx ty tw th = sbThumb l
+       in case dir of
+            DirColumn -> if onThumb then v2Y mouse - ty else th / 2
+            DirRow -> if onThumb then v2X mouse - tx else tw / 2
     drag1
       | startV = 1
       | startH = 2
       | down && drag0 /= 0 = drag0
       | otherwise = 0
-    -- Thumb-anchored drags move from the next frame on; track presses jump
-    -- the window to the click immediately.
-    draggingV = down && drag1 == 1 && ((drag0 == 1 && not startV) || (startV && not onVThumb))
-    draggingH = down && drag1 == 2 && ((drag0 == 2 && not startH) || (startH && not onHThumb))
+    dragKind' = if down then drag1 else 0
     -- This frame's grab offset: a track press jumps by the one its drag
     -- goes on with.
-    dragWin = clampWin (round ((v2Y mouse - rectY vTrackR - dragOff') / max 1 (rectH vTrackR - rectH vThumbR) * fromIntegral (n - vis)))
-    dragX = clamp 0 maxOffX ((v2X mouse - rectX hTrackR - dragOff') / max 1 (rectW hTrackR - rectW hThumbR) * maxOffX)
+    dragOff' | startV = grabOff DirColumn onVThumb vSb | startH = grabOff DirRow onHThumb hSb | otherwise = dragOff0
+    -- Thumb-anchored drags move from the next frame on; track presses jump
+    -- the window to the click immediately.
+    dragging kind started onThumb = down && drag1 == kind && ((drag0 == kind && not started) || (started && not onThumb))
     -- Off the dropdown the wheel scrolls something else, and the carried
     -- fraction is dropped.
     wheelRows = if overDrop then v2Y (inputScroll inp) * comboBoxRowsPerNotch + csWheelRem cs0 else 0
     wheelDelta = truncate wheelRows :: Int
     xWheel = if overDrop then v2X (inputScroll inp) * 20 else 0
     win
-      | draggingV = dragWin
+      | dragging 1 startV onVThumb = maybe 0 (\l -> clampWin (round (scrollOffsetFromThumb DirColumn l dragOff' mouse))) vSb
       | nav /= 0 = alignWin (win0 + wheelDelta)
       | otherwise = clampWin (win0 + wheelDelta)
     xOff
-      | draggingH = dragX
+      | dragging 2 startH onHThumb = maybe 0 (\l -> scrollOffsetFromThumb DirRow l dragOff' mouse) hSb
       | otherwise = clamp 0 maxOffX (storedX + xWheel)
-    dragKind' = if down then drag1 else 0
-    dragOff' | startV = vGrab | startH = hGrab | otherwise = dragOff0
     -- Enter commits only an explicitly highlighted row (hover or Up/Down).
     picked = isFocus && n > 0 && hi' >= 0 && pressedOnceIn KeyEnter inp
     -- Only read when 'picked', so @hi'@ is a row.
@@ -309,47 +276,19 @@ comboBox' placeholder options v = bindVar RenderFinal v (comboBoxCore placeholde
 -- text to @value@ and @text@.
 loadComboState :: WidgetStore -> Int -> Text -> Text -> ComboState
 loadComboState store key value text =
-  ComboState
-    { csHighlight = findSpec slotComboHighlight (-1) key store
-    , csWindow = findSpec slotComboWindow 0 key store
-    , csScrollX = findSpec slotComboScrollX 0 key store
-    , csContentW = findSpec slotComboContentW 0 key store
-    , csDrag = findSpec slotComboDrag 0 key store
-    , csDragOff = findSpec slotComboDragOff 0 key store
-    , csWheelRem = findSpec slotComboWheelRem 0 key store
-    , csCommitted = findSpec slotComboCommitted value key store
-    , csLive = findSpec slotComboLive text key store
-    , csFocused = findSpec slotComboFocus False key store
-    -- The resting pointer and the wheel's leftover are bookkeeping no paint
-    -- reads, so they live in quiet slots, which neither damage nor wake.
-    , csNavPointer = V2 <$> lookupSpec slotComboNavX key store <*> lookupSpec slotComboNavY key store
-    }
+  fromMaybe (ComboState (-1) 0 0 0 0 0 0 value text False Nothing) (lookupSlot fieldCombo key store)
 
--- | Persist @cs@ and option count @matchCount@ for @key@, moving the caret to
--- the end when @picked@ is 'True'.
-saveComboState :: Int -> Int -> Bool -> ComboState -> WidgetStore -> WidgetStore
-saveComboState key matchCount picked cs =
-  caretToEnd
-    . insertSpec slotComboHighlight key (csHighlight cs)
-    . navPointerAt slotComboNavX v2X (csNavPointer cs)
-    . navPointerAt slotComboNavY v2Y (csNavPointer cs)
-    . insertSpec slotComboWheelRem key (csWheelRem cs)
-    . insertSpec slotComboWindow key (csWindow cs)
-    . insertSpec slotComboCount key matchCount
-    . insertSpec slotComboFocus key (csFocused cs)
-    . insertSpec slotComboDrag key (csDrag cs)
-    . insertSpec slotComboScrollX key (csScrollX cs)
-    . insertSpec slotComboContentW key (csContentW cs)
-    . insertSpec slotComboDragOff key (csDragOff cs)
-    . insertSpec slotComboLive key finalText
-    . insertSpec slotComboCommitted key (csCommitted cs)
+-- | Persist @cs@ for @key@, moving the caret to the end when @picked@ is 'True'.
+saveComboState :: Int -> Bool -> ComboState -> WidgetStore -> WidgetStore
+saveComboState key picked cs =
+  (if picked then setFieldEnd key finalText else id)
+    . insertSlot fieldCombo key cs
     . insertSlot fieldText key finalText
   where
     finalText = csLive cs
-    len = T.length finalText
-    caretToEnd = if picked then setFieldSelection key len len else id
-    navPointerAt :: SlotSpec Float -> (V2 -> Float) -> Maybe V2 -> WidgetStore -> WidgetStore
-    navPointerAt spec coord = maybe (deleteSpec spec key) (insertSpec spec key . coord)
+
+setFieldEnd :: Int -> Text -> WidgetStore -> WidgetStore
+setFieldEnd key t = let len = T.length t in setFieldSelection key len len
 
 comboBoxCore :: Foldable f => Text -> f Text -> Text -> NanoUI (Response, Text)
 comboBoxCore placeholder options value = do
@@ -401,7 +340,7 @@ comboBoxCore placeholder options value = do
       Rect rx ry rw rh = rawRespRect resp
       dropRect = comboDropRect size rx ry rw rh nRows nMatches contentW
       geom r = comboScrollGeom r nMatches comboBoxMaxVisible win (csScrollX cs1) contentW
-      onLane = let (_, vSb, hSb, _) = geom dropRect in any (\(track, _) -> rectContains track mouse) (catMaybes [vSb, hSb])
+      onLane = let (_, vSb, hSb, _) = geom dropRect in any (\l -> rectContains (sbTrack l) mouse) (catMaybes [vSb, hSb])
       -- A left press on a row, not on a scrollbar lane, picks it, so that
       -- finishing a thumb drag cannot.
       clickRow
@@ -410,7 +349,7 @@ comboBoxCore placeholder options value = do
         | otherwise = Nothing
   when (isFocus || stepRedraw step) $
     liftIO $ do
-      modifyStore ctx (saveComboState key nMatches (stepPicked step) cs1)
+      modifyStore ctx (saveComboState key (stepPicked step) cs1)
       when (stepDismissed step) $ do
         writeIORef (ctxFocusId ctx) (WidgetId 0)
         markEscapeConsumed ctx
@@ -420,8 +359,7 @@ comboBoxCore placeholder options value = do
   -- produce, and commits it.
   liftIO . forM_ clickRow $ \i -> do
     let picked = fromMaybe "" (listToMaybe (drop i rows))
-        len = T.length picked
-    modifyStore ctx (insertSlot fieldText key picked . setFieldSelection key len len)
+    modifyStore ctx (insertSlot fieldText key picked . setFieldEnd key picked)
     writeIORef (ctxFocusId ctx) (WidgetId 0)
     markDirty ctx
   -- The dropdown's text spans read its rows from the node's option list: the
@@ -436,7 +374,7 @@ comboBoxCore placeholder options value = do
     let dp = DropdownPopup wid (csHighlight cs1 - win) True (csScrollX cs1)
         drag = csDrag cs1
         -- As a scroller's bar: brighter under the pointer or while dragged.
-        hot kind (track, thumb) = drag == kind || drag == 0 && (rectContains track mouse || rectContains thumb mouse)
+        hot kind l = drag == kind || drag == 0 && onScrollBar mouse l
     void . dropdownPopup wid dp (rectH dropRect) $ \_ dropR ->
       let
         (_, vSb, hSb, _) = geom dropR
@@ -447,9 +385,9 @@ comboBoxCore placeholder options value = do
             (inner, vBar, hBar, _) = geom rect
             theme = cdcTheme cdc
             base = themeInput theme
-            bar kind b@(track, thumb) = do
-              drawRect track (scrollBarTrackColor base theme)
-              drawRoundedRect thumb 3 ((if hot kind b then scrollBarThumbHoverColor else scrollBarThumbColor) base theme)
+            bar kind l = do
+              drawRect (sbTrack l) (scrollBarTrackColor base theme)
+              drawRoundedRect (sbThumb l) 3 ((if hot kind l then scrollBarThumbHoverColor else scrollBarThumbColor) base theme)
            in
             runCanvasFor cdc $ do
               withClip inner (paintDropdownRows cdc (dropdownPopupRows (cdcFont cdc) theme winH mouse dp rows rect))

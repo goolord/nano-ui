@@ -45,7 +45,7 @@ import Data.Primitive.PrimArray (readPrimArray, setPrimArray, writePrimArray)
 import Data.Primitive.SmallArray (SmallArray, mapSmallArray')
 import Data.Word (Word64)
 
-import NanoUI.Internal.Context.Animation (getLiveAnimations)
+import NanoUI.Internal.Context.Animation (isAnimatingKey)
 import NanoUI.Internal.Context.Types
 import NanoUI.Internal.Draw (DrawOp, DrawingBuild, shiftDrawOp)
 import NanoUI.Internal.Id (WidgetId, mix64)
@@ -238,7 +238,7 @@ cachedDrawingOps :: Context -> WidgetId -> Int -> Rect -> DrawingBuild -> IO (Sm
 cachedDrawingOps ctx wid content rect build = do
   animated <-
     if content == 0
-      then IM.member (intKey wid) <$> getLiveAnimations ctx
+      then isAnimatingKey ctx wid
       else pure False
   cached <- lookupIn dcsDrawOpCache ctx wid
   -- Ops built while animating are stale on the next frame, even one whose
@@ -321,12 +321,9 @@ pruneDrawOpCaches ctx dc = do
   let keep :: Int -> (NodeCustom -> Bool) -> IntMap a -> IO (IntMap a)
       keep live registered cache
         | IM.size cache <= live = pure cache
-        | otherwise = IM.fromDistinctAscList <$> filterLive (IM.toAscList cache)
-       where
-        filterLive [] = pure []
-        filterLive ((k, v) : rest) = do
-          nc <- maybe (pure noNodeCustom) (nodeCustomAt ctx) =<< lookupNodeByKey (ctxNodeArena ctx) k
-          if registered nc then ((k, v) :) <$> filterLive rest else filterLive rest
+        | otherwise = flip IM.traverseMaybeWithKey cache $ \k v -> do
+            nc <- maybe (pure noNodeCustom) (nodeCustomAt ctx) =<< lookupNodeByKey (ctxNodeArena ctx) k
+            pure (if registered nc then Just v else Nothing)
   ops <- keep drawings (isJust . ncDrawing) (dcsDrawOpCache dc)
   customOps <- keep customs (isJust . ncCustom) (dcsCustomDrawOpCache dc)
   fits <- keep drawings (isJust . ncDrawing) (dcsDrawFitCache dc)

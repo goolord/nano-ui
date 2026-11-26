@@ -23,12 +23,13 @@ import NanoUI.Internal.Context (getStore, intKey, requestWakeAt, modifyStore)
 import NanoUI.Internal.Equality (sameDouble)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, freshWidget, liftIO)
+import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, liftIO)
 import NanoUI.Internal.Store (deleteSpec, fieldDouble, fieldText, findSlot, findSpec, insertSlot, insertSpec, lookupSlot, memberSpec)
 import NanoUI.Internal.Store.Slots (slotNumericHeld, slotNumericRepeat, slotTextChanged, slotTextMode)
-import NanoUI.Internal.Style (Layout (..), LayoutModifier, Sizing (..), defaultLayout, inheritFont)
+import NanoUI.Internal.Style (Layout (..), LayoutModifier, Sizing (..), defaultLayout)
 import NanoUI.Internal.Types (Rect (..), clamp, rectContains)
 import NanoUI.Internal.WidgetText (numericStepperRects, packTextNodeStyle, textInputFlagNumeric)
+import NanoUI.Internal.Widgets.Combinators (widgetBaseLayout)
 import NanoUI.Internal.Widgets.Node (Response, addWidgetStyled, respHovered, respRect, setChanged, setSubmitted)
 import NanoUI.Widgets.TextEditor (singleLineMode)
 import NanoUI.Internal.Widgets.TextInput (TextInputState (..), editTextInput, editorTextState, focusAndIme, loadTextInputState, saveTextEditor, saveTextInputState)
@@ -123,8 +124,7 @@ numericInputCore cfg value = do
     s0 = loadTextInputState store key text0
     lastValue = if adopted then given else findSlot fieldDouble given key store
   mEdited <- if isFocus then liftIO (editTextInput ctx singleLineMode inp store key s0) else pure Nothing
-  amb <- askDefaultLayout
-  let lay = nicLayout cfg (inheritFont amb defaultLayout {layoutWidth = Grow 1, layoutMinW = 80})
+  lay <- widgetBaseLayout defaultLayout {layoutWidth = Grow 1, layoutMinW = 80} (nicLayout cfg)
   -- Its font face, weight and slant ride in the style bits, as on a label.
   resp <- addWidgetStyled wid NodeTextInput "" 0 lay (textInputFlagNumeric .|. packTextNodeStyle lay 0)
 
@@ -203,21 +203,12 @@ stepNumericStepper resp isFocus inp held0 repeatAt0 = do
         | pressedIn KeyDown inp = -1
         | otherwise = 0
   now <- if pressDir /= 0 || holding then getMonotonicTime else pure 0
-  let repeatDir = if pressDir == 0 && holding && now >= repeatAt0 then held0 else 0
-      dir
-        | pressDir /= 0 = pressDir
-        | repeatDir /= 0 = repeatDir
-        | otherwise = keyDir
-      held1
-        | pressDir /= 0 = pressDir
-        | holding = held0
-        | otherwise = 0
-      repeatAt1
-        | pressDir /= 0 = now + 0.4
-        | repeatDir /= 0 = now + 0.06
-        | held1 == 0 = 0
-        | otherwise = repeatAt0
-  pure (dir, held1, repeatAt1)
+  let step
+        | pressDir /= 0 = (pressDir, pressDir, now + 0.4)
+        | holding && now >= repeatAt0 = (held0, held0, now + 0.06)
+        | holding = (keyDir, held0, repeatAt0)
+        | otherwise = (keyDir, 0, 0)
+  pure step
 
 clampNumber :: NumericInputConfig -> Double -> Double
 clampNumber cfg = clamp (nicMin cfg) (nicMax cfg)

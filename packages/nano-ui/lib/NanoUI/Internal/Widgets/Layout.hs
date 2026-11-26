@@ -1,6 +1,7 @@
 -- | Rows, columns, grids, panels, labels, and scrollers built during the view pass.
 module NanoUI.Internal.Widgets.Layout
-  ( panel
+  ( withDefaultWith
+  , panel
   , panelWith
   , panelWith'
   , panel'
@@ -21,7 +22,6 @@ module NanoUI.Internal.Widgets.Layout
   , layers
   , layersWith
   , layersWith'
-  , layers'
   , clipBox
   , label
   , label'
@@ -204,12 +204,7 @@ layers = layersWith id
 -- | 'layers' with modified layout defaults; the flow remains layered.
 {-# INLINE layersWith #-}
 layersWith :: (Layout -> Layout) -> NanoUI a -> NanoUI a
-layersWith = (`withDefaultWith` layers')
-
--- | 'layers' with an explicit 'Layout' record; the flow remains layered.
-{-# INLINE layers' #-}
-layers' :: Layout -> NanoUI a -> NanoUI a
-layers' = container NodeContainer . layered
+layersWith = (`withDefaultWith` (container NodeContainer . layered))
 
 -- | 'layersWith' returning its 'Response', as 'rowWith'' does.
 layersWith' :: (Layout -> Layout) -> NanoUI a -> NanoUI (a, Response)
@@ -219,9 +214,7 @@ layersWith' f = withDefaultWith (layered . f) (containerResponse NodeContainer)
 -- a panel background or border.
 {-# INLINE clipBox #-}
 clipBox :: LayoutModifier -> NanoUI a -> NanoUI a
-clipBox f body = do
-  base <- askDefaultLayout
-  clipContainer (f (tight base)) body
+clipBox f = withDefaultWith (f . tight) clipContainer
 
 -- | Place children in a grid with at least one column. The count is clamped to 1.
 {-# INLINE grid #-}

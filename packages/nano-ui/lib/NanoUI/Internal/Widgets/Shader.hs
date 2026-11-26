@@ -49,9 +49,10 @@ import NanoUI.Internal.Shader
   , emptyShaderProgram
   , packShaderPass
   )
-import NanoUI.Internal.Style (LayoutModifier, defaultLayout, inheritFont, tight)
+import NanoUI.Internal.Style (LayoutModifier, defaultLayout, tight)
 import NanoUI.Internal.Types (V2 (..), colorToWord32)
 import NanoUI.Internal.WidgetText (containerFlagShaderEffect)
+import NanoUI.Internal.Widgets.Combinators (widgetBaseLayout)
 import NanoUI.Internal.Widgets.Node (Response, addWidgetNode, currentParent, resolveInteraction, withContainerNode)
 
 -- | Paint a leaf rectangle using a 'Surface' fragment shader and typed
@@ -59,7 +60,7 @@ import NanoUI.Internal.Widgets.Node (Response, addWidgetNode, currentParent, res
 -- its paint hash; unchanged uniforms produce zero damage.
 {-# INLINE shaderBox #-}
 shaderBox :: LayoutModifier -> Shader 'Surface u -> u -> NanoUI ()
-shaderBox f sh u = void (shaderBox' f sh u)
+shaderBox f sh = void . shaderBox' f sh
 
 -- | Like 'shaderBox', returning the node's 'Response'.
 {-# INLINE shaderBox' #-}
@@ -70,21 +71,20 @@ shaderBox' f = shaderConfigured' defaultShaderConfig {scLayout = f}
 -- color (used on non-GPU backends and SVG export), and vertex tint.
 {-# INLINE shaderConfigured #-}
 shaderConfigured :: ShaderConfig -> Shader 'Surface u -> u -> NanoUI ()
-shaderConfigured cfg sh u = void (shaderConfigured' cfg sh u)
+shaderConfigured cfg sh = void . shaderConfigured' cfg sh
 
 -- | Like 'shaderConfigured', returning the node's 'Response'.
 shaderConfigured' :: ShaderConfig -> Shader 'Surface u -> u -> NanoUI Response
 shaderConfigured' cfg sh u = do
   wid <- nextId
   ctx <- askContext
-  amb <- askDefaultLayout
+  !lay <- widgetBaseLayout defaultLayout (scLayout cfg)
   pass <- liftIO $ case shaderPasses sh of
     (p : _) -> packShaderPass p u
     [] -> pure (PackedShaderPass (shaderHash sh) emptyShaderProgram emptyByteArray 0)
   let !radius = max 0 (scCornerRadius cfg)
       !fallback = scFallback cfg
       !tint = scTint cfg
-      !lay = scLayout cfg (inheritFont amb defaultLayout)
       !paintH =
         mix64
           (pspHash pass `xor` pspUniformHash pass)

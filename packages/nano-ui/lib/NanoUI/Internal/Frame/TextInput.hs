@@ -4,7 +4,6 @@
 -- composition for both.
 module NanoUI.Internal.Frame.TextInput
   ( nodeTextFieldGeom
-  , syncTextInputScroll
   , TextInputFrame (..)
   , resolveTextInputFrame
   , FieldEdit
@@ -14,6 +13,7 @@ module NanoUI.Internal.Frame.TextInput
   , drawTextInputCaret
   , pushFieldText
   , fieldTextColor
+  , textInputFg
   , nodeTextColor
   , drawLineSelection
   , drawLineCaret
@@ -53,7 +53,7 @@ import NanoUI.Internal.Monad (ifM, unlessM, (<&&>))
 import NanoUI.Internal.Store (fieldSelection, fieldSelectionWrite, fieldText, findSpec, insertSlot, insertSpec, setFieldSelection)
 import NanoUI.Internal.Store.Slots (slotTextInputScroll)
 import NanoUI.Internal.Style (FontStyle (..), FontWeight (..), themeSelection, toneColor)
-import NanoUI.Internal.Types (Color (..), DamageBounds (..), Rect (..), V2 (..), clamp, rectContains, rectW)
+import NanoUI.Internal.Types (Color (..), DamageBounds (..), Rect (..), V2 (..), clamp, lerpColor, rectContains, rectW)
 import NanoUI.Internal.WidgetText
 import NanoUI.Widgets.TextBuffer qualified as TB
 
@@ -131,6 +131,14 @@ pushFieldText da fm native si x y txt col = do
 {-# INLINE fieldTextColor #-}
 fieldTextColor :: Context -> NodeIdx -> Color -> IO Color
 fieldTextColor ctx = nodeTextColor ctx NodeTextArea
+
+-- | The colour of a text input's text ('fieldTextColor'), faded toward @bg@
+-- while @value@ is empty and unfocused.
+{-# INLINE textInputFg #-}
+textInputFg :: Context -> NodeIdx -> Color -> Color -> Text -> Bool -> IO Color
+textInputFg ctx idx fgCol bgCol value focus = do
+  fg <- fieldTextColor ctx idx fgCol
+  pure (if T.null value && not focus then lerpColor fg bgCol 0.40 else fg)
 
 -- | 'fieldTextColor' for node @idx@ of type @nt@, whose tone sits in its
 -- font bits: all of a text area's or field's style index, the label font of

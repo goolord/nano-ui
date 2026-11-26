@@ -1,7 +1,8 @@
 -- | Per-widget animations: starting, ticking, settling and reading values.
 module NanoUI.Internal.Context.Animation
   ( anyAnimating
-  , getLiveAnimations
+  , liveAnimationKeys
+  , isAnimatingKey
   , takeAnimSettled
   , lookupAnimation
   , startAnimation
@@ -16,10 +17,11 @@ module NanoUI.Internal.Context.Animation
   , getViewAnimationValue
   ) where
 
-import Control.Monad (mfilter, unless, when)
+import Control.Monad (unless, when)
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
+import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
 
 import NanoUI.Internal.Animation
@@ -29,22 +31,30 @@ import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena (getNodeRect, lookupNodeByKey)
 import NanoUI.Internal.Types (DamageBounds (..), Rect, defaultDamageSlop, finite, rectNonEmpty)
 
--- | Whether the frame loop has to keep drawing: an animation is running, or a
--- scroller is still gliding onto its target.
+-- | Whether the frame loop has to keep drawing: an animation is running, a
+-- keep-alive lease is active, or a scroller is still gliding onto its target.
 {-# INLINE anyAnimating #-}
 anyAnimating :: Context -> IO Bool
 anyAnimating ctx = do
-  anim <- not . IM.null <$> getLiveAnimations ctx
-  if anim
+  as <- readIORef (ctxAnimationState ctx)
+  if not (IM.null (asAnimations as)) || not (IS.null (asKeepAlive as)) || not (IS.null (asKeepTouched as))
     then pure True
     else not . IM.null . ssGlides <$> readIORef (ctxScrollState ctx)
 
--- | The running animations. Every entry is in progress: the start functions
--- settle a request that would not move, and 'tickAnimations' moves finished
--- entries to the resting values.
-{-# INLINE getLiveAnimations #-}
-getLiveAnimations :: Context -> IO (IntMap Animation)
-getLiveAnimations ctx = asAnimations <$> readIORef (ctxAnimationState ctx)
+-- | Keys with a running animation or an active keep-alive lease.
+{-# INLINE liveAnimationKeys #-}
+liveAnimationKeys :: Context -> IO IntSet
+liveAnimationKeys ctx = do
+  as <- readIORef (ctxAnimationState ctx)
+  pure (IM.keysSet (asAnimations as) <> asKeepAlive as <> asKeepTouched as)
+
+-- | Whether @wid@ has a running animation or an active keep-alive lease.
+{-# INLINE isAnimatingKey #-}
+isAnimatingKey :: Context -> WidgetId -> IO Bool
+isAnimatingKey ctx wid = do
+  let k = intKey wid
+  as <- readIORef (ctxAnimationState ctx)
+  pure (IM.member k (asAnimations as) || IS.member k (asKeepAlive as) || IS.member k (asKeepTouched as))
 
 -- | Read and clear the flag indicating an animation settled during the last tick.
 takeAnimSettled :: Context -> IO Bool
@@ -107,8 +117,7 @@ startSpring ctx wid params target
   | otherwise = do
   let key = intKey wid
   as <- readIORef (ctxAnimationState ctx)
-  -- A 'keepAnimationAlive' lease is no value: the resting one stands.
-  case mfilter (not . isKeepAlive) (IM.lookup key (asAnimations as)) of
+  case IM.lookup key (asAnimations as) of
     Just (SpringAnim _ _ t p) | t == target && p == params -> repaintIfOrphan ctx key
     running -> do
       let (pos0, vel0) = case running of
@@ -133,39 +142,16 @@ insertRunning key anim as =
     , asAnimations = IM.insert key anim (asAnimations as)
     }
 
--- | How long a 'keepAnimationAlive' animation would run by itself: in effect
--- forever. The lease below ends it.
-keepAliveSec :: Float
-keepAliveSec = 1e9
-
 -- | Request continuous frames while the widget calls this on every view pass.
 -- 'tickAnimations' removes the request after a frame without renewal.
---
--- The lease shares the widget's key with the widget's own animations (its
--- hover): one already running there keeps frames coming and is left alone,
--- 'tickAnimations' puts the lease back when it ends, and the lease keeps the
--- key's resting value, which 'getAnimationValue' reads through it.
 keepAnimationAlive :: Context -> WidgetId -> IO ()
 keepAnimationAlive ctx wid = do
   let key = intKey wid
   as <- readIORef (ctxAnimationState ctx)
-  let running = IM.member key (asAnimations as)
-      touched = IS.member key (asKeepTouched as)
-  unless (running && touched) $
-    writeIORef (ctxAnimationState ctx) $!
-      as
-        { asAnimations = if running then asAnimations as else IM.insert key keepAliveAnim (asAnimations as)
-        , asKeepTouched = IS.insert key (asKeepTouched as)
-        }
-  unless running (repaintIfOrphan ctx key)
-
-keepAliveAnim :: Animation
-keepAliveAnim = EaseAnim 0 1 keepAliveSec 0 EaseLinear 0 0
-
-isKeepAlive :: Animation -> Bool
-isKeepAlive = \case
-  EaseAnim _ _ dur _ _ _ _ -> dur >= keepAliveSec
-  SpringAnim {} -> False
+  let live = IM.member key (asAnimations as) || IS.member key (asKeepAlive as) || IS.member key (asKeepTouched as)
+  unless (IS.member key (asKeepTouched as)) $
+    writeIORef (ctxAnimationState ctx) $! as {asKeepTouched = IS.insert key (asKeepTouched as)}
+  unless live (repaintIfOrphan ctx key)
 
 -- | Stop an animation at a value and damage its widget if the value changed.
 {-# INLINE setAnimationValue #-}
@@ -184,16 +170,10 @@ tickAnimations ctx dt = do
           then if asAnimSettled as then as {asAnimSettled = False} else as
           else
             let stepped = IM.map (stepAnim dt) (asAnimations as)
-                (live0, done) = IM.partition animInProgress stepped
-                -- Restore the keep-alive entry when a widget animation finishes
-                -- under an active lease.
-                leased = IM.restrictKeys done (asKeepAlive as)
-                live = if IM.null leased then live0 else IM.union live0 (IM.map (const keepAliveAnim) leased)
-                rest' =
-                  IM.foldlWithKey' (\r k a -> restAt k (animationValue a) r) (asAnimRest as) done
+                (live, done) = IM.partition animInProgress stepped
              in as
                   { asAnimations = live
-                  , asAnimRest = rest'
+                  , asAnimRest = restAll (asAnimRest as) done
                   , asRestHeld = if IM.null done then asRestHeld as else asRestHeld as <> IM.keysSet done
                   , asAnimSettled = not (IM.null done)
                   }
@@ -224,20 +204,12 @@ lapseRest rects as
   where
     held = asRestHeld as
 
--- | End the perpetual animations whose widget did not renew its lease this
--- frame, and start the next frame's lease. A lapsed key leaves no resting
--- value and does not count as settled: the widget is gone, and the rect it
--- leaves behind is damaged like any other removed node.
+-- | Advance the keep-alive lease window by one frame: only keys renewed
+-- since the previous tick stay live.
 lapseKeepAlive :: AnimationState -> AnimationState
 lapseKeepAlive as
   | IS.null (asKeepAlive as) && IS.null (asKeepTouched as) = as
-  | otherwise =
-      let lapsed = asKeepAlive as `IS.difference` asKeepTouched as
-          anims
-            | IS.null lapsed = asAnimations as
-            | otherwise =
-                IM.filterWithKey (\k a -> not (IS.member k lapsed && isKeepAlive a)) (asAnimations as)
-       in as {asAnimations = anims, asKeepAlive = asKeepTouched as, asKeepTouched = IS.empty}
+  | otherwise = as {asKeepAlive = asKeepTouched as, asKeepTouched = IS.empty}
 
 -- | Rest, at their current values, the view hooks' animations that the view
 -- left out this frame ('getViewAnimationValue'), and start the next frame's
@@ -250,7 +222,7 @@ lapseViewAnims as
           gone = IM.restrictKeys (asAnimations as) lapsed
        in as
             { asAnimations = if IM.null gone then asAnimations as else IM.withoutKeys (asAnimations as) lapsed
-            , asAnimRest = IM.foldlWithKey' (\r k a -> restAt k (animationValue a) r) (asAnimRest as) gone
+            , asAnimRest = restAll (asAnimRest as) gone
             , asViewAnims = asViewTouched as
             , asViewTouched = IS.empty
             }
@@ -273,9 +245,7 @@ settleKey ctx key val = do
   as <- readIORef (ctxAnimationState ctx)
   let rest = asAnimRest as
       prevRest = IM.findWithDefault 0 key rest
-      -- A 'keepAnimationAlive' lease stays, and the value it keeps is the
-      -- resting one.
-      prevLive = mfilter (not . isKeepAlive) (IM.lookup key (asAnimations as))
+      prevLive = IM.lookup key (asAnimations as)
       restChanged
         | approxEq val 0 = IM.member key rest
         | otherwise = prevRest /= val
@@ -305,31 +275,32 @@ settleKey ctx key val = do
 restAt :: Int -> Float -> IntMap Float -> IntMap Float
 restAt key v = if approxEq v 0 then IM.delete key else IM.insert key v
 
+restAll :: IntMap Float -> IntMap Animation -> IntMap Float
+restAll = IM.foldlWithKey' (\r k a -> restAt k (animationValue a) r)
+
 -- | Current animated or settled value; zero when the id has neither. Reading
 -- a settled value holds it through the next sweep ('lapseRest').
 getAnimationValue :: Context -> WidgetId -> IO Float
-getAnimationValue ctx wid = do
-  let key = intKey wid
-  as <- readIORef (ctxAnimationState ctx)
-  case IM.lookup key (asAnimations as) of
-    Just a | not (isKeepAlive a) -> pure $! animationValue a
-    _ -> do
-      -- 'restAt' keeps no zero, so a nonzero value is a stored one.
-      let v = IM.findWithDefault 0 key (asAnimRest as)
-      when (v /= 0 && IS.notMember key (asRestHeld as)) $
-        writeIORef (ctxAnimationState ctx) $! as {asRestHeld = IS.insert key (asRestHeld as)}
-      pure v
+getAnimationValue = readAnimValue False
 
 -- | 'getAnimationValue' for a key a view hook owns ('animate', 'animateTo').
 -- An animation running there lasts while the view reads it: on the first
 -- frame without a read, 'tickAnimations' rests it at its value.
 getViewAnimationValue :: Context -> WidgetId -> IO Float
-getViewAnimationValue ctx wid = do
+getViewAnimationValue = readAnimValue True
+
+readAnimValue :: Bool -> Context -> WidgetId -> IO Float
+readAnimValue touchView ctx wid = do
   let key = intKey wid
   as <- readIORef (ctxAnimationState ctx)
   case IM.lookup key (asAnimations as) of
-    Just a | not (isKeepAlive a) -> do
-      unless (IS.member key (asViewTouched as)) $
+    Just a -> do
+      when (touchView && IS.notMember key (asViewTouched as)) $
         writeIORef (ctxAnimationState ctx) $! as {asViewTouched = IS.insert key (asViewTouched as)}
       pure $! animationValue a
-    _ -> getAnimationValue ctx wid
+    Nothing -> do
+      -- 'restAt' keeps no zero, so a nonzero value is a stored one.
+      let v = IM.findWithDefault 0 key (asAnimRest as)
+      when (v /= 0 && IS.notMember key (asRestHeld as)) $
+        writeIORef (ctxAnimationState ctx) $! as {asRestHeld = IS.insert key (asRestHeld as)}
+      pure v

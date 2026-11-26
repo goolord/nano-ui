@@ -196,12 +196,15 @@ borderWidth w s = s {styleBorderWidth = max 0 w}
 borderSides :: [Side] -> Style -> Style
 borderSides sides s = s {styleBorderSides = foldl' (\m side -> setBit m (fromEnum side)) 0 sides}
 
+borderSide :: Side -> Float -> Color -> Style -> Style
+borderSide side w c s = s {styleBorder = c, styleBorderWidth = max 0 w, styleBorderSides = setBit 0 (fromEnum side)}
+
 -- | A border of width @w@ and colour @c@ on one side only.
 borderLeft, borderRight, borderTop, borderBottom :: Float -> Color -> Style -> Style
-borderLeft w c s = s {styleBorder = c, styleBorderWidth = max 0 w, styleBorderSides = setBit 0 (fromEnum SideLeft)}
-borderRight w c s = s {styleBorder = c, styleBorderWidth = max 0 w, styleBorderSides = setBit 0 (fromEnum SideRight)}
-borderTop w c s = s {styleBorder = c, styleBorderWidth = max 0 w, styleBorderSides = setBit 0 (fromEnum SideTop)}
-borderBottom w c s = s {styleBorder = c, styleBorderWidth = max 0 w, styleBorderSides = setBit 0 (fromEnum SideBottom)}
+borderLeft = borderSide SideLeft
+borderRight = borderSide SideRight
+borderTop = borderSide SideTop
+borderBottom = borderSide SideBottom
 
 -- | Set corner radius in logical pixels, clamped to zero or greater.
 cornerRadius :: Float -> Style -> Style
@@ -351,19 +354,13 @@ subtle =
 -- | Whichever of the theme's text colours reads best on @c@.
 readableOn :: Theme -> Color -> Color
 readableOn t c =
-  let !lc = colorLuminance c
-      ratio a =
-        let !la = colorLuminance a
-         in (max la lc + 0.05) / (min la lc + 0.05)
-      !c0 = themeOnAccent t
+  let !c0 = themeOnAccent t
       !c1 = styleFg (themePanel t)
       !c2 = themeWindow t
-      !r0 = ratio c0
-      !r1 = ratio c1
-      !r2 = ratio c2
-   in if r0 >= r1 && r0 >= r2
-        then c0
-        else if r1 >= r2 then c1 else c2
+      !r0 = contrastRatio c0 c
+      !r1 = contrastRatio c1 c
+      !r2 = contrastRatio c2 c
+   in if r0 >= r1 && r0 >= r2 then c0 else if r1 >= r2 then c1 else c2
 
 -- | The theme disabled widgets are drawn with.
 disabledTheme :: Theme -> Theme

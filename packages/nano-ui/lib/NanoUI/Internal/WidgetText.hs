@@ -31,7 +31,6 @@ module NanoUI.Internal.WidgetText
   , buttonFlagClose
   , buttonCloseTrailing
   , buttonCloseTab
-  , buttonFlagTab
   , buttonFlagTable
   , buttonFlagMenu
   , buttonFlagMenuBar
@@ -88,7 +87,7 @@ import GHC.Float (castFloatToWord32)
 import Numeric (showHex)
 import NanoUI.Internal.Font (FontMetrics (..), controlPadY, fmLineHeight, tableCellInset, widgetContentInset)
 import NanoUI.Internal.Layout.Arena (labelFontShift)
-import NanoUI.Internal.StyleBits (BitField (..))
+import NanoUI.Internal.StyleBits (BitField (..), decodeStyleEnum)
 import qualified NanoUI.Internal.StyleBits as SB
 import NanoUI.Internal.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), Style (..), TextDecoration (..), TextEllipsis (..), Theme (..), Tone (..), toneColor)
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorB, colorG, colorR, colorRGBA, lerpColor)
@@ -286,14 +285,6 @@ packTextNodeStyle l stripe =
     .|. SB.placeField SB.textTone (maybe 0 ((+ 1) . fromEnum) (layoutFontTone l))
     .|. SB.packField SB.textEllipsis (fromEnum (layoutEllipsis l))
     .|. (if layoutSingleLine l then SB.fieldMask SB.textSingleLine else 0)
-
--- | The enum packed in field @f@ of the style bits, or @fallback@ when the
--- field holds no constructor.
-{-# INLINE decodeStyleEnum #-}
-decodeStyleEnum :: forall a. (Bounded a, Enum a) => BitField -> a -> Word64 -> a
-decodeStyleEnum f fallback si =
-  let v = SB.getField f si
-   in if v >= fromEnum (minBound :: a) && v <= fromEnum (maxBound :: a) then toEnum v else fallback
 
 -- | The tone in a field that holds a 'Tone' plus one, 'Nothing' for 0.
 {-# INLINE decodeToneField #-}

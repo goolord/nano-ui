@@ -64,6 +64,7 @@ module NanoUI.Internal.Monad.Core
   , unlessM
   , (<&&>)
   , ifM
+  , mfilterM
   )
 where
 
@@ -408,15 +409,16 @@ disabledWhen False m = m
 disabledWhen True m =
   -- The view inside sees no presses, keys or wheel, so no widget's own input
   -- handling can fire; the frame's focus and click passes check the scope.
-  NanoUI . localStaticRep
-    (\r -> r {repInput = inert (repInput r), repFrame = inert (repFrame r)})
-    $ unNanoUI (withPaintScope enter m)
+  localBothInputs (\i -> (stripInteractionInput i) {inputButtonsHeld = noButtons, inputKeysHeld = mempty})
+    (withPaintScope enter m)
   where
-    inert i =
-      (stripInteractionInput i) {inputButtonsHeld = noButtons, inputKeysHeld = mempty}
     enter ctx outer
       | outer .&. 1 /= 0 = pure outer
       | otherwise = (.|. (outer .&. 2)) <$> (pushThemeScope ctx True =<< scopeRawTheme ctx outer)
+
+{-# INLINE localBothInputs #-}
+localBothInputs :: (Input -> Input) -> NanoUI a -> NanoUI a
+localBothInputs f (NanoUI m) = NanoUI (localStaticRep (\r -> r {repInput = f (repInput r), repFrame = f (repFrame r)}) m)
 
 -- Run @m@ with the arena scope @enter@ picks, then restore the scope around it
 -- (also on exceptions).
@@ -496,9 +498,7 @@ askInput = NanoUI (repInput <$!> getStaticRep)
 -- not react through overlays.
 {-# INLINE askFrameInput #-}
 askFrameInput :: NanoUI Input
-askFrameInput = do
-  UiRep {repFrame = frame} <- NanoUI getStaticRep
-  pure frame
+askFrameInput = NanoUI (repFrame <$> getStaticRep)
 
 -- | Run a part of the view with another routed input.
 {-# INLINE localInput #-}
@@ -508,10 +508,9 @@ localInput inp (NanoUI m) = NanoUI (localStaticRep (\r -> r {repInput = inp}) m)
 -- | Display-only content sees neither routed nor raw interaction input.
 -- Its container flag independently excludes its widgets from focus and IME.
 inertView :: NanoUI a -> NanoUI a
-inertView m = withPaintScope (\_ outer -> pure (outer .|. 2)) $ NanoUI $
-  localStaticRep (\r -> r {repInput = inert (repInput r), repFrame = inert (repFrame r)}) (unNanoUI m)
-  where
-    inert i = (withoutPointer (stripInteractionInput i)) {inputKeysHeld = mempty, inputComposition = Nothing}
+inertView =
+  withPaintScope (\_ outer -> pure (outer .|. 2))
+    . localBothInputs (\i -> (withoutPointer (stripInteractionInput i)) {inputKeysHeld = mempty, inputComposition = Nothing})
 
 -- | The window's content size in logical pixels ('NanoUI.winSize' of
 -- 'NanoUI.askWindow').
@@ -591,4 +590,10 @@ a <&&> b = a >>= \ok -> if ok then b else pure False
 {-# INLINE ifM #-}
 ifM :: Monad m => m Bool -> m a -> m a -> m a
 ifM mb t f = mb >>= \b -> if b then t else f
+
+-- | Effectful 'Control.Monad.mfilter' over 'Maybe', avoiding a list allocation.
+{-# INLINE mfilterM #-}
+mfilterM :: Monad m => (a -> m Bool) -> Maybe a -> m (Maybe a)
+mfilterM _ Nothing = pure Nothing
+mfilterM p (Just x) = p x >>= \ok -> pure (if ok then Just x else Nothing)
 

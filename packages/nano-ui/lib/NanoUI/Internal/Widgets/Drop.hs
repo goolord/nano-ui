@@ -27,13 +27,13 @@ import Data.Text (Text)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Input
-import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, freshWidget, liftIO, takeEscape, withContext)
+import NanoUI.Internal.Monad (NanoUI, askInput, freshWidget, liftIO, takeEscape, withContext)
 import NanoUI.Internal.Store (deleteSpec, findSpec, insertSpec, lookupSpec)
 import NanoUI.Internal.Store.Slots (setFlagSpec, slotDrop, slotDropPos)
 import NanoUI.Internal.Style (Layout)
 import NanoUI.Internal.Types (Rect (..), V2 (..), rectContains, rectIntersect)
-import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Widgets.Node (Response, containerResponse, respId, respRect, respPressed)
+import NanoUI.Internal.Widgets.Layout (panelWith')
+import NanoUI.Internal.Widgets.Node (Response, respId, respRect, respPressed)
 import NanoUI.Internal.Widgets.Behavior (DragAxis (..), pastDragThreshold)
 
 -- | A thresholded pointer gesture. Terminal phases last one frame.
@@ -178,9 +178,7 @@ posInside bounds = maybe False (rectContains bounds)
 -- panel's 'Response', and the 'DropTarget' for its rect.
 dropZone :: (Layout -> Layout) -> NanoUI a -> NanoUI (a, Response, DropTarget)
 dropZone f child = do
-  base <- askDefaultLayout
-  (a, resp) <- containerResponse NodePanel (f base) child
+  (a, resp) <- panelWith' f child
   mClip <- withContext (`getPrevClipRect` respId resp)
   let dropBounds = maybe (respRect resp) (fromMaybe (Rect 0 0 0 0) . rectIntersect (respRect resp)) mClip
-  target <- useDrop dropBounds
-  pure (a, resp, target)
+  (a, resp,) <$> useDrop dropBounds

@@ -349,7 +349,7 @@ textAreaHitForWidget ctx wid = do
 -- | Record the text viewport and clamp the stored scroll to the content, and
 -- return the content extent. A saved editor state ('SlotTextAreaReveal') has
 -- its caret, 1 px wide, scrolled into view across, which takes the font, as
--- 'syncTextInputScroll' does for a field; its x is returned too, for drawing
+-- 'resolveTextInputFrame' does for a field; its x is returned too, for drawing
 -- the caret. This paint already reflects all of it, so the write marks
 -- nothing dirty: a window resize would otherwise request a second frame that
 -- has nothing to repaint.
@@ -408,6 +408,26 @@ textAreaScrollSnapped da state = do
   let (scrollX, scrollY) = TA.tasScrollOffset state
   pure (onGrid s (realToFrac scrollX), onGrid s (realToFrac scrollY))
 
+-- | Shared per-frame view state for painting, span collection, and mouse hit-testing.
+data TextAreaView
+  = TextAreaView !TA.TextAreaState !(Float, Float) !(Maybe (Int, Preedit)) !TextAreaBars !Rect !Float
+
+readTextAreaView :: DrawArena -> Context -> WidgetId -> Int -> FontMetrics -> Rect -> (Float, Float) -> IO TextAreaView
+readTextAreaView da ctx wid key fm field (contentW, contentH) = do
+  state <- (`TA.loadTextAreaState` key) <$> getStore ctx
+  scroll <- textAreaScrollSnapped da state
+  preedit <- textAreaPreedit ctx wid state
+  let bars = textAreaBars fm field contentW contentH
+  pure (TextAreaView state scroll preedit bars (textAreaTextClip fm field bars) (textAreaLineHeight fm))
+
+-- | First and last document row visible inside @field@, clamped to @buf@.
+-- Only the rows in view are read, so painting costs the same however long the
+-- document is.
+visibleRowRange :: Rect -> Float -> Float -> Float -> TB.TextBuffer -> (Int, Int)
+visibleRowRange (Rect _ y _ h) contentTop scrollYf lineH buf =
+  let rowAt py = floor ((py - contentTop + scrollYf) / max 1 lineH)
+   in (max 0 (rowAt y), min (TB.getLineCount buf - 1) (rowAt (y + h)))
+
 -- | Text-area content with the node font already resolved, so a paint pass
 -- that also needs it (for the field frame) resolves it once.
 drawTextAreaContentWith :: DrawArena -> Context -> FontMetrics -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
@@ -415,31 +435,23 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
   wid <- getWidgetId (ctxNodeArena ctx) idx
   let key = intKey wid
       field = Rect x y w h
-  ((contentW, contentH), caretAt) <- syncTextAreaViewport ctx idx key fm field
+  (extent, caretAt) <- syncTextAreaViewport ctx idx key fm field
   focus <- textInputFocused ctx idx
   theme <- nodeTheme ctx idx
-  state <- (`TA.loadTextAreaState` key) <$> getStore ctx
-  (scrollXf, scrollYf) <- textAreaScrollSnapped da state
-  preedit <- textAreaPreedit ctx wid state
+  TextAreaView state (scrollXf, scrollYf) preedit bars textClip@(Rect clipX contentTop _ _) lineH <-
+    readTextAreaView da ctx wid key fm field extent
   -- The layout's colour or tone, and the weight, slant and decoration the
   -- font gives no face for, as a text field's.
   fg <- fieldTextColor ctx idx (styleFg style)
   si <- getStyleIdx (ctxNodeArena ctx) idx
   size <- getNodeFontSize (ctxNodeArena ctx) idx
   native <- nodeFontNative ctx size si
-  let lineH = textAreaLineHeight fm
-      bars = textAreaBars fm field contentW contentH
-      textClip@(Rect clipX contentTop _ _) = textAreaTextClip fm field bars
-      buf = TA.tasBuffer state
+  let buf = TA.tasBuffer state
       cursor@(TB.Cursor caretRow caretCol) = TB.getCursor buf
       contentX = clipX - scrollXf
       rowY row = contentTop + fromIntegral row * lineH - scrollYf
       (mV, mH) = textAreaBarLayouts field bars scrollXf scrollYf
-      -- Only the rows in view are read, so painting costs the same however
-      -- long the document is.
-      rowAt py = floor ((py - contentTop + scrollYf) / max 1 lineH) :: Int
-      firstRow = max 0 (rowAt y)
-      lastRow = min (TB.getLineCount buf - 1) (rowAt (y + h))
+      (firstRow, lastRow) = visibleRowRange field contentTop scrollYf lineH buf
       (lo, hi) = TB.selectionRange (TA.tasSelectionAnchor state) cursor
   withClip da textClip $ do
     when (focus && (lo /= hi || isJust preedit)) $
@@ -503,20 +515,17 @@ textAreaTextClip fm field bars =
 -- height)@, and the clip they are painted in: what 'drawTextAreaContentWith'
 -- draws, for hosts that draw text themselves. Empty rows are left out.
 textAreaTextPlacements :: Context -> NodeIdx -> Rect -> IO (Rect, [(T.Text, Float, Float, Float, Float)])
-textAreaTextPlacements ctx idx field@(Rect _ y _ h) = do
+textAreaTextPlacements ctx idx field = do
   fm <- resolveTextAreaFont ctx idx
   wid <- getWidgetId (ctxNodeArena ctx) idx
-  let key = intKey wid
-  (contentW, contentH) <- textAreaContentMetrics ctx idx
-  state <- (`TA.loadTextAreaState` key) <$> getStore ctx
-  (scrollXf, scrollYf) <- textAreaScrollSnapped (ctxDrawArena ctx) state
-  preedit <- textAreaPreedit ctx wid state
-  let lineH = textAreaLineHeight fm
-      clip@(Rect clipX contentTop _ _) = textAreaTextClip fm field (textAreaBars fm field contentW contentH)
-      buf = TA.tasBuffer state
-      rowAt py = floor ((py - contentTop + scrollYf) / max 1 lineH) :: Int
-      rows = [max 0 (rowAt y) .. min (TB.getLineCount buf - 1) (rowAt (y + h))]
-  placements <- forM [(row, line) | row <- rows, let line = fst (shownRow preedit buf row), not (T.null line)] $ \(row, line) -> do
+  extent <- textAreaContentMetrics ctx idx
+  TextAreaView state (scrollXf, scrollYf) preedit _ clip@(Rect clipX contentTop _ _) lineH <-
+    readTextAreaView (ctxDrawArena ctx) ctx wid (intKey wid) fm field extent
+  let buf = TA.tasBuffer state
+      (firstRow, lastRow) = visibleRowRange field contentTop scrollYf lineH buf
+  let visibleLines =
+        [(row, line) | row <- [firstRow .. lastRow], let line = fst (shownRow preedit buf row), not (T.null line)]
+  placements <- forM visibleLines $ \(row, line) -> do
     lw <- lineWidthIO fm line
     pure (line, clipX - scrollXf, contentTop + fromIntegral row * lineH - scrollYf, lw, lineH)
   pure (clip, placements)
@@ -531,17 +540,13 @@ textAreaMouse ctx inp onControl wid idx = do
       key = intKey wid
   selectWithMouse ctx inp wid field (if onControl then pure True else isMouseOnTextAreaScrollBarAt ctx idx mouse) $ do
     fm <- resolveTextAreaFont ctx idx
-    (contentW, contentH) <- textAreaContentMetrics ctx idx
-    store <- getStore ctx
+    extent <- textAreaContentMetrics ctx idx
+    TextAreaView state0 (scrollXf, scrollYf) preedit _ (Rect clipX contentTop vpW vpH) lineH <-
+      readTextAreaView (ctxDrawArena ctx) ctx wid key fm field extent
     -- The editor keeps the caret in view, so give it the viewport it has.
-    let Rect clipX contentTop vpW vpH = textAreaTextClip fm field (textAreaBars fm field contentW contentH)
-        lineH = textAreaLineHeight fm
-        state =
-          TA.setTextAreaViewport (realToFrac vpW, realToFrac vpH) (realToFrac lineH) (TA.loadTextAreaState store key)
+    let state = TA.setTextAreaViewport (realToFrac vpW, realToFrac vpH) (realToFrac lineH) state0
         buf = TA.tasBuffer state
-    (scrollXf, scrollYf) <- textAreaScrollSnapped (ctxDrawArena ctx) state
-    preedit <- textAreaPreedit ctx wid state
-    let row = clamp 0 (TB.getLineCount buf - 1) (floor ((mouseY - contentTop + scrollYf) / max 1 lineH))
+        row = clamp 0 (TB.getLineCount buf - 1) (floor ((mouseY - contentTop + scrollYf) / max 1 lineH))
         -- Hit-test the displayed row, then map back to a document column.
         (line, toSource) = shownRow preedit buf row
     prepared <- prepareFontMetrics fm line

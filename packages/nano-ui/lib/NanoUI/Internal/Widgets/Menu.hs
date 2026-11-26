@@ -24,14 +24,14 @@ import NanoUI.Internal.Frame.Hit (withWidgetNode)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Font (menuItemPadX, menuItemRowH, menuMinW, menuOuterPad, menuSepH, widgetContentInset)
 import NanoUI.Internal.Input (MouseButton (..), Pressable (..), inputMousePos, inputWindowSize)
-import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, askInput, freshWidget, liftIO, (<&&>))
+import NanoUI.Internal.Monad (NanoUI, askContext, askInput, freshWidget, liftIO, (<&&>))
 import NanoUI.Internal.Store (findSpec, insertSpec)
 import NanoUI.Internal.Store.Slots (setFlagSpec, slotMenuOpen, slotMenuPos)
 import NanoUI.Internal.Style (Layout (..), Padding (..), defaultLayout, fillW, fixedH, fontMuted, gap, grow, maxH, minW, padXY, tight, windowMargin)
 import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), Size (..), V2 (..))
 import NanoUI.Internal.WidgetText (ButtonKind (..), buttonFlagMenu, buttonFlagMenuBar, buttonKindOf)
 import NanoUI.Internal.Widgets.Combinators (buttonStyledEx)
-import NanoUI.Internal.Widgets.Layout (columnWith, labelEx, rowWith, scrollWith, separator)
+import NanoUI.Internal.Widgets.Layout (columnWith, labelEx, rowWith, scrollWith, separator, withDefaultWith)
 import NanoUI.Internal.Layout.Arena (NodeType (..), getNodeType, getStyleIdx)
 import NanoUI.Internal.Widgets.Node (HasResponse, Response (..), containerResponse, inertResponse, respClicked, respHovered, respRightClicked)
 import NanoUI.Internal.Var.Types (constVar)
@@ -60,8 +60,7 @@ contextMenuArea ::
   NanoUI (a, Maybe b)
 contextMenuArea f areaContent menuContent = do
   menu <- freshWidget
-  base <- askDefaultLayout
-  (areaRes, areaResp) <- containerResponse NodeContainer (f base) areaContent
+  (areaRes, areaResp) <- withDefaultWith f (containerResponse NodeContainer) areaContent
   (,) areaRes <$> runContextMenu menu (respRightClicked areaResp) menuContent
 
 -- | Open the menu at the pointer on a right click, show it while open, and

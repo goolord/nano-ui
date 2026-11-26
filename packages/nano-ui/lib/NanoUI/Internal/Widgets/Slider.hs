@@ -12,14 +12,14 @@ import NanoUI.Internal.Context
 import NanoUI.Internal.Equality (sameFloat)
 import NanoUI.Internal.Font (sliderHitBounds)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, freshWidget, scope, liftIO)
-import NanoUI.Internal.Style (Layout, defaultLayout, fillW, inheritFont)
+import NanoUI.Internal.Monad (NanoUI, freshWidget, scope, liftIO)
+import NanoUI.Internal.Style (Layout, defaultLayout, fillW)
 import NanoUI.Internal.Store (fieldFloat)
 import NanoUI.Internal.Types (Rect (..), clamp)
 import NanoUI.Internal.Var (Binding (..), bindVarBy)
 import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Widgets.Behavior (DragAxis (..), holdActiveWhile, navStep, useDrag1D, useKeyNav)
-import NanoUI.Internal.Widgets.Combinators (finishInput)
+import NanoUI.Internal.Widgets.Combinators (finishInput, widgetBaseLayout)
 import NanoUI.Internal.Widgets.Node (Response, addWidget, setWidgetValue)
 
 -- | Slider over @[minV, maxV]@ that fills the available width, bound to
@@ -64,11 +64,10 @@ sliderCore f minV maxV value = do
   -- is not adopted afresh, and written back clamped, on every frame.
   let given = if isNaN value then minV else clamp minV maxV value
   current <- liftIO $ adoptSlot fieldFloat ctx wid given
-  let
-    range = maxV - minV
-    fracOf x = if range > 0 then (x - minV) / range else 0
-  amb <- askDefaultLayout
-  resp <- addWidget wid NodeSlider "" (fracOf current) (f (inheritFont amb (fillW defaultLayout)))
+  let range = maxV - minV
+      fracOf x = if range > 0 then (x - minV) / range else 0
+  lay <- widgetBaseLayout (fillW defaultLayout) f
+  resp <- addWidget wid NodeSlider "" (fracOf current) lay
   mrect <- liftIO (getPrevRect ctx wid)
   let
     track = maybe (Rect 0 0 0 0) (\(Rect x y w h) -> sliderHitBounds x y w h) mrect

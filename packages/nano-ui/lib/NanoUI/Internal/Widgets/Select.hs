@@ -14,7 +14,6 @@ module NanoUI.Internal.Widgets.Select
 where
 
 import Control.Monad (forM_, join, mfilter, unless, void, when)
-import Data.Foldable (toList)
 import Data.Hashable (hash)
 import Data.IORef (writeIORef)
 import Data.Maybe (isJust, isNothing)
@@ -22,20 +21,19 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Internal.Canvas (CanvasM, drawRect, drawRoundedRect, drawText, runCanvasFor)
 import NanoUI.Internal.Context
-import NanoUI.Internal.Equality (sameEnum)
 import NanoUI.Internal.Font (FontMetrics (..), centeredTextY, menuItemRowH, menuOuterPad)
 import NanoUI.Internal.Frame.Select (DropdownRow (..), dropdownPopupRows, dropdownVisibleRows, selectRowAt)
 import NanoUI.Internal.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input (Input, MouseButton (..), Pressable (..), UiCursorKind (..), inputMousePos, inputWindowSize)
 import NanoUI.Internal.Layout.Arena (NodeType (..), addNodeFromLayout)
-import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askDefaultLayout, askInput, freshWidget, liftIO, nextId)
+import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askInput, freshWidget, liftIO, nextId)
 import NanoUI.Internal.Store (fieldInt, insertSlot)
-import NanoUI.Internal.Style (AlignX (..), AlignY (..), Layout (..), Theme (..), defaultLayout, fillW, fixedH, inheritFont, tight)
+import NanoUI.Internal.Style (AlignX (..), AlignY (..), Layout (..), Theme (..), defaultLayout, fillW, fixedH, tight)
 import NanoUI.Internal.Types (Rect (..), Size (..), V2 (..), clamp, rectIntersect)
-import NanoUI.Internal.Var (Binding (..), bindVar, bindVarBy)
+import NanoUI.Internal.Var (Binding (..), bindVar)
 import NanoUI.Internal.Var.Types (Var)
-import NanoUI.Internal.Widgets.Combinators (withBoundedIndex)
+import NanoUI.Internal.Widgets.Combinators (bindEnumPicker, nonEmptyOpts, widgetBaseLayout)
 import NanoUI.Internal.Widgets.Node (Response, addWidget, addWidgetWithOptions, dropdownBodyInput, inDropdownScope, pointerOnWidget, respRect, setChanged)
 import NanoUI.Internal.Widgets.Popup (floatingOverlay)
 
@@ -43,7 +41,7 @@ import NanoUI.Internal.Widgets.Popup (floatingOverlay)
 -- holding the zero-based selected index.
 {-# INLINE select #-}
 select :: Foldable f => f Text -> Var Int -> NanoUI ()
-select options v = void (selectWith' id options v)
+select options = void . select' options
 
 -- | 'select' returning its 'Response'.
 {-# INLINE select' #-}
@@ -53,7 +51,7 @@ select' = selectWith' id
 -- | 'select' with a layout modifier.
 {-# INLINE selectWith #-}
 selectWith :: Foldable f => (Layout -> Layout) -> f Text -> Var Int -> NanoUI ()
-selectWith f options v = void (selectWith' f options v)
+selectWith f options = void . selectWith' f options
 
 -- | 'selectWith' returning its 'Response'.
 {-# INLINE selectWith' #-}
@@ -71,21 +69,17 @@ selectCore ::
 selectCore f options index = do
   (wid, ctx) <- freshWidget
   liftIO $ registerFocusable ctx wid
-  let
-    opts = case toList options of
-      [] -> [""]
-      xs -> xs
-    n = length opts
-    key = intKey wid
+  let opts = nonEmptyOpts options
+      n = length opts
+      key = intKey wid
   -- The store holds the caller's index until a pick replaces it, even one
   -- the options do not reach: a pick of the option it shows is a change.
   stored <- liftIO $ adoptSlot fieldInt ctx wid index
   store0 <- liftIO (getStore ctx)
-  let
-    current = clamp 0 (n - 1) stored
-    open = isSelectOpen store0 key
-  amb <- askDefaultLayout
-  resp <- addWidgetWithOptions wid NodeSelect "" opts 0 (f (inheritFont amb defaultLayout))
+  let current = clamp 0 (n - 1) stored
+      open = isSelectOpen store0 key
+  lay <- widgetBaseLayout defaultLayout f
+  resp <- addWidgetWithOptions wid NodeSelect "" opts 0 lay
   inp <- askInput
   let rect = respRect resp
   -- Ignore presses where layers or a pinned node cover the widget, or where
@@ -190,12 +184,12 @@ paintDropdownRows cdc rows =
 -- | Select over every value of a bounded enum, labeled by @encode@.
 {-# INLINE enumSelectBy #-}
 enumSelectBy :: (Bounded a, Enum a) => (a -> Text) -> Var a -> NanoUI ()
-enumSelectBy encode v = void (enumSelectBy' encode v)
+enumSelectBy encode = void . enumSelectBy' encode
 
 -- | 'enumSelectBy' returning its 'Response'.
 {-# INLINE enumSelectBy' #-}
 enumSelectBy' :: (Bounded a, Enum a) => (a -> Text) -> Var a -> NanoUI Response
-enumSelectBy' encode v = bindVarBy sameEnum RenderFinal v (\value -> withBoundedIndex encode value (selectCore id))
+enumSelectBy' = bindEnumPicker (selectCore id)
 
 -- | 'enumSelectBy' labeled with 'show'.
 {-# INLINE enumSelect #-}

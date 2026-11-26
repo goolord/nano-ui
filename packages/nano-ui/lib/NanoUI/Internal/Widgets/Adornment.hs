@@ -25,13 +25,12 @@ import Control.Monad (forM)
 import Data.IORef (readIORef)
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
-import NanoUI.Internal.Context (Context (..), getPrevRect, isDisabled, pointerCovered)
+import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Font (FontMetrics (..))
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input (inputMousePos)
-import NanoUI.Internal.Frame.Hit (nodeInteractionHit)
-import NanoUI.Internal.Layout.Arena (arenaCount, getNodeType, getWidgetId, isWidgetNode, lookupNodeByWidgetId)
-import NanoUI.Internal.Monad (NanoUI, askContext, askInput, ifM, resolveFontUi, liftIO, uiTheme, withDefaultLayout, (<&&>))
+import NanoUI.Internal.Layout.Arena (arenaCount, lookupNodeByWidgetId)
+import NanoUI.Internal.Monad (NanoUI, askContext, askInput, ifM, resolveFontUi, liftIO, uiTheme, withDefaultLayout)
 import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Color, V2)
 import NanoUI.Internal.Widgets.Behavior (keyActivated)
@@ -181,16 +180,8 @@ adornmentRowLayout lay = tight . gap (layoutGap lay) . alignMiddle . itemsCenter
 -- is active, it retains the pointer.
 holdsPointer :: Context -> WidgetId -> V2 -> [(Int, Int)] -> IO Bool
 holdsPointer ctx wid mouse ranges = do
-  let na = ctxNodeArena ctx
-      inRanges i = any (\(from, to) -> i >= from && i < to) ranges
-      overControl i =
-        (isWidgetNode <$> getNodeType na i) <&&> do
-          w <- getWidgetId na i
-          (not <$> isDisabled ctx w)
-            <&&> (not <$> pointerCovered ctx w)
-            <&&> (maybe (pure False) (\r -> nodeInteractionHit ctx i r mouse) =<< getPrevRect ctx w)
   active <- readIORef (ctxActiveId ctx)
-  pressedControl <- maybe False inRanges <$> lookupNodeByWidgetId na active
+  pressedControl <- maybe False (\i -> any (\(from, to) -> i >= from && i < to) ranges) <$> lookupNodeByWidgetId (ctxNodeArena ctx) active
   if pressedControl || active == wid
     then pure pressedControl
-    else foldr (\i rest -> ifM (overControl i) (pure True) rest) (pure False) [i | (from, to) <- ranges, i <- [from .. to - 1]]
+    else foldr (\(from, to) rest -> ifM (anyControlHitInRange ctx mouse from to) (pure True) rest) (pure False) ranges

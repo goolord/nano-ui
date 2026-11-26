@@ -41,7 +41,7 @@ searchFonts names = listToMaybe <$> searchFontFamilies (concatMap families names
 searchFontFamilies :: [String] -> IO [FilePath]
 searchFontFamilies names = do
   files <- fontStems
-  pure (nubOrd (mapMaybe (\name -> bestMatch (normalize name) files) names))
+  pure (nubOrd (mapMaybe (\name -> bestMatch (normalizeFamily name) files) names))
 
 -- | Files beside a regular face that may be its bold, most likely first: the
 -- family's own @-Bold@ file, or Windows' short names, @consolab.ttf@ beside
@@ -50,11 +50,11 @@ searchFontFamilies names = do
 boldFaceCandidates :: FilePath -> IO [FilePath]
 boldFaceCandidates regular = do
   siblings <- filter isFontFile <$> listDirectory dir `catch` \(_ :: IOException) -> pure []
-  let named = [(normalize (takeBaseName f), dir </> f) | f <- siblings]
+  let named = [(normalizeFamily (takeBaseName f), dir </> f) | f <- siblings]
   pure [path | want <- wanted, (stem', path) <- named, stem' == want]
   where
     dir = takeDirectory regular
-    stem = normalize (takeBaseName regular)
+    stem = normalizeFamily (takeBaseName regular)
     families = stem : [reverse family | t <- regularTails, Just family <- [stripPrefix (reverse t) (reverse stem)], not (null family)]
     wanted = nubOrd (map (<> "bold") families ++ [stem <> "bd", stem <> "b"])
 
@@ -76,7 +76,7 @@ listFontFamilies = do
 -- | Filename stem -> display family. Everything from the first @-@ is treated
 -- as style (\"Regular\", \"Bold Italic\", ...); camel case is split so
 -- @NotoSansArabic@ reads as @Noto Sans Arabic@. Kept case-insensitively
--- compatible with 'normalize'.
+-- compatible with 'normalizeFamily'.
 prettyFamily :: String -> String
 prettyFamily file = concat (zipWith separate (' ' : stem) stem)
   where
@@ -111,7 +111,7 @@ startFontIndex = modifyMVar fontIndexRef $ \case
   where
     walk = do
       files <- fontFilesUnder =<< defaultFontDirs
-      let stems = map (\path -> (normalize (takeBaseName path), path)) files
+      let stems = map (\path -> (normalizeFamily (takeBaseName path), path)) files
       -- Forced here, so a search that waits finds the work done.
       stems <$ mapM_ (\(stem, _) -> length stem `seq` pure ()) stems
 
@@ -214,14 +214,12 @@ matchScore norm stem = score <$> stripPrefix norm stem
 -- suffixes (@arialbd@, @consolaz@). @Mono@, @Condensed@ or a script name
 -- in it make it the rest of a longer family's name.
 isStyleTail :: String -> Bool
-isStyleTail t = t `elem` ["", "r", "b", "bd", "i", "bi", "z"] || styleWords (dropAxes t)
+isStyleTail t = t `elem` ["", "r", "b", "bd", "i", "bi", "z"] || styleWords (dropVariable (takeWhile (/= '[') t))
   where
-    dropAxes s
-      | (before, '[' : _) <- break (== '[') s = dropVariable before
-      | otherwise = dropVariable s
-    dropVariable s = case [take n s | n <- [0 .. length s], "variable" `isPrefixOf` drop n s] of
-      before : _ -> before
-      [] -> s
+    dropVariable "" = ""
+    dropVariable s@(c : cs)
+      | "variable" `isPrefixOf` s = ""
+      | otherwise = c : dropVariable cs
     styleWords "" = True
     styleWords s = any (\w -> maybe False styleWords (stripPrefix w s)) styleVocabulary
 
@@ -273,8 +271,3 @@ familyAliases "arialunicodems" = ["arialuni"]
 familyAliases "pingfangsc" = ["pingfang"]
 familyAliases "kohinoordevanagari" = ["kohinoor"]
 familyAliases _ = []
-
--- | Expand a generic CSS family into concrete families to search in order.
--- Shared with @nano-ui-sdl-web@ via "NanoUI.Ttf.Internal.Support".
-normalize :: String -> String
-normalize = normalizeFamily

@@ -1,8 +1,10 @@
 -- | Button, selection and cache helpers shared by the widget modules.
 module NanoUI.Internal.Widgets.Combinators
-  ( buttonStyledEx
+  ( widgetBaseLayout
+  , buttonStyledEx
   , choiceToggleWidget
-  , withBoundedIndex
+  , bindEnumPicker
+  , nonEmptyOpts
   , finishToggle
   , finishInput
   , readDerived
@@ -11,18 +13,29 @@ module NanoUI.Internal.Widgets.Combinators
 where
 
 import Control.Monad (when)
+import Data.Foldable (toList)
 import Data.IORef (modifyIORef', readIORef)
 import Data.Text (Text)
 import Data.Word (Word64)
-import NanoUI.Internal.Derived (DerivedField, lookupDerived, insertDerived)
 import NanoUI.Internal.Context
+import NanoUI.Internal.Derived (DerivedField, insertDerived, lookupDerived)
+import NanoUI.Internal.Equality (sameEnum)
 import NanoUI.Internal.Id (WidgetId)
-import NanoUI.Internal.Store (fieldInt, Field, boolInt)
 import NanoUI.Internal.Layout.Arena (NodeType (..))
-import NanoUI.Internal.Monad (NanoUI, freshWidget, liftIO)
-import NanoUI.Internal.Style (Layout (..))
+import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, freshWidget, liftIO)
+import NanoUI.Internal.Store (Field, boolInt, fieldInt)
+import NanoUI.Internal.Style (Layout (..), inheritFont)
+import NanoUI.Internal.Var (Binding (..), bindVarBy)
+import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Widgets.Behavior (keyActivated)
 import NanoUI.Internal.Widgets.Node
+
+-- | Apply @f@ over @base@ after inheriting the ambient default layout's font.
+{-# INLINE widgetBaseLayout #-}
+widgetBaseLayout :: Layout -> (Layout -> Layout) -> NanoUI Layout
+widgetBaseLayout base f = do
+  dl <- askDefaultLayout
+  pure (f (inheritFont dl base))
 
 -- | A button, given whether it is enabled, its value, and a style index for
 -- active, sort, badge, or close chrome: the shared activation path for
@@ -101,15 +114,23 @@ readDerived field ctx key = lookupDerived field key <$> readIORef (ctxDerivedCac
 writeDerived :: DerivedField a -> Context -> Int -> a -> IO ()
 writeDerived field ctx key value = modifyIORef' (ctxDerivedCache ctx) (insertDerived field key value)
 
--- | Run an index-based picker over every value of a bounded enum. Indices
--- are offset by @fromEnum minBound@, so enums that do not start at 0 map
--- correctly. Meant for small enums: every value becomes an option.
-withBoundedIndex ::
-  forall a r f.
-  (Bounded a, Enum a, Functor f) =>
-  (a -> Text) -> a -> ([Text] -> Int -> f (r, Int)) -> f (r, a)
-withBoundedIndex encode initial pick =
-  fmap (toEnum . (+ lower))
-    <$> pick (map encode [minBound .. maxBound]) (fromEnum initial - lower)
- where
-  lower = fromEnum (minBound :: a)
+-- | Non-empty option list, defaulting an empty foldable to a single blank option.
+nonEmptyOpts :: Foldable f => f Text -> [Text]
+nonEmptyOpts xs = case toList xs of
+  [] -> [""]
+  ys -> ys
+
+-- | Bind a 'Var' over every value of a bounded enum to an index-based picker.
+-- Indices are offset by @fromEnum minBound@, so enums that do not start at 0
+-- map accurately.
+{-# INLINE bindEnumPicker #-}
+bindEnumPicker ::
+  forall a.
+  (Bounded a, Enum a) =>
+  ([Text] -> Int -> NanoUI (Response, Int)) -> (a -> Text) -> Var a -> NanoUI Response
+bindEnumPicker pick encode v =
+  bindVarBy sameEnum RenderFinal v $ \val ->
+    fmap (toEnum . (+ lower)) <$> pick opts (fromEnum val - lower)
+  where
+    lower = fromEnum (minBound :: a)
+    opts = map encode [minBound .. maxBound]

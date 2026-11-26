@@ -28,13 +28,10 @@ module NanoUI.Internal.Draw.Arena
   , getClipPieces
   , withClip
   , setTexture
-  , setShader
-  , allocShaderCall
   , pushShaderQuad
-  , EffectSpanToken (..)
+  , EffectSpanToken
   , beginEffectSpan
   , endEffectSpan
-  , currentEffectSpanId
   , finishDraw
   , withVerts
   , withVertsRaw
@@ -49,7 +46,6 @@ module NanoUI.Internal.Draw.Arena
   ) where
 
 import Control.Monad (forM, unless, when)
-import Data.Bits (shiftR, (.&.))
 import Data.Int (Int32)
 import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe)
@@ -64,7 +60,7 @@ import Data.Primitive.ByteArray
   )
 import Data.Primitive.PrimArray
   ( PrimArray
-  , emptyPrimArray
+  , copyMutablePrimArray
   , indexPrimArray
   , newPrimArray
   , primArrayFromList
@@ -86,7 +82,20 @@ import GHC.Exts (RealWorld)
 import NanoUI.Internal.Draw.Types
 import NanoUI.Internal.Shader (PackedShaderPass (..))
 import NanoUI.Internal.SIMD (pokeQuadSIMD)
-import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), foldUpTo, forUpTo_, newZeroedPrimArray, onGrid, rectIntersect)
+import NanoUI.Internal.Types
+  ( Color (..)
+  , Rect (..)
+  , V2 (..)
+  , bucketOffsets
+  , foldUpTo
+  , forUpTo_
+  , newZeroedPrimArray
+  , onGrid
+  , readRectAt
+  , rectIntersect
+  , unpackColorF
+  , writeRectAt
+  )
 import NanoUI.Internal.Uniforms (alignUp, pokeSysUniforms, sysUniformBytes)
 
 vertexCapacity :: Int
@@ -110,59 +119,45 @@ newDrawArena = do
   daCmdStore <- newIORef =<< UM.unsafeNew cmdInitialCapacity
   daCurrentLayer <- newIORef LayerContent
   daCurrentClip <- newPrimArray 4
-  daCurrentTexture <- newIORef glyphAtlasTextureId
   daSnapScale <- newIORef 0.0
   daSquareGeometry <- newIORef False
   daExternalText <- newIORef False
-  daClipPieces <- newIORef emptyPrimArray
-  daTextSpans <- newIORef ([], [])
   daClear <- newIORef (Color 0)
   daRecordOps <- newIORef False
-  daRecordedOps <- newIORef []
   daRecordOpacity <- newIORef 1.0
-  daCurrentShader <- newIORef 0
-  daNoMergeBefore <- newIORef 0
-  daShaderCalls <- newIORef []
-  daShaderCallCount <- newIORef 0
   daUniformBuf <- newIORef =<< newByteArray 0
-  daUniformLen <- newIORef 0
-  daEffectSpans <- newIORef []
-  daEffectStack <- newIORef []
-  daEffectNextId <- newIORef 1
   daPixelScale <- newIORef 1.0
-  let
-    da = DrawArena {..}
+  daExtra <- newIORef emptyDrawExtra
+  let da = DrawArena {..}
   resetDrawArena da
   pure da
 
 resetDrawArena :: DrawArena -> IO ()
 resetDrawArena da = do
   setPrimArray (daCounts da) 0 countSlots 0
+  setCount da texSlot glyphAtlasTextureId
+  setCount da effectNextIdSlot 1
   writeIORef (daCurrentLayer da) LayerContent
   setClip da (Rect 0 0 1e9 1e9)
-  writeIORef (daCurrentTexture da) glyphAtlasTextureId
-  writeIORef (daCurrentShader da) 0
-  writeIORef (daNoMergeBefore da) 0
-  writeIORef (daShaderCalls da) []
-  writeIORef (daShaderCallCount da) 0
-  writeIORef (daUniformLen da) 0
-  writeIORef (daEffectSpans da) []
-  writeIORef (daEffectStack da) []
-  writeIORef (daEffectNextId da) 1
-  writeIORef (daClipPieces da) emptyPrimArray
   writeIORef (daClear da) (Color 0)
-  -- Only here: a reused frame paints nothing and keeps the last paint's.
-  writeIORef (daTextSpans da) ([], [])
-  writeIORef (daRecordedOps da) []
   writeIORef (daRecordOpacity da) 1.0
+  -- Only here: a reused frame paints nothing and keeps the last paint's.
+  writeIORef (daExtra da) emptyDrawExtra
 
 -- 'daCounts' slots.
-vertexCountSlot, indexCountSlot, cmdCountSlot, cmdStartSlot, countSlots :: Int
+vertexCountSlot, indexCountSlot, cmdCountSlot, cmdStartSlot :: Int
+texSlot, shaderSlot, noMergeSlot, shaderCallCountSlot, uniformLenSlot, effectNextIdSlot, countSlots :: Int
 vertexCountSlot = 0
 indexCountSlot = 1
 cmdCountSlot = 2
 cmdStartSlot = 3
-countSlots = 4
+texSlot = 4
+shaderSlot = 5
+noMergeSlot = 6
+shaderCallCountSlot = 7
+uniformLenSlot = 8
+effectNextIdSlot = 9
+countSlots = 10
 
 {-# INLINE getCount #-}
 getCount :: DrawArena -> Int -> IO Int
@@ -178,13 +173,13 @@ setCount da = writePrimArray (daCounts da)
 -- the pixels between them, which it has not cleared.
 setClipPieces :: DrawArena -> [Rect] -> IO ()
 setClipPieces da rects =
-  writeIORef (daClipPieces da) $
-    primArrayFromList (concat [[x, y, x + w, y + h] | Rect x y w h <- rects])
+  modifyIORef' (daExtra da) $ \e ->
+    e {dfeClipPieces = primArrayFromList (concat [[x, y, x + w, y + h] | Rect x y w h <- rects])}
 
 -- | The rects 'setClipPieces' set, as @x0, y0, x1, y1@ runs.
 {-# INLINE getClipPieces #-}
 getClipPieces :: DrawArena -> IO (PrimArray Float)
-getClipPieces da = readIORef (daClipPieces da)
+getClipPieces da = dfeClipPieces <$> readIORef (daExtra da)
 
 -- | Device pixel scale used to snap primitive origins/endpoints to whole
 -- device pixels. A non-positive value disables snapping. The SDL backend keeps
@@ -261,11 +256,11 @@ recordOpOn da op = do
   layer <- currentLayer da
   clip <- currentClip da
   alpha <- readIORef (daRecordOpacity da)
-  modifyIORef' (daRecordedOps da) (RecordedOp layer clip alpha op :)
+  modifyIORef' (daExtra da) $ \e -> e {dfeRecordedOps = RecordedOp layer clip alpha op : dfeRecordedOps e}
 
 -- | The shapes the last paint recorded, in paint order.
 recordedOps :: DrawArena -> IO [RecordedOp]
-recordedOps da = reverse <$> readIORef (daRecordedOps da)
+recordedOps da = reverse . dfeRecordedOps <$> readIORef (daExtra da)
 
 -- | External text for hosts that rasterize text themselves from the collected
 -- text spans. Text emitters push no quads, so fonts without a glyph atlas do
@@ -330,10 +325,10 @@ flushCmd da = do
   when (end > start) $ do
     Rect cx cy cw ch <- currentClip da
     when (cw > 0 && ch > 0) $ do
-      tex <- readIORef (daCurrentTexture da)
+      tex <- getCount da texSlot
       layer <- readIORef (daCurrentLayer da)
-      sh <- readIORef (daCurrentShader da)
-      noMerge <- readIORef (daNoMergeBefore da)
+      sh <- fromIntegral <$> getCount da shaderSlot
+      noMerge <- getCount da noMergeSlot
       n <- getCount da cmdCountSlot
       arr <- readIORef (daCmdStore da)
       let
@@ -380,23 +375,11 @@ beginLayer da layer = do
     writeIORef (daCurrentLayer da) layer
 
 setClip :: DrawArena -> Rect -> IO ()
-setClip da (Rect x y w h) = do
-  flushCmd da
-  let clip = daCurrentClip da
-  writePrimArray clip 0 x
-  writePrimArray clip 1 y
-  writePrimArray clip 2 w
-  writePrimArray clip 3 h
+setClip da (Rect x y w h) = flushCmd da >> writeRectAt (daCurrentClip da) 0 x y w h
 
 {-# INLINE currentClip #-}
 currentClip :: DrawArena -> IO Rect
-currentClip da = do
-  let clip = daCurrentClip da
-  x <- readPrimArray clip 0
-  y <- readPrimArray clip 1
-  w <- readPrimArray clip 2
-  h <- readPrimArray clip 3
-  pure $! Rect x y w h
+currentClip da = readRectAt (daCurrentClip da) 0
 
 -- | Run @act@ clipped to the intersection with the current clip. Not
 -- exception-safe: the frame resets the clip before the next paint anyway.
@@ -409,36 +392,27 @@ withClip da rect act = do
 
 -- | Bind a texture. The unchanged case is the common one and stays inline; a
 -- real switch closes the pending command out of line.
+{-# INLINE setSlotState #-}
+setSlotState :: DrawArena -> Int -> Int -> IO ()
+setSlotState da slot val = do
+  cur <- getCount da slot
+  when (cur /= val) $ switchSlotState da slot val
+
+{-# NOINLINE switchSlotState #-}
+switchSlotState :: DrawArena -> Int -> Int -> IO ()
+switchSlotState da slot val = flushCmd da >> setCount da slot val
+
 {-# INLINE setTexture #-}
 setTexture :: DrawArena -> Int -> IO ()
-setTexture da tex = do
-  cur <- readIORef (daCurrentTexture da)
-  when (cur /= tex) $ switchTexture da tex
-
-{-# NOINLINE switchTexture #-}
-switchTexture :: DrawArena -> Int -> IO ()
-switchTexture da tex = do
-  flushCmd da
-  writeIORef (daCurrentTexture da) tex
+setTexture da = setSlotState da texSlot
 
 -- | Bind a 1-based shader call index (@0@ for the standard pipeline).
 {-# INLINE setShader #-}
 setShader :: DrawArena -> Int32 -> IO ()
-setShader da sh = do
-  cur <- readIORef (daCurrentShader da)
-  when (cur /= sh) $ switchShader da sh
+setShader da = setSlotState da shaderSlot . fromIntegral
 
-{-# NOINLINE switchShader #-}
-switchShader :: DrawArena -> Int32 -> IO ()
-switchShader da sh = do
-  flushCmd da
-  writeIORef (daCurrentShader da) sh
-
--- | Append one shader call's 48-byte system header and user std140 uniform
--- bytes into the draw arena, returning its 1-based 'ShaderCall' index.
-{-# NOINLINE allocShaderCall #-}
 -- | Pack system + user uniforms for @pass@ into 'daUniformBuf' and return the
--- resulting 'ShaderCall' without appending it to 'daShaderCalls'.
+-- resulting 'ShaderCall' without appending it to 'dfeShaderCalls'.
 packShaderCall ::
   DrawArena ->
   PackedShaderPass ->
@@ -453,7 +427,7 @@ packShaderCall da pass nodeRect uvRect scale radius tw th = do
   let userBytes = pspUniforms pass
       !userLen = sizeofByteArray userBytes
       !totalLen = alignUp 16 (sysUniformBytes + userLen)
-  off <- readIORef (daUniformLen da)
+  off <- getCount da uniformLenSlot
   buf0 <- readIORef (daUniformBuf da)
   cap <- getSizeofMutableByteArray buf0
   buf <-
@@ -466,7 +440,7 @@ packShaderCall da pass nodeRect uvRect scale radius tw th = do
         grown <$ writeIORef (daUniformBuf da) grown
   pokeSysUniforms nodeRect uvRect scale radius tw th buf off
   when (userLen > 0) $ copyByteArray buf (off + sysUniformBytes) userBytes 0 userLen
-  writeIORef (daUniformLen da) (off + totalLen)
+  setCount da uniformLenSlot (off + totalLen)
   pure
     ShaderCall
       { scHash = pspHash pass
@@ -475,6 +449,9 @@ packShaderCall da pass nodeRect uvRect scale radius tw th = do
       , scUniformLength = totalLen
       }
 
+-- | Append one shader call's 48-byte system header and user std140 uniform
+-- bytes into the draw arena, returning its 1-based 'ShaderCall' index.
+{-# NOINLINE allocShaderCall #-}
 allocShaderCall ::
   DrawArena ->
   PackedShaderPass ->
@@ -487,9 +464,9 @@ allocShaderCall ::
   IO Int32
 allocShaderCall da pass nodeRect uvRect scale radius tw th = do
   !call <- packShaderCall da pass nodeRect uvRect scale radius tw th
-  idx <- (+ 1) <$> readIORef (daShaderCallCount da)
-  writeIORef (daShaderCallCount da) idx
-  modifyIORef' (daShaderCalls da) (call :)
+  idx <- (+ 1) <$> getCount da shaderCallCountSlot
+  setCount da shaderCallCountSlot idx
+  modifyIORef' (daExtra da) $ \e -> e {dfeShaderCalls = call : dfeShaderCalls e}
   pure (fromIntegral idx)
 
 -- | Emit a Tier 1 leaf surface shader quad with normalized local UVs
@@ -505,21 +482,13 @@ pushShaderQuad da pass rect@(Rect _ _ w h) radius tint = do
   setShader da 0
 
 -- | Token returned by 'beginEffectSpan' and passed to 'endEffectSpan'.
-data EffectSpanToken = EffectSpanToken
-  { estId :: {-# UNPACK #-} !Int
-  , estParent :: {-# UNPACK #-} !Int
-  , estLayer :: !Layer
-  , estRawStart :: {-# UNPACK #-} !Int
-  , estBounds :: !Rect
-  , estClip :: !Rect
-  , estMargin :: !V2
-  }
+newtype EffectSpanToken = EffectSpanToken EffectSpan
 
 -- | Current enclosing effect span ID, or @0@ when painting to the root target.
 {-# INLINE currentEffectSpanId #-}
 currentEffectSpanId :: DrawArena -> IO Int
 currentEffectSpanId da = do
-  stk <- readIORef (daEffectStack da)
+  stk <- dfeEffectStack <$> readIORef (daExtra da)
   pure $ case stk of
     (i : _) -> i
     [] -> 0
@@ -531,44 +500,31 @@ beginEffectSpan :: DrawArena -> Rect -> V2 -> IO EffectSpanToken
 beginEffectSpan da bounds margin = do
   flushCmd da
   rawStart <- getCount da cmdCountSlot
-  writeIORef (daNoMergeBefore da) rawStart
+  setCount da noMergeSlot rawStart
   layer <- readIORef (daCurrentLayer da)
   clip <- currentClip da
   parent <- currentEffectSpanId da
-  esid <- readIORef (daEffectNextId da)
-  writeIORef (daEffectNextId da) (esid + 1)
-  modifyIORef' (daEffectStack da) (esid :)
-  pure (EffectSpanToken esid parent layer rawStart bounds clip margin)
+  esid <- getCount da effectNextIdSlot
+  setCount da effectNextIdSlot (esid + 1)
+  modifyIORef' (daExtra da) $ \e -> e {dfeEffectStack = esid : dfeEffectStack e}
+  pure (EffectSpanToken (EffectSpan esid parent layer rawStart 0 bounds clip margin emptyShaderCalls))
 
 -- | Close an open effect span, packing one 'ShaderCall' per pass in @passes@
 -- and recording the span for 'finishDraw'.
 {-# NOINLINE endEffectSpan #-}
 endEffectSpan :: DrawArena -> EffectSpanToken -> [PackedShaderPass] -> IO ()
-endEffectSpan da tok passes = do
+endEffectSpan da (EffectSpanToken es0) passes = do
   flushCmd da
   rawEnd <- getCount da cmdCountSlot
-  writeIORef (daNoMergeBefore da) rawEnd
-  modifyIORef' (daEffectStack da) (\case (_ : rest) -> rest; [] -> [])
+  setCount da noMergeSlot rawEnd
   scale <- readIORef (daPixelScale da)
-  let bounds@(Rect _ _ bw bh) = estBounds tok
-      V2 mx my = estMargin tok
-      tw = bw + 2 * mx
-      th = bh + 2 * my
+  let bounds@(Rect _ _ bw bh) = esBounds es0
+      V2 mx my = esMargin es0
   calls <- forM passes $ \pass ->
-    packShaderCall da pass bounds (Rect 0 0 1 1) scale 0 tw th
-  let !pes =
-        PendingEffectSpan
-          { pesId = estId tok
-          , pesParent = estParent tok
-          , pesLayer = estLayer tok
-          , pesRawStart = estRawStart tok
-          , pesRawEnd = rawEnd
-          , pesBounds = bounds
-          , pesClip = estClip tok
-          , pesMargin = estMargin tok
-          , pesPasses = smallArrayFromList calls
-          }
-  modifyIORef' (daEffectSpans da) (pes :)
+    packShaderCall da pass bounds (Rect 0 0 1 1) scale 0 (bw + 2 * mx) (bh + 2 * my)
+  let !es = es0 {esCmdEnd = rawEnd, esPasses = smallArrayFromList calls}
+  modifyIORef' (daExtra da) $ \e ->
+    e {dfeEffectStack = drop 1 (dfeEffectStack e), dfeEffectSpans = es : dfeEffectSpans e}
 
 finishDraw :: DrawArena -> IO DrawData
 finishDraw da = do
@@ -579,8 +535,9 @@ finishDraw da = do
   iCount <- getCount da indexCountSlot
   count0 <- getCount da cmdCountSlot
   arr0 <- readIORef (daCmdStore da)
-  pieces <- readIORef (daClipPieces da)
-  pendingEffects <- readIORef (daEffectSpans da)
+  extra <- readIORef (daExtra da)
+  let pieces = dfeClipPieces extra
+      pendingEffects = dfeEffectSpans extra
   (cmds, offsets, effectSpans) <-
     if null pendingEffects
       then do
@@ -591,12 +548,11 @@ finishDraw da = do
         (cs, offs) <- groupCmdsByLayer arr count
         pure (cs, offs, emptyEffectSpans)
       else finishWithEffects pieces arr0 count0 (reverse pendingEffects)
-  callCount <- readIORef (daShaderCallCount da)
-  shaderCalls <-
-    if callCount == 0
-      then pure emptyShaderCalls
-      else smallArrayFromList . reverse <$> readIORef (daShaderCalls da)
-  uLen <- readIORef (daUniformLen da)
+  callCount <- getCount da shaderCallCountSlot
+  let shaderCalls
+        | callCount == 0 = emptyShaderCalls
+        | otherwise = smallArrayFromList (reverse (dfeShaderCalls extra))
+  uLen <- getCount da uniformLenSlot
   uniformBytes <- if uLen <= 0 then pure emptyUniformBytes else freezeUniformPrefix da uLen
   clear <- readIORef (daClear da)
   pure
@@ -615,76 +571,54 @@ finishDraw da = do
 
 {-# NOINLINE freezeUniformPrefix #-}
 freezeUniformPrefix :: DrawArena -> Int -> IO ByteArray
-freezeUniformPrefix da uLen
-  | uLen <= 0 = pure emptyUniformBytes
-  | otherwise = do
-      src <- readIORef (daUniformBuf da)
-      dst <- newByteArray uLen
-      copyMutableByteArray dst 0 src 0 uLen
-      unsafeFreezeByteArray dst
+freezeUniformPrefix da uLen = do
+  src <- readIORef (daUniformBuf da)
+  dst <- newByteArray uLen
+  copyMutableByteArray dst 0 src 0 uLen
+  unsafeFreezeByteArray dst
 
 -- | Cut commands (when damage pieces are active), group by layer, and map
--- the raw command boundaries of each 'PendingEffectSpan' into final 'drawCommands'
+-- the raw command boundaries of each pending 'EffectSpan' into final 'drawCommands'
 -- indices. Only reached on frames that use Tier 2 subtree effects.
 {-# NOINLINE finishWithEffects #-}
 finishWithEffects ::
   PrimArray Float ->
   U.MVector RealWorld DrawCmd ->
   Int ->
-  [PendingEffectSpan] ->
+  [EffectSpan] ->
   IO (U.Vector DrawCmd, PrimArray Int, SmallArray EffectSpan)
 finishWithEffects pieces arr0 count0 pending = do
   let !layers = fromEnum (maxBound :: Layer) + 1
   before <- newZeroedPrimArray ((count0 + 1) * layers)
+  let advanceRow i cmd emitted = do
+        copyMutablePrimArray before ((i + 1) * layers) before (i * layers) layers
+        when (emitted > 0) $ do
+          let !slot = (i + 1) * layers + fromEnum (cmdLayer cmd)
+          readPrimArray before slot >>= writePrimArray before slot . (+ emitted)
   (arr, count) <-
     if sizeofPrimArray pieces == 0
       then do
-        forUpTo_ count0 $ \i -> do
-          forUpTo_ layers $ \l -> do
-            v <- readPrimArray before (i * layers + l)
-            writePrimArray before ((i + 1) * layers + l) v
-          cmd <- UM.unsafeRead arr0 i
-          let !l = fromEnum (cmdLayer cmd)
-          v <- readPrimArray before ((i + 1) * layers + l)
-          writePrimArray before ((i + 1) * layers + l) (v + 1)
+        forUpTo_ count0 $ \i -> UM.unsafeRead arr0 i >>= \cmd -> advanceRow i cmd 1
         pure (arr0, count0)
       else do
         let !k = sizeofPrimArray pieces `quot` 4
         dest <- UM.unsafeNew (max 1 (count0 * k))
         let step m i = do
-              forUpTo_ layers $ \l -> do
-                v <- readPrimArray before (i * layers + l)
-                writePrimArray before ((i + 1) * layers + l) v
               cmd <- UM.unsafeRead arr0 i
               mNext <- cutCmdAt pieces k dest m cmd
-              let !emitted = mNext - m
-                  !l = fromEnum (cmdLayer cmd)
-              when (emitted > 0) $ do
-                v <- readPrimArray before ((i + 1) * layers + l)
-                writePrimArray before ((i + 1) * layers + l) (v + emitted)
+              advanceRow i cmd (mNext - m)
               pure mNext
         mFinal <- foldUpTo count0 step 0
         pure (dest, mFinal)
   (cmds, offsets) <- groupCmdsByLayer arr count
-  spans <- forM pending $ \pes -> do
-    let !l = fromEnum (pesLayer pes)
+  spans <- forM pending $ \es -> do
+    let !l = fromEnum (esLayer es)
         !layerOff = indexPrimArray offsets l
-        !rawS = min count0 (max 0 (pesRawStart pes))
-        !rawE = min count0 (max rawS (pesRawEnd pes))
+        !rawS = min count0 (max 0 (esCmdStart es))
+        !rawE = min count0 (max rawS (esCmdEnd es))
     sOff <- readPrimArray before (rawS * layers + l)
     eOff <- readPrimArray before (rawE * layers + l)
-    pure
-      EffectSpan
-        { esId = pesId pes
-        , esParent = pesParent pes
-        , esLayer = pesLayer pes
-        , esCmdStart = layerOff + sOff
-        , esCmdEnd = layerOff + eOff
-        , esBounds = pesBounds pes
-        , esClip = pesClip pes
-        , esMargin = pesMargin pes
-        , esPasses = pesPasses pes
-        }
+    pure es {esCmdStart = layerOff + sOff, esCmdEnd = layerOff + eOff}
   pure (cmds, offsets, smallArrayFromList spans)
 
 -- | Emit one copy of @cmd@ into @dest@ starting at @m@ for each disjoint clip
@@ -727,27 +661,13 @@ groupCmdsByLayer ::
   U.MVector RealWorld DrawCmd -> Int -> IO (U.Vector DrawCmd, PrimArray Int)
 groupCmdsByLayer _ 0 = pure (U.empty, emptyLayerOffsets)
 groupCmdsByLayer src n = do
-  let
-    layers = fromEnum (maxBound :: Layer) + 1
-    layerAt i = fromEnum . cmdLayer <$> UM.unsafeRead src i
-  cursors <- newZeroedPrimArray layers
-  forUpTo_ n $ \i -> do
-    l <- layerAt i
-    readPrimArray cursors l >>= writePrimArray cursors l . (+ 1)
-  offsets <- newPrimArray (layers + 1)
-  let
-    prefix !l !off = do
-      writePrimArray offsets l off
-      when (l < layers) $ do
-        c <- readPrimArray cursors l
-        writePrimArray cursors l off
-        prefix (l + 1) (off + c)
-  prefix 0 0
+  let layers = fromEnum (maxBound :: Layer) + 1
+  (offsets, cursors) <- bucketOffsets layers $ \visit ->
+    forUpTo_ n $ \i -> UM.unsafeRead src i >>= visit . fromEnum . cmdLayer
   dest <- UM.unsafeNew n
   forUpTo_ n $ \i -> do
     cmd <- UM.unsafeRead src i
-    let
-      l = fromEnum (cmdLayer cmd)
+    let l = fromEnum (cmdLayer cmd)
     j <- readPrimArray cursors l
     UM.unsafeWrite dest j cmd
     writePrimArray cursors l (j + 1)
@@ -756,16 +676,6 @@ groupCmdsByLayer src n = do
 -- Empty damage frames share their immutable command index.
 emptyLayerOffsets :: PrimArray Int
 emptyLayerOffsets = primArrayFromList (replicate (fromEnum (maxBound :: Layer) + 2) 0)
-
-{-# INLINE unpackColorF #-}
-unpackColorF :: Color -> (Float, Float, Float, Float)
-unpackColorF (Color w) =
-  let !inv255 = 1.0 / 255.0
-      !r = fromIntegral ((w `shiftR` 24) .&. 0xFF) * inv255
-      !g = fromIntegral ((w `shiftR` 16) .&. 0xFF) * inv255
-      !b = fromIntegral ((w `shiftR` 8) .&. 0xFF) * inv255
-      !a = fromIntegral (w .&. 0xFF) * inv255
-   in (r, g, b, a)
 
 -- Allocate room for a primitive, hand the derived offsets to the body, and
 -- commit the vertex/index counts afterwards. INLINE: erased at -O.

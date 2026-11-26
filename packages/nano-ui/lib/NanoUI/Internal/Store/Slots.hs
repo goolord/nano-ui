@@ -32,7 +32,6 @@ module NanoUI.Internal.Store.Slots
   , slotDragPress
   , slotDragItem
   , slotDragPoint
-  , slotDragStartW
   , slotDragStartPos
   , slotDrop
   , slotDropPos
@@ -50,25 +49,10 @@ module NanoUI.Internal.Store.Slots
   , slotScrollRange
   , slotScrollContent
   , slotScrollPending
-    -- * Combo boxes
-  , slotComboHighlight
-  , slotComboWindow
-  , slotComboCount
-  , slotComboScrollX
-  , slotComboContentW
-  , slotComboDrag
-  , slotComboDragOff
-  , slotComboCommitted
-  , slotComboFocus
-  , slotComboLive
-  , slotComboNavX
-  , slotComboNavY
-  , slotComboWheelRem
     -- * Other widgets
   , slotColorBase
   , slotNumericHeld
   , slotNumericRepeat
-  , flagSpec
   , setFlagSpec
   )
 where
@@ -191,11 +175,6 @@ slotDragItem = slotSpec SlotDrag fieldInt
 slotDragPoint :: SlotSpec V2
 slotDragPoint = slotSpec SlotDrag fieldPoint
 
--- | A table column's width when its resize started.
-{-# INLINE slotDragStartW #-}
-slotDragStartW :: SlotSpec Float
-slotDragStartW = slotSpec SlotDragW fieldFloat
-
 -- | Where a reorder's press went down.
 {-# INLINE slotDragStartPos #-}
 slotDragStartPos :: SlotSpec V2
@@ -270,74 +249,6 @@ slotScrollContent = slotSpec SlotScrollContent fieldFloat
 {-# INLINE slotScrollPending #-}
 slotScrollPending :: SlotSpec V2
 slotScrollPending = slotSpec SlotScrollPending fieldPoint
-
--- Combo boxes ----------------------------------------------------------------
-
--- | The highlighted option, as an index into the filtered list, -1 for none.
-{-# INLINE slotComboHighlight #-}
-slotComboHighlight :: SlotSpec Int
-slotComboHighlight = slotSpec SlotComboHighlight fieldInt
-
--- | The first filtered option the dropdown shows.
-{-# INLINE slotComboWindow #-}
-slotComboWindow :: SlotSpec Int
-slotComboWindow = slotSpec SlotComboScroll fieldInt
-
--- | How many options passed the filter.
-{-# INLINE slotComboCount #-}
-slotComboCount :: SlotSpec Int
-slotComboCount = slotSpec SlotComboCount fieldInt
-
--- | The dropdown's horizontal scroll.
-{-# INLINE slotComboScrollX #-}
-slotComboScrollX :: SlotSpec Float
-slotComboScrollX = slotSpec SlotComboScrollX fieldFloat
-
--- | The widest row's width.
-{-# INLINE slotComboContentW #-}
-slotComboContentW :: SlotSpec Float
-slotComboContentW = slotSpec SlotComboContentW fieldFloat
-
--- | The scrollbar axis a thumb drag holds, 0 for none.
-{-# INLINE slotComboDrag #-}
-slotComboDrag :: SlotSpec Int
-slotComboDrag = slotSpec SlotComboDrag fieldInt
-
--- | Where on the thumb a thumb drag grabbed it.
-{-# INLINE slotComboDragOff #-}
-slotComboDragOff :: SlotSpec Float
-slotComboDragOff = slotSpec SlotComboDragOff fieldFloat
-
-{-# INLINE slotComboCommitted #-}
-slotComboCommitted :: SlotSpec Text
-slotComboCommitted = slotSpec SlotComboCommitted fieldText
-
--- | Whether the field had focus last frame.
-{-# INLINE slotComboFocus #-}
-slotComboFocus :: SlotSpec Bool
-slotComboFocus = flagSpec (slotSpec SlotComboFocus fieldInt)
-
-{-# INLINE slotComboLive #-}
-slotComboLive :: SlotSpec Text
-slotComboLive = slotSpec SlotComboLive fieldText
-
--- | The pointer's x when Up or Down last moved the highlight, as float bits
--- in a quiet slot under 'SlotComboHighlight'.
-{-# INLINE slotComboNavX #-}
-slotComboNavX :: SlotSpec Float
-slotComboNavX = floatBitsSpec (slotSpec SlotComboHighlight fieldQuiet)
-
--- | The pointer's y when Up or Down last moved the highlight, as float bits
--- in a quiet slot under 'SlotComboScroll'.
-{-# INLINE slotComboNavY #-}
-slotComboNavY :: SlotSpec Float
-slotComboNavY = floatBitsSpec (slotSpec SlotComboScroll fieldQuiet)
-
--- | The wheel's leftover rows, as float bits in a quiet slot under
--- 'SlotComboScrollX'.
-{-# INLINE slotComboWheelRem #-}
-slotComboWheelRem :: SlotSpec Float
-slotComboWheelRem = floatBitsSpec (slotSpec SlotComboScrollX fieldQuiet)
 
 -- Other widgets --------------------------------------------------------------
 

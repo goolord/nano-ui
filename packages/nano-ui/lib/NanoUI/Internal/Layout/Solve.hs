@@ -10,7 +10,6 @@ module NanoUI.Internal.Layout.Solve
   , placeFloatingNodes
   , placeFloatingNodesWith
   , computePopupPosition
-  , placeWindowNode
   , scrollBarSlotOf
   , windowBodyScroller
   , findAncestorMaxW
@@ -21,7 +20,7 @@ import Control.Monad (unless, when)
 import Data.IORef (IORef, newIORef, readIORef)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IM
-import Data.Primitive.PrimArray (newPrimArray, readPrimArray, setPrimArray, writePrimArray)
+import Data.Primitive.PrimArray (copyMutablePrimArray, newPrimArray, readPrimArray, setPrimArray, writePrimArray)
 import Data.Word (Word8)
 import NanoUI.Internal.Font (FontMetrics (..))
 import NanoUI.Internal.Layout.ScrollGeometry (isScrollStyle2D)
@@ -53,16 +52,15 @@ solveLayout na ms rootW rootH mCache = do
     else do
       measureLog <- newIORef IM.empty
       env0 <- solveEnv na ms mCache
-      (offered, unsnapped, spans) <- positionArrays na
-      setPrimArray offered 0 (count * 4) (0 / 0)
-      let env = env0 {seMeasureLog = Just measureLog, sePositions = Just (PositionLog offered spans)}
+      let a = seArrays env0
+          env = env0 {seMeasureLog = Just measureLog, seRecordPos = True}
+      setPrimArray (naArrOffered a) 0 (count * 4) (0 / 0)
       measurePass env count
       positionNodeA env 0 0 (Rect 0 0 rootW rootH)
-      forUpTo_ count $ \i -> do
-        let copyCol col k = readGeom (seArrays env) i col >>= writePrimArray unsnapped (i * 4 + k)
-        copyCol GeomX 0 >> copyCol GeomY 1 >> copyCol GeomW 2 >> copyCol GeomH 3
+      forUpTo_ count $ \i ->
+        copyMutablePrimArray (naArrUnsnapped a) (i * 4) (naArrGeom a) (i * geomStride) 4
       floatingCount <- floatingNodeCount na
-      quantizeResultsA na (seArrays env) count floatingCount (fmSnapScale (msFm ms))
+      quantizeResultsA na a count floatingCount (fmSnapScale (msFm ms))
       readIORef measureLog
 
 -- | Snap the solved geometry of the @count@ nodes outside floating subtrees

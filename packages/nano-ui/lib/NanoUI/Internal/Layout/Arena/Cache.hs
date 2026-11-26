@@ -15,7 +15,7 @@ module NanoUI.Internal.Layout.Arena.Cache
   ) where
 
 import Control.Monad (foldM, forM_, when)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, newIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IM
 import Data.Primitive.PrimArray
@@ -108,10 +108,6 @@ captureLayoutCache :: NodeArena -> LayoutCache -> IO LayoutCache
 captureLayoutCache na lc0 = do
   n <- arenaCount na
   sig <- getInputSignature na
-  subA <- readIORef (naSubHash na)
-  measuredA <- readIORef (naMeasured na)
-  offeredA <- readIORef (naOffered na)
-  unsnappedA <- readIORef (naUnsnapped na)
   -- The copies below overwrite everything a capture reads, so a cache too
   -- small for the arena is replaced rather than grown.
   lc <- if n <= lcCap lc0 then pure lc0 else newLayoutCache (max n (lcCap lc0 * 2))
@@ -122,10 +118,10 @@ captureLayoutCache na lc0 = do
     when (isScrollNode nt) $
       copyMutablePrimArray (lcStyle lc) (i * 2) (naArrStyle a) (i * styleStride + fromEnum StyleScrollContentW) 2
   copyMutablePrimArray (lcTags lc) 0 (naArrTags a) 0 (n * tagStride)
-  copyMutablePrimArray (lcSub lc) 0 subA 0 n
-  copyMutablePrimArray (lcMeasured lc) 0 measuredA 0 (n * 2)
-  copyMutablePrimArray (lcOffered lc) 0 offeredA 0 (n * 4)
-  copyMutablePrimArray (lcUnsnapped lc) 0 unsnappedA 0 (n * 4)
+  copyMutablePrimArray (lcSub lc) 0 (naArrSubHash a) 0 n
+  copyMutablePrimArray (lcMeasured lc) 0 (naArrMeasured a) 0 (n * 2)
+  copyMutablePrimArray (lcOffered lc) 0 (naArrOffered a) 0 (n * 4)
+  copyMutablePrimArray (lcUnsnapped lc) 0 (naArrUnsnapped a) 0 (n * 4)
   writeIORef (lcPlaced lc) IM.empty
   pure lc {lcCount = n, lcSig = sig}
 

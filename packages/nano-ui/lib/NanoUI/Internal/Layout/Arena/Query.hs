@@ -9,7 +9,6 @@ module NanoUI.Internal.Layout.Arena.Query
   , flowChildEnds
   , foldPlacedChildrenM
   , forChildrenInPaintOrder_
-  , childrenTopFirst
   , firstChildOnTopJustM
   , drawnOver
   , AdornRows (..)
@@ -28,8 +27,8 @@ module NanoUI.Internal.Layout.Arena.Query
   , walkAncestors
   ) where
 
-import Control.Monad (unless, when)
-import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
+import Control.Monad (when)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Primitive.PrimArray (readPrimArray)
 import NanoUI.Internal.Layout.Arena.Types
 import NanoUI.Internal.Style (AlignX (..), Flow (..))
@@ -50,13 +49,8 @@ forFloatingNodes_ na t f =
 -- order): bottom to top in paint order.
 floatingNodesInPaintOrder :: NodeArena -> IO [NodeIdx]
 floatingNodesInPaintOrder na = do
-  tagged <- foldClassNodeRevM na FloatingNodes (\acc idx -> (\nt -> (rank nt, idx) : acc) <$> getNodeType na idx) []
-  pure [idx | r <- [0, 1, 2 :: Int], (r', idx) <- tagged, r' == r]
-  where
-    rank nt = case nt of
-      NodeWindow -> 0
-      NodeModal -> 1
-      _ -> 2
+  tagged <- foldClassNodeRevM na FloatingNodes (\acc idx -> (\nt -> (nt, idx) : acc) <$> getNodeType na idx) []
+  pure [idx | nt <- [NodeWindow, NodeModal, NodePopup], (t, idx) <- tagged, t == nt]
 
 
 
@@ -148,24 +142,29 @@ forChildrenInPaintOrder_ na parentIdx f = do
       | pinnedBelow -> pinnedLast fc
       | otherwise -> forChildNodes_ na parentIdx f
 
--- | A node's non-floating children, topmost first (the reverse of
--- 'forChildrenInPaintOrder_'). Floating children are painted as separate
--- layers.
-childrenTopFirst :: NodeArena -> NodeIdx -> IO [NodeIdx]
-childrenTopFirst na parentIdx = do
-  acc <- newIORef []
-  forChildrenInPaintOrder_ na parentIdx $ \ci -> do
-    nt <- getNodeType na ci
-    unless (isFloatingNode nt) $ modifyIORef' acc (ci :)
-  readIORef acc
-
--- | The first 'Just' that @f@ returns over @parentIdx@'s children in
--- 'childrenTopFirst' order. Use it instead of 'firstChildJustM' where
--- children can overlap.
+-- | The first 'Just' that @f@ returns over @parentIdx@'s non-floating children
+-- in topmost-first order (the reverse of 'forChildrenInPaintOrder_').
 {-# INLINE firstChildOnTopJustM #-}
 firstChildOnTopJustM :: NodeArena -> NodeIdx -> (NodeIdx -> IO (Maybe a)) -> IO (Maybe a)
-firstChildOnTopJustM na parentIdx f =
-  foldr (\ci rest -> f ci >>= maybe rest (pure . Just)) (pure Nothing) =<< childrenTopFirst na parentIdx
+firstChildOnTopJustM na parentIdx f = do
+  flow <- getFlow na parentIdx
+  pinnedBelow <- hasPinnedBelow na parentIdx
+  fc <- getFirstChild na parentIdx
+  let tryIf want ci = do
+        nt <- getNodeType na ci
+        p <- isPinnedNode na ci
+        if not (isFloatingNode nt) && want p then f ci else pure Nothing
+      fwd want !ci
+        | ci < 0 = pure Nothing
+        | otherwise = tryIf want ci >>= maybe (getNextSibling na ci >>= fwd want) (pure . Just)
+      rev want !ci
+        | ci < 0 = pure Nothing
+        | otherwise = getNextSibling na ci >>= rev want >>= maybe (tryIf want ci) (pure . Just)
+  case flow of
+    Layered -> (if pinnedBelow then fwd id fc else pure Nothing) >>= maybe (fwd not fc) (pure . Just)
+    _
+      | pinnedBelow -> fwd id fc >>= maybe (rev not fc) (pure . Just)
+      | otherwise -> rev (const True) fc
 
 -- | Whether paint draws node @b@ over the earlier node @a@. At their common
 -- ancestor, this checks whether 'forChildrenInPaintOrder_' visits @b@'s
@@ -244,13 +243,13 @@ foldNodesM :: NodeArena -> (a -> NodeIdx -> IO a) -> a -> IO a
 foldNodesM na f z = arenaCount na >>= \n -> foldSeqM False n pure f z
 
 
--- | The length of the list of class @c@ in 'naClassNodes', and a reader for
+-- | The length of the list of class @c@ in 'naArrClassNodes', and a reader for
 -- its @i@th node.
 {-# INLINE classNodes #-}
 classNodes :: NodeArena -> NodeClass -> IO (Int, Int -> IO NodeIdx)
 classNodes na c = do
   let ci = fromEnum c
-  arr <- readIORef (naClassNodes na)
+  arr <- naArrClassNodes <$> arenaArrays na
   cap <- readIORef (naCapacity na)
   k <- readPrimArray (naClassCounts na) ci
   -- Forced here: a lazy offset would be a thunk and a box on every walk.

@@ -1,9 +1,8 @@
 -- | Open a URL with the platform's default handler.
 module NanoUI.Sdl.Internal.Url (openUrl) where
 
-import Data.ByteString qualified as BS
 import Data.Text (Text)
-import Data.Text.Encoding (encodeUtf8)
+import Data.Text.Foreign qualified as TextForeign
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Misc qualified as SDL
 
@@ -21,5 +20,5 @@ import SDL3.Sys.Misc qualified as SDL
 -- Markdown document, check that its scheme is one it means to allow
 -- (@http@, @https@, @mailto@).
 openUrl :: Text -> IO Bool
-openUrl url = BS.useAsCString (encodeUtf8 url) $ \cUrl ->
+openUrl url = TextForeign.withCString url $ \cUrl ->
   SDL.openURLSafe (PtrConst.unsafeFromPtr cUrl)

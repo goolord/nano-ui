@@ -13,13 +13,20 @@ module NanoUI.Internal.Widgets.Checkbox
 
 import Data.Functor (void)
 import Data.Text (Text)
-import NanoUI.Internal.Monad (NanoUI, askDefaultLayout)
+import Data.Word (Word64)
+import NanoUI.Internal.Monad (NanoUI)
+import NanoUI.Internal.Style (Layout, Tone, defaultLayout)
 import NanoUI.Internal.Var (Binding (..), bindVar)
 import NanoUI.Internal.Var.Types (Var)
-import NanoUI.Internal.Style (Layout, Tone, defaultLayout, inheritFont)
 import NanoUI.Internal.WidgetText (buttonFlagChoice, buttonToneStyle)
-import NanoUI.Internal.Widgets.Combinators (choiceToggleWidget)
+import NanoUI.Internal.Widgets.Combinators (choiceToggleWidget, widgetBaseLayout)
 import NanoUI.Internal.Widgets.Node (Response)
+
+{-# INLINE toggleWith' #-}
+toggleWith' :: Word64 -> (Layout -> Layout) -> Text -> Var Bool -> NanoUI Response
+toggleWith' flag f txt v = do
+  lay <- widgetBaseLayout defaultLayout f
+  bindVar RenderFinal v (choiceToggleWidget txt lay flag)
 
 -- | Checkbox with a caption bound to mutable state ('Var'): a click or
 -- Space/Enter toggles the value in place.
@@ -43,9 +50,7 @@ checkboxWith f txt v = void (checkboxWith' f txt v)
 -- | 'checkboxWith' returning its 'Response'.
 {-# INLINE checkboxWith' #-}
 checkboxWith' :: (Layout -> Layout) -> Text -> Var Bool -> NanoUI Response
-checkboxWith' f txt v = do
-  amb <- askDefaultLayout
-  bindVar RenderFinal v (choiceToggleWidget txt (f (inheritFont amb defaultLayout)) buttonFlagChoice)
+checkboxWith' = toggleWith' buttonFlagChoice
 
 -- | Toggle button bound to mutable state ('Var'): filled in the tone's color
 -- while on, a plain button while off. A click or Space/Enter toggles it in place.
@@ -68,6 +73,4 @@ toggleButtonWith f t txt v = void (toggleButtonWith' f t txt v)
 -- | 'toggleButtonWith' returning its 'Response'.
 {-# INLINE toggleButtonWith' #-}
 toggleButtonWith' :: (Layout -> Layout) -> Tone -> Text -> Var Bool -> NanoUI Response
-toggleButtonWith' f t txt v = do
-  amb <- askDefaultLayout
-  bindVar RenderFinal v (choiceToggleWidget txt (f (inheritFont amb defaultLayout)) (buttonToneStyle t))
+toggleButtonWith' f t = toggleWith' (buttonToneStyle t) f

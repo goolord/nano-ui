@@ -98,6 +98,7 @@ module NanoUI.Internal.Monad
   , unlessM
   , ifM
   , (<&&>)
+  , mfilterM
   )
 where
 

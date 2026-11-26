@@ -38,7 +38,7 @@ import NanoUI.Internal.Frame.Paint.Widgets (PaintEnv (..), buildPaintEnv, paintT
 import NanoUI.Internal.Layout.ScrollGeometry (ScrollNode (..), borderContentClip, scrollBare, scrollNodeBars, scrollNodeViewport)
 import NanoUI.Internal.Frame.Spans (textNodeSpanEntry)
 import NanoUI.Internal.Id (hashWidgetId)
-import NanoUI.Internal.Image (fadeBy, imageDrawOp, lookDraw, lookQuad, lookTurned)
+import NanoUI.Internal.Image (fadeBy, withLookDraw)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Shader (ShaderCapabilities (..), ShaderEffectEntry (..), ShaderNodeEntry (..))
 import NanoUI.Internal.Style hiding (fontSize)
@@ -427,10 +427,9 @@ paintBoxNode env idx rect = do
 
 -- | An image node. Without a look it is stretched over its rect, tinted by
 -- its font colour. With a look ('getImageNode') it is fitted, cropped,
--- zoomed, faded and rotated ('lookDraw'), and clipped to its rect when
+-- zoomed, faded and rotated ('withLookDraw'), and clipped to its rect when
 -- rotated. Disabled images fade like disabled widget colours; unregistered
--- ones paint the accent. The image's size and UVs come from one atlas
--- lookup, and an unrotated look ('lookQuad') builds no draw record.
+-- ones paint the accent. The image's size and UVs come from one atlas lookup.
 paintImageNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintImageNode env@PaintEnv {peDrawArena = da} idx rect = do
   let na = peNodeArena env
@@ -443,13 +442,10 @@ paintImageNode env@PaintEnv {peDrawArena = da} idx rect = do
       Nothing -> do
         base <- fromMaybe (colorRGBA 255 255 255 255) <$> getNodeFontColor na idx
         pushImageOp da slot (DrawImage rect 0 tid 0 0 1 1 (fadeBy fade base))
-      Just ImageNode {inLook = look}
-        | lookTurned look ->
-            forM_ (lookDraw look (iw, ih) (ImageId tid) fade rect) $ \d ->
-              withClip da rect $ forM_ (imageDrawOp d) (pushImageOp da slot)
-        | otherwise ->
-            lookQuad look (iw, ih) fade rect $ \r u0 v0 u1 v1 c ->
-              pushImageOp da slot (DrawImage r 0 tid u0 v0 u1 v1 c)
+      Just ImageNode {inLook = look} ->
+        withLookDraw look (iw, ih) fade rect $ \turned r angle u0 v0 u1 v1 c -> do
+          let emit = pushImageOp da slot (DrawImage r angle tid u0 v0 u1 v1 c)
+          if turned then withClip da rect emit else emit
   where
     accent = pushRect da rect (themeAccent (peTheme env))
 

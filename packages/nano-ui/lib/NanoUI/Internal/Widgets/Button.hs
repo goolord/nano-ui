@@ -28,11 +28,11 @@ import Data.Word (Word64)
 import NanoUI.Internal.Context (Context (..))
 import NanoUI.Internal.Layout.Arena (NodeType (..), addNodeFromLayout, flowChildEnds, foldFlowChildrenM, mixNodePaintHash, setStyleIdx)
 import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, uiTheme, withContext)
-import NanoUI.Internal.Style (Direction (..), Layout (..), LayoutModifier, Style (..), Theme (..), defaultLayout, gap, inheritFont, tight)
+import NanoUI.Internal.Style (Direction (..), Layout (..), LayoutModifier, Style (..), Theme (..), defaultLayout, gap, tight)
 import NanoUI.Internal.Types (Color)
 import NanoUI.Internal.WidgetText (ButtonKind (..), buttonFlagContent, buttonKindOf, containerFlagButtonGroup)
 import NanoUI.Internal.Widgets.Adornment (Adornments, adornButton, adornmentRow, icon, leading)
-import NanoUI.Internal.Widgets.Combinators (buttonStyledEx)
+import NanoUI.Internal.Widgets.Combinators (buttonStyledEx, widgetBaseLayout)
 import NanoUI.Internal.Widgets.Node (Response, currentParent, respClicked, respId, withContainerNode, withWidgetChildren)
 import NanoUI.Svg (Svg)
 
@@ -65,8 +65,8 @@ buttonWith f txt = respClicked <$> buttonWith' f txt
 -- | 'buttonWith' returning the full response; activation is in @respClicked@.
 buttonWith' :: (Layout -> Layout) -> Text -> NanoUI Response
 buttonWith' f txt = do
-  amb <- askDefaultLayout
-  buttonStyledEx True txt 0 (f (inheritFont amb defaultLayout)) 0
+  lay <- widgetBaseLayout defaultLayout f
+  buttonStyledEx True txt 0 lay 0
 
 -- | A button's layout modifier, and the adornments ("NanoUI.Adornment") it draws
 -- beside its label. The label and its adornments sit together in the middle
@@ -90,8 +90,7 @@ buttonConfigured cfg txt = respClicked <$> buttonConfigured' cfg txt
 -- | 'buttonConfigured' returning its 'Response'.
 buttonConfigured' :: ButtonConfig -> Text -> NanoUI Response
 buttonConfigured' (ButtonConfig f adorns) txt = do
-  amb <- askDefaultLayout
-  let lay = f (inheritFont amb defaultLayout)
+  lay <- widgetBaseLayout defaultLayout f
   resp <- buttonStyledEx True txt 0 lay 0
   adornButton resp lay (labelColor lay) adorns
 
@@ -137,8 +136,8 @@ buttonContentWith f content = respClicked <$> buttonContentWith' f content
 -- | 'buttonContentWith' returning its 'Response'.
 buttonContentWith' :: (Layout -> Layout) -> NanoUI () -> NanoUI Response
 buttonContentWith' f content = do
-  amb <- askDefaultLayout
-  buttonContentStyled 0 0 (f (inheritFont amb defaultLayout)) content
+  lay <- widgetBaseLayout defaultLayout f
+  buttonContentStyled 0 0 lay content
 
 -- | A content button with style index @styleIx@ and the extra button
 -- @flags@, as a table's header passes them.

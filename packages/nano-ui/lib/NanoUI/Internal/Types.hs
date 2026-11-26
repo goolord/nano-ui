@@ -19,6 +19,7 @@ module NanoUI.Internal.Types
   , colorG
   , colorB
   , colorA
+  , unpackColorF
   , rgbToHsv
   , hsvToRgb
   , clamp
@@ -52,17 +53,34 @@ module NanoUI.Internal.Types
   , v2Sub
   , PopupAnchor (..)
   , PopupPlacement (..)
+  , spanEffectiveClip
+  , shiftClip
+  , readRectAt
+  , writeRectAt
+  , eqRectAt
   , foldUpTo
   , forUpTo_
   , newZeroedPrimArray
+  , bucketOffsets
   ) where
 
 import Control.Monad.Primitive (PrimMonad, PrimState)
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
 import Data.Hashable (Hashable)
-import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, indexPrimArray, newPrimArray, primArrayFromList, setPrimArray)
+import Data.Primitive.PrimArray
+  ( MutablePrimArray
+  , PrimArray
+  , copyMutablePrimArray
+  , indexPrimArray
+  , newPrimArray
+  , primArrayFromList
+  , readPrimArray
+  , setPrimArray
+  , writePrimArray
+  )
 import Data.Primitive.Types (Prim)
 import Data.Word (Word8, Word32)
+import GHC.Exts (RealWorld)
 import GHC.Generics (Generic)
 
 -- | A two-component point, offset, or vector; units depend on its use.
@@ -168,6 +186,17 @@ colorB (Color w) = fromIntegral ((w `shiftR` 8) .&. 0xFF)
 {-# INLINE colorA #-}
 colorA :: Color -> Word8
 colorA (Color w) = fromIntegral (w .&. 0xFF)
+
+-- | Unpack a packed 'Color' into normalized @[0, 1]@ RGBA floats.
+{-# INLINE unpackColorF #-}
+unpackColorF :: Color -> (Float, Float, Float, Float)
+unpackColorF (Color w) =
+  let !inv = 1.0 / 255.0
+   in ( fromIntegral ((w `shiftR` 24) .&. 0xFF) * inv
+      , fromIntegral ((w `shiftR` 16) .&. 0xFF) * inv
+      , fromIntegral ((w `shiftR` 8) .&. 0xFF) * inv
+      , fromIntegral (w .&. 0xFF) * inv
+      )
 
 -- | Restrict a value to inclusive lower and upper bounds, which must be ordered.
 {-# INLINE clamp #-}
@@ -501,3 +530,75 @@ newZeroedPrimArray :: (PrimMonad m, Prim a, Num a) => Int -> m (MutablePrimArray
 newZeroedPrimArray n = do
   arr <- newPrimArray n
   arr <$ setPrimArray arr 0 n 0
+
+-- | Intersect a clip rectangle (where 'isUnbounded' width or height means open)
+-- with an optional damage rectangle: 'Nothing' when culled, @Just Nothing@ when
+-- open, and @Just (Just r)@ for a concrete clip.
+{-# INLINE spanEffectiveClip #-}
+spanEffectiveClip :: Maybe Rect -> Rect -> Maybe (Maybe Rect)
+spanEffectiveClip mDamage r@(Rect _ _ cw ch) =
+  let !open = isUnbounded cw || isUnbounded ch
+   in case (mDamage, open) of
+        (Nothing, True) -> Just Nothing
+        (Nothing, False) -> Just (Just r)
+        (Just dmg, True) -> Just (Just dmg)
+        (Just dmg, False) -> Just <$> rectIntersect dmg r
+
+-- | Translate an optional clip rectangle into local target space by subtracting @(ox, oy)@.
+{-# INLINE shiftClip #-}
+shiftClip :: Float -> Float -> Maybe Rect -> Maybe Rect
+shiftClip ox oy mClip
+  | ox == 0 && oy == 0 = mClip
+  | otherwise = (\(Rect x y w h) -> Rect (x - ox) (y - oy) w h) <$> mClip
+
+-- | Read four contiguous floats @(x, y, w, h)@ starting at @off@ as a 'Rect'.
+{-# INLINE readRectAt #-}
+readRectAt :: MutablePrimArray RealWorld Float -> Int -> IO Rect
+readRectAt arr !off =
+  Rect
+    <$> readPrimArray arr off
+    <*> readPrimArray arr (off + 1)
+    <*> readPrimArray arr (off + 2)
+    <*> readPrimArray arr (off + 3)
+
+-- | Write four contiguous floats @(x, y, w, h)@ starting at @off@.
+{-# INLINE writeRectAt #-}
+writeRectAt :: MutablePrimArray RealWorld Float -> Int -> Float -> Float -> Float -> Float -> IO ()
+writeRectAt arr !off x y w h = do
+  writePrimArray arr off x
+  writePrimArray arr (off + 1) y
+  writePrimArray arr (off + 2) w
+  writePrimArray arr (off + 3) h
+
+-- | Compare four contiguous floats at @off@ against @(x, y, w, h)@.
+{-# INLINE eqRectAt #-}
+eqRectAt :: MutablePrimArray RealWorld Float -> Int -> Float -> Float -> Float -> Float -> IO Bool
+eqRectAt arr !off x y w h = do
+  x0 <- readPrimArray arr off
+  y0 <- readPrimArray arr (off + 1)
+  w0 <- readPrimArray arr (off + 2)
+  h0 <- readPrimArray arr (off + 3)
+  pure (x0 == x && y0 == y && w0 == w && h0 == h)
+
+-- | Count items across @buckets@ buckets via @forItems@, returning cumulative
+-- bucket @starts@ (length @buckets + 1@) and a mutable write @cursor@ copy of
+-- @starts[0 .. buckets - 1]@.
+{-# INLINE bucketOffsets #-}
+bucketOffsets ::
+  PrimMonad m =>
+  Int ->
+  ((Int -> m ()) -> m ()) ->
+  m (MutablePrimArray (PrimState m) Int, MutablePrimArray (PrimState m) Int)
+bucketOffsets buckets forItems = do
+  starts <- newZeroedPrimArray (buckets + 1)
+  forItems $ \b -> readPrimArray starts (b + 1) >>= writePrimArray starts (b + 1) . (+ 1)
+  let prefix !b
+        | b > buckets = pure ()
+        | otherwise = do
+            before <- readPrimArray starts (b - 1)
+            readPrimArray starts b >>= writePrimArray starts b . (+ before)
+            prefix (b + 1)
+  prefix 1
+  cursor <- newPrimArray buckets
+  copyMutablePrimArray cursor 0 starts 0 buckets
+  pure (starts, cursor)

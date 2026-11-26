@@ -7,9 +7,11 @@ module NanoUI.Internal.Layout.Solve.Flex
   , columnGapSumScratch
   , foldChromeColumnScratch
   , gridColumnCount
+  , gridColWidth
   , gridRowHeight
   , wrapLines
   , distributeScratch
+  , resolveSize
   , alignX
   , alignY
   ) where
@@ -22,7 +24,7 @@ import Data.Primitive.PrimArray (copyMutablePrimArray, readPrimArray, writePrimA
 import NanoUI.Internal.Layout.ScrollGeometry (isScrollStyle2D)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Padding (..), alignXFraction, alignYFraction)
-import NanoUI.Internal.Types (foldUpTo, forUpTo_, isBounded)
+import NanoUI.Internal.Types (clamp, foldUpTo, forUpTo_, isBounded)
 
 -- | Strict accumulator for flow-child folds: a child count and two running
 -- sums or extents. The strict fields keep the folds unboxed.
@@ -69,17 +71,19 @@ gridColumnCount gCols minColW availW gap
   | otherwise = 1
 
 -- | Height of grid row @r@: its tallest child.
+-- | Width of each column in a grid of @cols@ columns across @avail@ with @gap@.
+{-# INLINE gridColWidth #-}
+gridColWidth :: Float -> Int -> Float -> Float
+gridColWidth avail cols gap = max 0 ((avail - gap * fromIntegral (cols - 1)) / fromIntegral cols)
+
 gridRowHeight :: IOArr Float -> Int -> Int -> Int -> IO Float
 gridRowHeight hArr n cols r =
   foldUpTo (min cols (n - r * cols)) (\m j -> max m <$> readPrimArray hArr (r * cols + j)) 0
 
 {-# INLINE containerFlow #-}
 containerFlow :: NodeArenaArrays -> NodeIdx -> IO (Padding, Float, DirTag)
-containerFlow a idx = do
-  pad <- Padding <$> readStyle a idx StylePadL <*> readStyle a idx StylePadR <*> readStyle a idx StylePadT <*> readStyle a idx StylePadB
-  gap <- readStyle a idx StyleGap
-  dir <- readTagEnum a idx TagDirection
-  pure (pad, gap, dir)
+containerFlow a idx =
+  (,,) <$> readPadding a idx <*> readStyle a idx StyleGap <*> readTagEnum a idx TagDirection
 
 -- | The gaps between the first @n@ scratch children of a window's or modal's
 -- column, where a separator takes none before it.
@@ -166,7 +170,9 @@ shrinkScratch mainArr factorArr minAt n = pass 0
                           then waterFillShrink mainArr factorArr minAt (need - given) n
                           else pure (need - given)
                       pass (sweep + 1) need'
-                    else apply 0
+                    else forUpTo_ n $ \j -> do
+                      f <- readPrimArray factorArr j
+                      when (f > 0) $ readPrimArray mainArr j >>= \main -> writePrimArray mainArr j (main - need * f / total)
               | otherwise = do
                   f <- readPrimArray factorArr i
                   if f <= 0
@@ -180,10 +186,6 @@ shrinkScratch mainArr factorArr minAt n = pass 0
                           writePrimArray factorArr i 0
                           stop (i + 1) (given + main - lo) (stopped + 1)
                         else stop (i + 1) given stopped
-            apply !i = when (i < n) $ do
-              f <- readPrimArray factorArr i
-              when (f > 0) $ readPrimArray mainArr i >>= \main -> writePrimArray mainArr i (main - need * f / total)
-              apply (i + 1)
         stop 0 0 0
 
 -- | Lock every remaining shrinkable child whose headroom per unit of factor is
@@ -330,6 +332,17 @@ waterFillGrow mainArr crossArr room n = do
       lockFrom _ _ _ = pure ()
   growing <- foldUpTo n collect []
   lockFrom (room - occupied) gfSum (sortOn (\(perUnit, _, _, _) -> Down perUnit) growing)
+
+-- | The size a node takes along an axis where @avail@ is offered, from its
+-- sizing, its measured size @intrinsic@ and its limits.
+{-# INLINE resolveSize #-}
+resolveSize :: AxisSizing -> Float -> Float -> Float
+resolveSize (AxisSizing tag val lo hi) intrinsic avail =
+  clamp lo hi $ case tag of
+    SizingFixed -> val
+    SizingGrow -> avail
+    SizingPercent -> avail
+    _ -> min intrinsic avail
 
 alignX :: AlignX -> Float -> Float -> Float -> Float
 alignX ax cx cw iw = cx + (cw - iw) * alignXFraction ax

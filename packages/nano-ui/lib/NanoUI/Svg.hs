@@ -23,7 +23,7 @@ import Data.ByteString qualified as BS
 import Data.ByteString.Internal qualified as BSI
 import Data.Maybe (fromMaybe)
 import Data.Foldable (toList)
-import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, copyMutablePrimArray, indexPrimArray, newPrimArray, readPrimArray, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
+import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, indexPrimArray, newPrimArray, readPrimArray, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
 import Data.Primitive.SmallArray (SmallArray)
 import Data.Word (Word8)
 import Foreign.Storable (pokeByteOff)
@@ -40,14 +40,12 @@ import Graphics.NanoSvg
   , Segment (..)
   , Shape (..)
   , Style (..)
-  , averageScale
   , black
-  , multiply
   )
 import Graphics.NanoSvg qualified as NanoSvg
 import NanoUI.Internal.Path (Rings (..), buildRings, cleanRings, ringCount)
 import NanoUI.Internal.Path qualified as P
-import NanoUI.Internal.Types (Color (..), Rect (..), clamp, colorA, colorB, colorG, colorR, newZeroedPrimArray)
+import NanoUI.Internal.Types (Color (..), Rect (..), bucketOffsets, clamp, colorA, colorB, colorG, colorR, newZeroedPrimArray)
 
 -- | A parsed SVG document. Only 'parseSvg' makes one, so its raster cache
 -- key ('svgKey') always describes its source: an edited @nano-svg@
@@ -81,15 +79,18 @@ svgMonochrome = documentMonochrome . svgDocument
 -- Flattening
 --------------------------------------------------------------------------------
 
+-- | Convert a @nano-svg@ matrix into a path 'P.Transform'.
+toTransform :: Matrix -> P.Transform
+toTransform (Matrix a b c d e f) = P.Transform a b c d e f
+
 -- | Flatten segments through a transform into contours in device pixels,
 -- each tagged 1 when closed. Curves are split until they are within a
 -- quarter pixel of their chords. Arcs use steps of at most pi/16, and at
 -- least four steps.
-flatten :: Matrix -> SmallArray Segment -> Rings
-flatten (Matrix a b c d e f) segs =
-  P.flattenPath 0.25 arcSteps (P.Transform a b c d e f) (P.Path (map segment (toList segs)))
+flatten :: P.Transform -> SmallArray Segment -> Rings
+flatten tr segs =
+  P.flattenPath 0.25 (\_ sweep -> max 4 (ceiling (abs sweep / (pi / 16)))) tr (P.Path (map segment (toList segs)))
   where
-    arcSteps _ sweep = max 4 (ceiling (abs sweep / (pi / 16)))
     segment = \case
       MoveTo (Point x y) -> P.SegMove x y
       LineTo (Point x y) -> P.SegLine x y
@@ -209,23 +210,23 @@ rasterizeSvg width height current (Svg svg) =
 -- > rasterizeSvgIn 64 64 (Rect (-16) 0 96 64) white doc  -- a 3:2 icon covering a square
 rasterizeSvgIn :: Int -> Int -> Rect -> Color -> Svg -> ByteString
 rasterizeSvgIn width height (Rect x y w h) current (Svg svg) =
-  rasterizeView width height (Matrix (w / dw) 0 0 (h / dh) x y `multiply` meet (documentViewBox svg) dw dh) current svg
+  rasterizeView width height (P.Transform (w / dw) 0 0 (h / dh) x y <> meet (documentViewBox svg) dw dh) current svg
   where
     (dw, dh) = documentSize svg
 
 -- | The viewBox fitted into a @w@ by @h@ viewport and centred, as SVG's
 -- default @xMidYMid meet@ does.
-meet :: Box -> Float -> Float -> Matrix
-meet (Box vx vy vw vh) w h = Matrix s 0 0 s ((w - vw * s) / 2 - vx * s) ((h - vh * s) / 2 - vy * s)
+meet :: Box -> Float -> Float -> P.Transform
+meet (Box vx vy vw vh) w h = P.Transform s 0 0 s ((w - vw * s) / 2 - vx * s) ((h - vh * s) / 2 - vy * s)
   where
     s = min (w / vw) (h / vh)
 
 -- | Render with @view@ mapping viewBox units to raster pixels.
-rasterizeView :: Int -> Int -> Matrix -> Color -> Document -> ByteString
-rasterizeView width height view@(Matrix a b c d e f) current svg
+rasterizeView :: Int -> Int -> P.Transform -> Color -> Document -> ByteString
+rasterizeView width height view current svg
   | width <= 0 || height <= 0 = BS.empty
   -- A degenerate viewBox or rect makes a view of infinities or NaNs.
-  | not (P.transformFinite (P.Transform a b c d e f)) = BS.replicate (width * height * 4) 0
+  | not (P.transformFinite view) = BS.replicate (width * height * 4) 0
   | otherwise = BSI.unsafeCreate (width * height * 4) $ \out ->
       forM_ [0 .. width * height - 1] $ \i -> do
         let al = indexPrimArray image (i * 4 + 3)
@@ -239,9 +240,9 @@ rasterizeView width height view@(Matrix a b c d e f) current svg
       acc <- newZeroedPrimArray (width * height * 4)
       cov <- newZeroedPrimArray (width * height)
       forM_ (documentShapes svg) $ \(Shape segs m style) -> do
-        let full = view `multiply` m
+        let full = view <> toTransform m
             contours = flatten full segs
-            scaleOf = averageScale full
+            scaleOf = P.averageStretch full
             opacity = styleOpacity style
             paintColor p = case p of
               PaintNone -> Nothing
@@ -299,18 +300,11 @@ coverPolygons width height cov rule rings@(Rings pts starts _) = do
               -- huge or infinite coordinate) floors to garbage, not a row.
               when (ay /= by && y1 > 0 && y0 < fromIntegral height) $
                 visit (if y0 <= 0 then 0 else floor y0) y0 y1 x0 ((x1 - x0) / (y1 - y0)) (if up then 1 else -1)
-  -- Where each row's edges begin: counts, then running totals.
-  rowStart <- newZeroedPrimArray (height + 1)
-  forEdges $ \row _ _ _ _ _ -> readPrimArray rowStart (row + 1) >>= writePrimArray rowStart (row + 1) . (+ 1)
-  forM_ [1 .. height] $ \row -> do
-    before <- readPrimArray rowStart (row - 1)
-    readPrimArray rowStart row >>= writePrimArray rowStart row . (+ before)
+  (rowStart, cursor) <- bucketOffsets height (\emit -> forEdges (\row _ _ _ _ _ -> emit row))
   -- Four numbers an edge, in row order: top, bottom, x at the top, slope;
   -- windings apart.
   edges <- newPrimArray (capacity * 4)
   windings <- newPrimArray capacity
-  cursor <- newPrimArray height
-  copyMutablePrimArray cursor 0 rowStart 0 height
   forEdges $ \row y0 y1 x0 slope dir -> do
     e <- readPrimArray cursor row
     writePrimArray cursor row (e + 1)

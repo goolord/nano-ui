@@ -87,31 +87,24 @@ pushImageRotated da (Rect x y w h) angle tex0 u0 v0 u1 v1 col = do
       !cy = y + h / 2
       !hw = w / 2
       !hh = h / 2
-      -- Rotated corner at offset (dx, dy) from the centre.
+      -- Rotated corners clockwise from top-left.
       cornerX dx dy = cx + dx * c - dy * s
       cornerY dx dy = cy + dx * s + dy * c
+      !x0 = cornerX (-hw) (-hh)
+      !y0 = cornerY (-hw) (-hh)
+      !x1 = cornerX hw (-hh)
+      !y1 = cornerY hw (-hh)
+      !x2 = cornerX hw hh
+      !y2 = cornerY hw hh
+      !x3 = cornerX (-hw) hh
+      !y3 = cornerY (-hw) hh
   -- A solid quad records as a shape; an image records as itself
   -- ('NanoUI.Internal.Draw.pushImageOp').
   when (tex0 <= 0) $
-    recordOp da $
-      quadPolygon
-        (primArrayFromListN 8 [cornerX (-hw) (-hh), cornerY (-hw) (-hh), cornerX hw (-hh), cornerY hw (-hh), cornerX hw hh, cornerY hw hh, cornerX (-hw) hh, cornerY (-hw) hh])
-        (Flat col)
+    recordOp da $ quadPolygon (primArrayFromListN 8 [x0, y0, x1, y1, x2, y2, x3, y3]) (Flat col)
   setTexture da tex
   withVerts da 4 6 $ \vp ip vOff iOff baseIdxWord ->
-    pokeQuadCornersSIMD
-      vp
-      vOff
-      ip
-      iOff
-      (cornerX (-hw) (-hh))
-      (cornerY (-hw) (-hh))
-      (cornerX hw (-hh))
-      (cornerY hw (-hh))
-      (cornerX hw hh)
-      (cornerY hw hh)
-      (cornerX (-hw) hh)
-      (cornerY (-hw) hh)
+    pokeQuadCornersSIMD vp vOff ip iOff x0 y0 x1 y1 x2 y2 x3 y3
       tu0
       tv0
       tu1
@@ -159,10 +152,10 @@ cornerCosSin q seg =
       3 -> (0.3826834324, 0.9238795325)
       _ -> (0.0, 1.0)
 
--- | Poke one coverage-AA strip into a reservation at vertex offset @vi@ and
--- index offset @ii@ (both relative to @base@/@baseIdx@). Callers guarantee
--- @(x0,y0) /= (x1,y1)@. Shared by straight strokes and the fused
--- rounded-stroke paths, so a whole border shares one arena reservation.
+-- | Poke one coverage-AA strip with unit normal @(nx, ny)@ into a reservation
+-- at vertex offset @vi@ and index offset @ii@ (both relative to @base@/@baseIdx@).
+-- Shared by straight strokes and the fused rounded-stroke paths, so a whole
+-- border shares one arena reservation.
 {-# INLINE pokeStripAt #-}
 pokeStripAt ::
   Ptr Word8 ->
@@ -180,10 +173,11 @@ pokeStripAt ::
   Float ->
   Float ->
   Float ->
+  Float ->
+  Float ->
   IO ()
-pokeStripAt vp ip base baseIdx vi ii x0 y0 x1 y1 bw r g b a = do
-  let !(nx, ny) = segNormal x0 y0 x1 y1
-      !half = bw * 0.5
+pokeStripAt vp ip base baseIdx vi ii x0 y0 x1 y1 !nx !ny bw r g b a = do
+  let !half = bw * 0.5
       !core = max 0 (half - 0.5)
       !outer = half + 0.5
       pokeEnd !ev !ex !ey =
@@ -426,11 +420,11 @@ pushRoundedStrokeRaw da (Rect px py w h) radius bw col
               !innerAA = if solidCenter then 0 else max 0 (inner - arcFeather)
               !outerAA = outerR + arcFeather
           when doTB $ do
-            pokeStripAt vp ip base baseIdx 0 0 x0 topY (x0 + midW) topY ibw r g b a
-            pokeStripAt vp ip base baseIdx 8 18 x0 botY (x0 + midW) botY ibw r g b a
+            pokeStripAt vp ip base baseIdx 0 0 x0 topY (x0 + midW) topY 0 1 ibw r g b a
+            pokeStripAt vp ip base baseIdx 8 18 x0 botY (x0 + midW) botY 0 1 ibw r g b a
           when doLR $ do
-            pokeStripAt vp ip base baseIdx viLR iiLR leftX y0 leftX (y0 + midH) ibw r g b a
-            pokeStripAt vp ip base baseIdx (viLR + 8) (iiLR + 18) rightX y0 rightX (y0 + midH) ibw r g b a
+            pokeStripAt vp ip base baseIdx viLR iiLR leftX y0 leftX (y0 + midH) (-1) 0 ibw r g b a
+            pokeStripAt vp ip base baseIdx (viLR + 8) (iiLR + 18) rightX y0 rightX (y0 + midH) (-1) 0 ibw r g b a
           when corners $ do
             pokeArcTop vp ip base baseIdx hasCore innerAA inner outerR outerAA r g b a viC iiC (px + rad) (py + rad) 0
             pokeArcTop vp ip base baseIdx hasCore innerAA inner outerR outerAA r g b a (viC + arcV) (iiC + arcI) (px + w - rad) (py + rad) 1
@@ -498,15 +492,22 @@ pushLine da x1 y1 x2 y2 thickness col
               cap x1 y1
               cap x2 y2
 
+-- | Snap segment endpoints to the arena's device pixel grid before calling @raw@.
+{-# INLINE snapStrokeEndpoints #-}
+snapStrokeEndpoints ::
+  (DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()) ->
+  DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
+snapStrokeEndpoints raw da x0 y0 x1 y1 bw col
+  | bw <= 0 = pure ()
+  | otherwise = do
+      s <- readIORef (daSnapScale da)
+      raw da (onGrid s x0) (onGrid s y0) (onGrid s x1) (onGrid s y1) bw col
+
 -- Coverage-AA strip for a straight segment, the strip a rounded stroke's
 -- sides use, without the round caps 'pushLine' adds.
 {-# INLINE pushStrokeAA #-}
 pushStrokeAA :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
-pushStrokeAA da x0 y0 x1 y1 bw col
-  | bw <= 0 = pure ()
-  | otherwise = do
-      s <- readIORef (daSnapScale da)
-      pushStrokeAARaw da (onGrid s x0) (onGrid s y0) (onGrid s x1) (onGrid s y1) bw col
+pushStrokeAA = snapStrokeEndpoints pushStrokeAARaw
 
 -- | Unsnapped variant: the caller already snapped the endpoints.
 pushStrokeAARaw :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
@@ -514,42 +515,38 @@ pushStrokeAARaw da x0 y0 x1 y1 bw col = do
   square <- readIORef (daSquareGeometry da)
   if square
     then pushStrokeRaw da x0 y0 x1 y1 bw col
-    else case strokeAxes x0 y0 x1 y1 of
+    else case strokeNormal x0 y0 x1 y1 of
       Nothing -> pure ()
-      Just _ -> do
+      Just (!nx, !ny) -> do
         recordOp da (StrokeLineAA x0 y0 x1 y1 bw col)
         setTexture da glyphAtlasTextureId
         let !(r, g, b, a) = unpackColorF col
         withVertsRaw da 8 18 $ \vp ip base baseIdx ->
-          pokeStripAt vp ip base baseIdx 0 0 x0 y0 x1 y1 bw r g b a
+          pokeStripAt vp ip base baseIdx 0 0 x0 y0 x1 y1 nx ny bw r g b a
 
-strokeAxes :: Float -> Float -> Float -> Float -> Maybe (Float, Float, Float)
-strokeAxes x0 y0 x1 y1 =
-  let dx = x1 - x0
-      dy = y1 - y0
-      len = sqrt (dx * dx + dy * dy)
-   in if not (finite len) || len < 0.001 then Nothing else Just (dx, dy, len)
+strokeNormal :: Float -> Float -> Float -> Float -> Maybe (Float, Float)
+strokeNormal x0 y0 x1 y1 =
+  let !dx = x1 - x0
+      !dy = y1 - y0
+      !len = sqrt (dx * dx + dy * dy)
+   in if not (finite len) || len < 0.001 then Nothing else Just (-dy / len, dx / len)
 
 -- One quad per segment. Plots and diagrams use this; pushLine adds round caps.
 pushStroke :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
-pushStroke da x1 y1 x2 y2 thickness col
-  | thickness <= 0 = pure ()
-  | otherwise = do
-      s <- readIORef (daSnapScale da)
-      pushStrokeRaw da (onGrid s x1) (onGrid s y1) (onGrid s x2) (onGrid s y2) thickness col
+pushStroke = snapStrokeEndpoints pushStrokeRaw
 
 pushStrokeRaw :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushStrokeRaw da px1 py1 px2 py2 thickness col
   | thickness <= 0 = pure ()
   | otherwise =
-      case strokeAxes px1 py1 px2 py2 of
+      case strokeNormal px1 py1 px2 py2 of
         Nothing -> pure ()
-        Just (dx, dy, len) -> do
+        Just (!nx, !ny) -> do
           recordOp da (Stroke px1 py1 px2 py2 thickness col)
           setTexture da glyphAtlasTextureId
-          let !invLen = (thickness * 0.5) / len
-              !hx = (-dy) * invLen
-              !hy = dx * invLen
+          let !half = thickness * 0.5
+              !hx = nx * half
+              !hy = ny * half
           withVerts da 4 6 $ \vp ip vOff iOff baseIdxWord -> do
             let !(r, g, b, a) = unpackColorF col
                 !u = whitePixel

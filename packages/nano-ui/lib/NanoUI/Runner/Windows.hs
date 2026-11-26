@@ -255,6 +255,13 @@ closeRequested w c = do
     modifyIORef' (chSiblings c) (filter ((/= chKey c) . chKey))
     markDirty (chParent c)
 
+drawChildPass :: WindowOps w ev -> Child w ev -> ChildLoop -> Context -> Input -> Bool -> IO ChildLoop
+drawChildPass ops c cl ctx' inp full = do
+  view <- childView <$> readIORef (chDecl c)
+  more <- woDraw ops (chWin c) ctx' view inp full
+  seen <- varChangeCount
+  pure cl {clDraw = more, clSettle = max 0 (clSettle cl - 1), clSeen = seen}
+
 -- | One pass of a further window's loop: take its events into a frame's
 -- input, as the first window's loop does, and draw when anything calls for
 -- it. Nothing to do costs a few reads.
@@ -287,14 +294,7 @@ stepChild w c = do
         forced <- mustDraw cl
         draw <- if forced then pure True else shouldRedrawFrame ctx' (clInput cl) synced (clWasAnim cl) False wakeDue
         animNow <- anyAnimating ctx'
-        cl' <-
-          if draw
-            then do
-              view <- childView <$> readIORef (chDecl c)
-              more <- woDraw ops win ctx' view synced (clSettle cl > 0 || (clWasAnim cl && not animNow))
-              seen <- varChangeCount
-              pure cl {clDraw = more, clSettle = max 0 (clSettle cl - 1), clSeen = seen}
-            else pure cl
+        cl' <- if draw then drawChildPass ops c cl ctx' synced (clSettle cl > 0 || (clWasAnim cl && not animNow)) else pure cl
         writeIORef (chLoop c) $! cl' {clCtx = ctx', clInput = synced, clLastT = now, clWasAnim = animNow, clResized = False}
         woCursor ops win ctx' synced
         quit <- quitRequested ctx'
@@ -317,22 +317,10 @@ liveResize w c = unlessM (readIORef (chClosed c)) $ do
   dirty <- isDirty ctx'
   when (dirty || inputWindowSize synced /= inputWindowSize (clInput cl)) $ do
     now <- getMonotonicTime
-    view <- childView <$> readIORef (chDecl c)
     let dt = min maxFrameDt (realToFrac (now - clLastT cl))
-    more <- woDraw ops win ctx' view synced {inputDeltaTime = dt} True
-    seen <- varChangeCount
+    cl' <- drawChildPass ops c cl ctx' synced {inputDeltaTime = dt} True
     animNow <- anyAnimating ctx'
-    writeIORef (chLoop c) $!
-      cl
-        { clCtx = ctx'
-        , clInput = synced
-        , clLastT = now
-        , clWasAnim = animNow
-        , clDraw = more
-        , clSettle = max 0 (clSettle cl - 1)
-        , clSeen = seen
-        , clResized = True
-        }
+    writeIORef (chLoop c) $! cl' {clCtx = ctx', clInput = synced, clLastT = now, clWasAnim = animNow, clResized = True}
   where
     ops = wOps w
     win = chWin c

@@ -168,10 +168,7 @@ trianglePicture dd =
           corner t k = (peekByteOff ip ((start + 3 * t + k) * indexSize) :: IO Word32) >>= vertexAt vp . fromIntegral
           add m t = do
             vs <- mapM (corner t) [0, 1, 2]
-            let xs = map vX vs
-                ys = map vY vs
-                bounds = Rect (minimum xs) (minimum ys) (maximum xs - minimum xs) (maximum ys - minimum ys)
-                shown = fromMaybe (Rect 0 0 0 0) (rectIntersect bounds clip)
+            let shown = fromMaybe (Rect 0 0 0 0) (rectIntersect (vertexBounds vs) clip)
                 key = foldl' hashVertex salt vs
             pure $! M.insertWith (\(i, r) (j, _) -> (i + j, r)) key (1, shown) m
       foldM add acc [0 .. fromIntegral (cmdIndexCount c) `quot` 3 - 1]
@@ -179,6 +176,12 @@ trianglePicture dd =
       let (r, g, b) = vRgb v
        in s `hashWithSalt` vX v `hashWithSalt` vY v `hashWithSalt` r `hashWithSalt` g `hashWithSalt` b
             `hashWithSalt` vA v `hashWithSalt` vU v `hashWithSalt` vV v
+
+vertexBounds :: [Vertex] -> Rect
+vertexBounds vs =
+  let xs = map vX vs
+      ys = map vY vs
+   in Rect (minimum xs) (minimum ys) (maximum xs - minimum xs) (maximum ys - minimum ys)
 
 -- | Decode the quads a frame actually rasterised: one @(rect, color)@ per
 -- six-index quad, in draw order. Unlike span and arena queries, this includes
@@ -195,12 +198,8 @@ drawQuads dd = do
   where
     -- Each quad's 6 indices are [a, b, c, a, c, d]; corners are a, b, c, d.
     quads vs = case splitAt 6 vs of
-      (a : b : c : _ : _ : d : _, rest) -> quad [a, b, c, d] a : quads rest
+      (a : b : c : _ : _ : d : _, rest) -> (vertexBounds [a, b, c, d], vertexColor a) : quads rest
       _ -> []
-    quad corners v =
-      let xs = map vX corners
-          ys = map vY corners
-       in (Rect (minimum xs) (minimum ys) (maximum xs - minimum xs) (maximum ys - minimum ys), vertexColor v)
 
 -- | Ids and rects of the frame's nodes of one type, in arena order.
 nodesOfType :: NodeType -> Context -> IO [(WidgetId, Rect)]
@@ -419,27 +418,33 @@ frameCost ctx inp idle ui = do
           (_, _, d) <- runFrame ctx idle ui
           settle d (k + 1)
 
+runClickWith :: MouseButton -> Context -> Input -> NanoUI a -> V2 -> IO a
+runClickWith b ctx inp0 ui pos = let (press, release) = clickPairWith b inp0 pos in warmup ctx press ui >> evalUi ctx release ui
+
 -- | Run a press frame and a release frame at @pos@ ('clickPair'), returning
 -- the release frame's result.
 runClick :: Context -> Input -> NanoUI a -> V2 -> IO a
-runClick ctx inp0 ui pos = let (press, release) = clickPair inp0 pos in warmup ctx press ui >> evalUi ctx release ui
+runClick = runClickWith MouseLeft
 
 -- | 'runClick' with the right button ('rightClickPair'), as opens a context
 -- or edit menu.
 runRightClick :: Context -> Input -> NanoUI a -> V2 -> IO a
-runRightClick ctx inp0 ui pos = let (press, release) = rightClickPair inp0 pos in warmup ctx press ui >> evalUi ctx release ui
+runRightClick = runClickWith MouseRight
 
 -- | Count a failure unless some span contains the substring.
 assertSpansHas :: HasCallStack => IORef Int -> T.Text -> [(Rect, T.Text, a, b, c)] -> IO ()
 assertSpansHas failed needle spans = assert failed (hasText needle spans)
 
+matchingRects :: (T.Text -> Bool) -> [(Rect, T.Text, a, b, c)] -> [Rect]
+matchingRects p spans = [r | (r, txt, _, _, _) <- spans, p txt]
+
 -- | The rect of the first span whose text contains @needle@.
 spanRect :: T.Text -> [(Rect, T.Text, a, b, c)] -> Maybe Rect
-spanRect needle spans = listToMaybe [r | (r, txt, _, _, _) <- spans, needle `T.isInfixOf` txt]
+spanRect needle = listToMaybe . matchingRects (needle `T.isInfixOf`)
 
 -- | The rect of the first span whose text is exactly @lbl@.
 spanRectOf :: T.Text -> [(Rect, T.Text, a, b, c)] -> Maybe Rect
-spanRectOf lbl spans = listToMaybe [r | (r, txt, _, _, _) <- spans, txt == lbl]
+spanRectOf lbl = listToMaybe . matchingRects (== lbl)
 
 -- | Whether the first rect contains the second.
 covers :: Rect -> Rect -> Bool
@@ -458,11 +463,11 @@ damageCovers dmg rect = clipCovers dmg rect
 
 -- | Y origins of spans whose unmodified text exactly matches the label.
 spanYOf :: T.Text -> [(Rect, T.Text, a, b, c)] -> [Float]
-spanYOf lbl spans = [y | (Rect _ y _ _, txt, _, _, _) <- spans, txt == lbl]
+spanYOf lbl = map rectY . matchingRects (== lbl)
 
 -- | X origins of spans whose unmodified text exactly matches the label.
 spanXOf :: T.Text -> [(Rect, T.Text, a, b, c)] -> [Float]
-spanXOf lbl spans = [x | (Rect x _ _ _, txt, _, _, _) <- spans, txt == lbl]
+spanXOf lbl = map rectX . matchingRects (== lbl)
 
 -- | Run a frame with the pointer at @pos@ and return the resulting 'UiCursorKind'.
 cursorOver :: Context -> Input -> NanoUI a -> V2 -> IO UiCursorKind

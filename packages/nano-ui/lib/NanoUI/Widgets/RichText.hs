@@ -360,26 +360,20 @@ updateSelection ctx inp wid resp focused plain buffer lines' = do
       press = pressedIn MouseLeft inp && respHovered resp
       held = heldIn MouseLeft inp
       released = releasedIn MouseLeft inp
-  (next, dragReleased) <-
-    if press
-      then do
-        let pos = pointAt plain lines' (respRect resp) mouse
-        requestFocus wid
-        pure (selectionAt plain pos pos held False, False)
-      else
-        if selectionDragging afterKeys && (held || released)
-          then do
+      (next, dragReleased)
+        | press =
+            let pos = pointAt plain lines' (respRect resp) mouse
+             in (selectionAt plain pos pos held False, False)
+        | selectionDragging afterKeys && (held || released) =
             let pos = pointAt plain lines' (respRect resp) mouse
                 dragAnchor = (selectionAnchor afterKeys, anchorOffset afterKeys)
                 didMove = selectionMoved afterKeys || fst pos /= fst dragAnchor
-            pure
-              ( selectionAt plain dragAnchor pos held (didMove && held)
-              , released && didMove
-              )
-          else
-            -- A drag that ended elsewhere stops; an idle pass keeps the stored
-            -- selection object, so it writes nothing.
-            pure (if selectionDragging afterKeys then afterKeys {selectionDragging = False, selectionMoved = False} else afterKeys, False)
+             in (selectionAt plain dragAnchor pos held (didMove && held), released && didMove)
+        -- A drag that ended elsewhere stops; an idle pass keeps the stored
+        -- selection object, so it writes nothing.
+        | selectionDragging afterKeys = (afterKeys {selectionDragging = False, selectionMoved = False}, False)
+        | otherwise = (afterKeys, False)
+  when press (requestFocus wid)
   unless (ptrEq stored next) $
     liftIO (modifyStore ctx (insertSlot fieldRichSelection key next))
   pure (next, dragReleased)
@@ -456,21 +450,17 @@ lineAtY :: Float -> [Line] -> Line
 lineAtY y = go
   where
     go [] = Line 0 0 0 0 0 []
-    go [line] = line
     go (line : rest)
-      | y < lineTop line + lineHeight line = line
+      | null rest || y < lineTop line + lineHeight line = line
       | otherwise = go rest
 
 tokenIndexAtX :: Line -> Float -> Int
 tokenIndexAtX line x = go (lineTokens line)
   where
     go [] = lineStart line
-    go [(tokenX, tok)]
-      | x <= tokenX = tokenStart tok
-      | x >= tokenX + tokenWidth tok = tokenStart tok + T.length (tokenText tok)
-      | otherwise = indexWithin tokenX tok
     go ((tokenX, tok) : rest)
       | x <= tokenX = tokenStart tok
+      | null rest && x >= tokenX + tokenWidth tok = tokenStart tok + T.length (tokenText tok)
       | x <= tokenX + tokenWidth tok = indexWithin tokenX tok
       | otherwise = go rest
     indexWithin tokenX tok =

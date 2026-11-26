@@ -26,12 +26,14 @@ module NanoUI.Internal.Uniforms
   , uniformLayout
   , uniformSize
   , packUniformBytes
+  , packZeroedBytes
   , hashUniformBytes
   , sysUniformBytes
   , pokeSysUniforms
   ) where
 
-import Data.Bits (shiftR, xor, (.&.))
+import Control.Monad (when)
+import Data.Bits (shiftR, xor)
 import Data.Int (Int32)
 import Data.Kind (Type)
 import Data.Primitive.ByteArray
@@ -61,7 +63,7 @@ import GHC.Generics
   , Selector (..)
   , U1 (..)
   )
-import NanoUI.Internal.Types (Color (..), Rect (..), Size (..), V2 (..))
+import NanoUI.Internal.Types (Color (..), Rect (..), Size (..), V2 (..), unpackColorF)
 
 -- | A three-component float vector for GPU uniforms and shader math.
 data V3 = V3
@@ -202,56 +204,54 @@ instance Uniforms () where
   uniformFieldsAt _ _ off = (off, [])
   pokeUniformAt () _ _ off = pure off
 
+{-# INLINE primField #-}
+primField :: Int -> Int -> GpuType -> Text -> Int -> (Int, [UniformField])
+primField align sz gt name off = let !o = alignUp align off in (o + sz, [UniformField name gt o])
+
+{-# INLINE pokeWordUniform #-}
+pokeWordUniform :: Word32 -> MutableByteArray RealWorld -> Int -> Int -> IO Int
+pokeWordUniform w mba base off = let !o = alignUp 4 off in (o + 4) <$ writeWord32At mba (base + o) w
+
+{-# INLINE pokeVec2 #-}
+pokeVec2 :: Float -> Float -> MutableByteArray RealWorld -> Int -> Int -> IO Int
+pokeVec2 x y mba base off = do
+  let !o = alignUp 8 off
+  writeFloatAt mba (base + o) x
+  writeFloatAt mba (base + o + 4) y
+  pure (o + 8)
+
+{-# INLINE pokeVec4 #-}
+pokeVec4 :: Float -> Float -> Float -> Float -> MutableByteArray RealWorld -> Int -> Int -> IO Int
+pokeVec4 x y z w mba base off = do
+  let !o = alignUp 16 off
+  writeFloatAt mba (base + o) x
+  writeFloatAt mba (base + o + 4) y
+  writeFloatAt mba (base + o + 8) z
+  writeFloatAt mba (base + o + 12) w
+  pure (o + 16)
+
 instance Uniforms Float where
-  uniformFieldsAt _ name off =
-    let !o = alignUp 4 off
-     in (o + 4, [UniformField name GFloat o])
-  pokeUniformAt f mba base off = do
-    let !o = alignUp 4 off
-    writeFloatAt mba (base + o) f
-    pure (o + 4)
+  uniformFieldsAt _ = primField 4 4 GFloat
+  pokeUniformAt f = pokeWordUniform (castFloatToWord32 f)
 
 instance Uniforms Int32 where
-  uniformFieldsAt _ name off =
-    let !o = alignUp 4 off
-     in (o + 4, [UniformField name GInt32 o])
-  pokeUniformAt n mba base off = do
-    let !o = alignUp 4 off
-    writeWord32At mba (base + o) (fromIntegral n)
-    pure (o + 4)
+  uniformFieldsAt _ = primField 4 4 GInt32
+  pokeUniformAt n = pokeWordUniform (fromIntegral n)
 
 instance Uniforms Word32 where
-  uniformFieldsAt _ name off =
-    let !o = alignUp 4 off
-     in (o + 4, [UniformField name GUInt32 o])
-  pokeUniformAt w mba base off = do
-    let !o = alignUp 4 off
-    writeWord32At mba (base + o) w
-    pure (o + 4)
+  uniformFieldsAt _ = primField 4 4 GUInt32
+  pokeUniformAt = pokeWordUniform
 
 instance Uniforms Bool where
-  uniformFieldsAt _ name off =
-    let !o = alignUp 4 off
-     in (o + 4, [UniformField name GBool o])
-  pokeUniformAt b mba base off = do
-    let !o = alignUp 4 off
-    writeWord32At mba (base + o) (if b then 1 else 0)
-    pure (o + 4)
+  uniformFieldsAt _ = primField 4 4 GBool
+  pokeUniformAt b = pokeWordUniform (if b then 1 else 0)
 
 instance Uniforms V2 where
-  uniformFieldsAt _ name off =
-    let !o = alignUp 8 off
-     in (o + 8, [UniformField name GVec2 o])
-  pokeUniformAt (V2 x y) mba base off = do
-    let !o = alignUp 8 off
-    writeFloatAt mba (base + o) x
-    writeFloatAt mba (base + o + 4) y
-    pure (o + 8)
+  uniformFieldsAt _ = primField 8 8 GVec2
+  pokeUniformAt (V2 x y) = pokeVec2 x y
 
 instance Uniforms V3 where
-  uniformFieldsAt _ name off =
-    let !o = alignUp 16 off
-     in (o + 12, [UniformField name GVec3 o])
+  uniformFieldsAt _ = primField 16 12 GVec3
   pokeUniformAt (V3 x y z) mba base off = do
     let !o = alignUp 16 off
     writeFloatAt mba (base + o) x
@@ -260,55 +260,20 @@ instance Uniforms V3 where
     pure (o + 12)
 
 instance Uniforms V4 where
-  uniformFieldsAt _ name off =
-    let !o = alignUp 16 off
-     in (o + 16, [UniformField name GVec4 o])
-  pokeUniformAt (V4 x y z w) mba base off = do
-    let !o = alignUp 16 off
-    writeFloatAt mba (base + o) x
-    writeFloatAt mba (base + o + 4) y
-    writeFloatAt mba (base + o + 8) z
-    writeFloatAt mba (base + o + 12) w
-    pure (o + 16)
+  uniformFieldsAt _ = primField 16 16 GVec4
+  pokeUniformAt (V4 x y z w) = pokeVec4 x y z w
 
 instance Uniforms Color where
-  uniformFieldsAt _ name off =
-    let !o = alignUp 16 off
-     in (o + 16, [UniformField name GVec4 o])
-  pokeUniformAt (Color w) mba base off = do
-    let !o = alignUp 16 off
-        !inv = 1.0 / 255.0 :: Float
-        !r = fromIntegral ((w `shiftR` 24) .&. 0xFF) * inv
-        !g = fromIntegral ((w `shiftR` 16) .&. 0xFF) * inv
-        !b = fromIntegral ((w `shiftR` 8) .&. 0xFF) * inv
-        !a = fromIntegral (w .&. 0xFF) * inv
-    writeFloatAt mba (base + o) r
-    writeFloatAt mba (base + o + 4) g
-    writeFloatAt mba (base + o + 8) b
-    writeFloatAt mba (base + o + 12) a
-    pure (o + 16)
+  uniformFieldsAt _ = primField 16 16 GVec4
+  pokeUniformAt col = let !(r, g, b, a) = unpackColorF col in pokeVec4 r g b a
 
 instance Uniforms Rect where
-  uniformFieldsAt _ name off =
-    let !o = alignUp 16 off
-     in (o + 16, [UniformField name GVec4 o])
-  pokeUniformAt (Rect x y w h) mba base off = do
-    let !o = alignUp 16 off
-    writeFloatAt mba (base + o) x
-    writeFloatAt mba (base + o + 4) y
-    writeFloatAt mba (base + o + 8) w
-    writeFloatAt mba (base + o + 12) h
-    pure (o + 16)
+  uniformFieldsAt _ = primField 16 16 GVec4
+  pokeUniformAt (Rect x y w h) = pokeVec4 x y w h
 
 instance Uniforms Size where
-  uniformFieldsAt _ name off =
-    let !o = alignUp 8 off
-     in (o + 8, [UniformField name GVec2 o])
-  pokeUniformAt (Size w h) mba base off = do
-    let !o = alignUp 8 off
-    writeFloatAt mba (base + o) w
-    writeFloatAt mba (base + o + 4) h
-    pure (o + 8)
+  uniformFieldsAt _ = primField 8 8 GVec2
+  pokeUniformAt (Size w h) = pokeVec2 w h
 
 instance (Uniforms a, Uniforms b) => Uniforms (a, b) where
   uniformFieldsAt _ pfx off =
@@ -341,17 +306,17 @@ uniformSize p =
   let !raw = fst (uniformFieldsAt p "" 0)
    in if raw == 0 then 0 else alignUp 16 raw
 
+-- | Allocate a zero-filled @sz@-byte buffer, run @fill@ when @sz > 0@, and freeze it.
+{-# INLINE packZeroedBytes #-}
+packZeroedBytes :: Int -> (MutableByteArray RealWorld -> IO a) -> IO ByteArray
+packZeroedBytes !sz fill = do
+  mba <- newByteArray sz
+  when (sz > 0) (fillByteArray mba 0 sz 0 >> fill mba >> pure ())
+  unsafeFreezeByteArray mba
+
 -- | Pack @u@ into a zero-padded immutable std140 'ByteArray'.
 packUniformBytes :: forall u. Uniforms u => u -> IO ByteArray
-packUniformBytes u = do
-  let !sz = uniformSize (Proxy :: Proxy u)
-  mba <- newByteArray sz
-  if sz > 0
-    then do
-      fillByteArray mba 0 sz 0
-      _ <- pokeUniformAt u mba 0 0
-      unsafeFreezeByteArray mba
-    else unsafeFreezeByteArray mba
+packUniformBytes u = packZeroedBytes (uniformSize (Proxy :: Proxy u)) (\mba -> pokeUniformAt u mba 0 0)
 
 -- | Deterministic 64-bit FNV-1a hash over the 32-bit words of a packed
 -- uniform 'ByteArray'. Because 'packUniformBytes' zeroes padding bytes,
@@ -389,15 +354,7 @@ pokeSysUniforms ::
   Int ->
   IO ()
 pokeSysUniforms (Rect rx ry rw rh) (Rect u0 v0 us vs) scale radius tw th mba off = do
-  writeFloatAt mba off rx
-  writeFloatAt mba (off + 4) ry
-  writeFloatAt mba (off + 8) rw
-  writeFloatAt mba (off + 12) rh
-  writeFloatAt mba (off + 16) u0
-  writeFloatAt mba (off + 20) v0
-  writeFloatAt mba (off + 24) us
-  writeFloatAt mba (off + 28) vs
-  writeFloatAt mba (off + 32) scale
-  writeFloatAt mba (off + 36) radius
-  writeFloatAt mba (off + 40) tw
-  writeFloatAt mba (off + 44) th
+  _ <- pokeVec4 rx ry rw rh mba off 0
+  _ <- pokeVec4 u0 v0 us vs mba (off + 16) 0
+  _ <- pokeVec4 scale radius tw th mba (off + 32) 0
+  pure ()

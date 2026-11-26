@@ -7,16 +7,12 @@ module NanoUI.Sdl.Internal.Font
   , embeddedFontSource
   , newGlyphAtlas
   , destroyGlyphAtlas
-  , prepareGlyphAtlasForFrame
   , dropGlyphTextures
-  , closeEvictedFonts
-  , sdlPathEncoding
-  , glyphAtlasFull
   , glyphAtlasHandle
+  , sdlPathEncoding
   , SdlFontCache
   , newSdlFontCache
   , destroySdlFontCache
-  , reloadSdlFontCache
   , sdlFontCacheSource
   , sdlFontCacheMonoSource
   , withSdlFontCache
@@ -39,15 +35,11 @@ import NanoUI.Ttf.Internal.Font
   , FontSource (..)
   , GlyphAtlas (..)
   , SdlFontCache (..)
-  , closeEvictedFonts
   , destroyGlyphAtlas
   , destroySdlFontCache
   , embeddedFontSource
   , fontSourceLabel
-  , glyphAtlasFull
   , glyphAtlasHandle
-  , prepareGlyphAtlasForFrame
-  , reloadSdlFontCache
   , sdlFontCacheMonoSource
   , sdlFontCacheSource
   , ttfCloseFont

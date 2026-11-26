@@ -14,6 +14,8 @@ module NanoUI.Internal.Widgets.Node
   , respRightPressed
   , respRightClicked
   , pointerOnWidget
+  , pointerReachable
+  , anyControlHitInRange
   , mkResponse
   , setClicked
   , setChanged
@@ -224,8 +226,33 @@ styledContainer nt si layout child = do
   idx <- withContext $ \ctx -> do
     parent <- currentParent ctx
     idx <- addNodeFromLayout (ctxNodeArena ctx) nt parent layout
-    idx <$ setStyleIdx (ctxNodeArena ctx) idx si
+    when (si /= 0) (setStyleIdx (ctxNodeArena ctx) idx si)
+    pure idx
   withContainerNode True idx child
+
+-- | Whether @mouse@ reaches container @wid@: neither covered, disabled, nor
+-- outside its enclosing clip from last frame.
+pointerReachable :: Context -> WidgetId -> V2 -> IO Bool
+pointerReachable ctx wid mouse =
+  (not <$> pointerCovered ctx wid)
+    <&&> (not <$> isDisabled ctx wid)
+    <&&> (maybe True (`rectContains` mouse) <$> getPrevClipRect ctx wid)
+
+-- | Whether @mouse@ is on an enabled, uncovered widget node in @[from .. to)@.
+anyControlHitInRange :: Context -> V2 -> Int -> Int -> IO Bool
+anyControlHitInRange ctx mouse from to = go from
+  where
+    na = ctxNodeArena ctx
+    go !i
+      | i >= to = pure False
+      | otherwise = do
+          hit <-
+            (isWidgetNode <$> getNodeType na i) <&&> do
+              w <- getWidgetId na i
+              (not <$> isDisabled ctx w)
+                <&&> (not <$> pointerCovered ctx w)
+                <&&> (maybe (pure False) (\r -> nodeInteractionHit ctx i r mouse) =<< getPrevRect ctx w)
+          if hit then pure True else go (i + 1)
 
 -- | A 'container' tagged with a fresh id, and its interaction under that id.
 containerResponse :: NodeType -> Layout -> NanoUI a -> NanoUI (a, Response)

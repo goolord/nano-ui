@@ -141,32 +141,32 @@ inspect $ 'storeReadProbe === 'storeReadByHand
 inspect $ 'storeWriteProbe `hasNoType` ''Field
 inspect $ 'storeReadProbe `hasNoType` ''Field
 
--- A 'SlotSpec' compiles to the slot code it names, plus its encoding: the
--- float bits a combo keeps in a quiet slot, an int read as a flag.
+-- A 'SlotSpec' compiles to the slot code it names, plus its encoding: float
+-- bits in a quiet slot, and an int read as a flag.
 specWriteProbe :: Int -> Int -> Float -> WidgetStore -> WidgetStore
 specWriteProbe k cursor x =
   insertSpec (slotSpec SlotCursor fieldInt) k cursor
-    . insertSpec (floatBitsSpec (slotSpec SlotComboScrollX fieldQuiet)) k x
+    . insertSpec (floatBitsSpec (slotSpec SlotScrollCross fieldQuiet)) k x
     . deleteSpec (slotSpec SlotAnchor fieldInt) k
 
 specWriteByHand :: Int -> Int -> Float -> WidgetStore -> WidgetStore
 specWriteByHand k cursor x =
   insertSlot fieldInt (slotKey SlotCursor k) cursor
-    . insertSlot fieldQuiet (slotKey SlotComboScrollX k) (fromIntegral (castFloatToWord32 x))
+    . insertSlot fieldQuiet (slotKey SlotScrollCross k) (fromIntegral (castFloatToWord32 x))
     . deleteSlot fieldInt (slotKey SlotAnchor k)
 
 specReadProbe :: Int -> WidgetStore -> (Int, Maybe Float, Bool)
 specReadProbe k st =
   ( findSpec (slotSpec SlotCursor fieldInt) 7 k st
-  , lookupSpec (floatBitsSpec (slotSpec SlotComboScrollX fieldQuiet)) k st
-  , findSpec (encodedSpec intBool boolInt (slotSpec SlotComboFocus fieldInt)) False k st
+  , lookupSpec (floatBitsSpec (slotSpec SlotScrollCross fieldQuiet)) k st
+  , findSpec (encodedSpec intBool boolInt (slotSpec SlotMenuOpen fieldInt)) False k st
   )
 
 specReadByHand :: Int -> WidgetStore -> (Int, Maybe Float, Bool)
 specReadByHand k st =
   ( findSlot fieldInt 7 (slotKey SlotCursor k) st
-  , castWord32ToFloat . fromIntegral <$> lookupSlot fieldQuiet (slotKey SlotComboScrollX k) st
-  , intBool (findSlot fieldInt 0 (slotKey SlotComboFocus k) st)
+  , castWord32ToFloat . fromIntegral <$> lookupSlot fieldQuiet (slotKey SlotScrollCross k) st
+  , intBool (findSlot fieldInt 0 (slotKey SlotMenuOpen k) st)
   )
 
 inspect $ 'specWriteProbe === 'specWriteByHand

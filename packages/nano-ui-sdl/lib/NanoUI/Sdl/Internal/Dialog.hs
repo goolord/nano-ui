@@ -32,10 +32,10 @@ module NanoUI.Sdl.Internal.Dialog
 
 import Control.Exception (SomeException, onException, try)
 import Control.Monad (unless, void, when, (>=>))
+import Control.Monad.Trans.Resource (allocate, closeInternalState, createInternalState, runInternalState)
 import Data.Foldable (for_)
 import Data.Int (Int32)
 import Data.IORef (IORef, atomicWriteIORef, newIORef, readIORef)
-import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified GHC.Foreign as GHC
@@ -203,46 +203,40 @@ launchDialog env kind opts = do
   -- as a path ('sdlPathEncoding'): UTF-8 on Windows too, not the code page
   -- Foreign.C.String would use.
   enc <- sdlPathEncoding
-  let allocNames [] acc = pure (reverse acc)
-      allocNames (FileFilter name pattern_ : rest) acc = do
-        n <- GHC.newCString utf8 (T.unpack name) `onException` freePairs acc
-        p <- GHC.newCString utf8 (T.unpack pattern_) `onException` (free n >> freePairs acc)
-        allocNames rest ((n, p) : acc)
-      freePairs = mapM_ (\(n, p) -> free n >> free p)
-  names <- allocNames (if kind == FolderDialog then [] else dialogFilters opts) []
-  let freeNames = freePairs names
-  filters <-
-    (if null names
-      then pure nullPtr
-      else newArray [SDL_DialogFileFilter (PtrConst.unsafeFromPtr n) (PtrConst.unsafeFromPtr p) | (n, p) <- names])
-      `onException` freeNames
-  location <-
-    traverse (GHC.newCString enc) (dialogDefaultLocation opts)
-      `onException` (free filters >> freeNames)
-  let freeBuffers = do
-        freePairs names
-        free filters
-        mapM_ free location
-  result <- newIORef FileDialogPending
-  let finish outcome = do
-        freeBuffers
-        completeResult result outcome
-        pushRefreshEvent
-  sp <- newStablePtr finish `onException` freeBuffers
-  let userdata = castPtr (castStablePtrToPtr sp)
-      win = sdlWindow env
-      filtersConst = PtrConst.unsafeFromPtr filters
-      nfilters = fromIntegral (length names)
-      locationConst = PtrConst.unsafeFromPtr (fromMaybe nullPtr location)
-      showDlg = case kind of
-        OpenDialog ->
-          showOpenFileDialogSafe dialogCallback userdata win filtersConst nfilters locationConst (dialogAllowMany opts)
-        SaveDialog ->
-          showSaveFileDialogSafe dialogCallback userdata win filtersConst nfilters locationConst
-        FolderDialog ->
-          showOpenFolderDialogSafe dialogCallback userdata win locationConst (dialogAllowMany opts)
-  showDlg `onException` (freeStablePtr sp >> freeBuffers)
-  pure (FileDialogId (sdlCachedCtx env) result)
+  st <- createInternalState
+  flip onException (closeInternalState st) $ do
+    let hold alloc = snd <$> allocate alloc free
+        holdCStr e s = hold (GHC.newCString e s)
+        rawFilters = if kind == FolderDialog then [] else dialogFilters opts
+    (cs, filters, location) <- flip runInternalState st $ do
+      cs <-
+        mapM
+          ( \(FileFilter n p) -> do
+              cn <- holdCStr utf8 (T.unpack n)
+              cp <- holdCStr utf8 (T.unpack p)
+              pure (SDL_DialogFileFilter (PtrConst.unsafeFromPtr cn) (PtrConst.unsafeFromPtr cp))
+          )
+          rawFilters
+      filters <- if null cs then pure nullPtr else hold (newArray cs)
+      location <- maybe (pure nullPtr) (holdCStr enc) (dialogDefaultLocation opts)
+      pure (cs, filters, location)
+    result <- newIORef FileDialogPending
+    let finish outcome = closeInternalState st >> completeResult result outcome >> pushRefreshEvent
+    sp <- newStablePtr finish
+    let userdata = castPtr (castStablePtrToPtr sp)
+        win = sdlWindow env
+        filtersConst = PtrConst.unsafeFromPtr filters
+        nfilters = fromIntegral (length cs)
+        locationConst = PtrConst.unsafeFromPtr location
+        showDlg = case kind of
+          OpenDialog ->
+            showOpenFileDialogSafe dialogCallback userdata win filtersConst nfilters locationConst (dialogAllowMany opts)
+          SaveDialog ->
+            showSaveFileDialogSafe dialogCallback userdata win filtersConst nfilters locationConst
+          FolderDialog ->
+            showOpenFolderDialogSafe dialogCallback userdata win locationConst (dialogAllowMany opts)
+    showDlg `onException` freeStablePtr sp
+    pure (FileDialogId (sdlCachedCtx env) result)
 
 -- | The callback every dialog shares, made once a process. A launch's
 -- userdata carries what finishes it (releasing its buffers, recording the

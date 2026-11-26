@@ -6,12 +6,15 @@ module NanoUI.Sdl.Internal.Env
   ( SdlEnv (..)
   , PresentProbe (..)
   , Retain (..)
+  , emptyRetain
+  , dropRetainRef
   ) where
 
+import Control.Monad (unless)
 import Data.Int (Int32)
-import Data.IORef (IORef)
+import Data.IORef (IORef, readIORef, writeIORef)
 import Data.Text (Text)
-import Foreign.Ptr (Ptr)
+import Foreign.Ptr (Ptr, nullPtr)
 import NanoUI.Internal.Context (Context)
 import NanoUI.Internal.Debug (DebugSamplerRef)
 import NanoUI.Sdl.Internal.Chrome.Types (ChromeState)
@@ -25,6 +28,7 @@ import NanoUI.Sdl.Internal.Render (RenderBatch)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer, SDL_Texture)
 import SDL3.Sys.Bindgen.Video (SDL_Window)
 import SDL3.Sys.Blendmode (SDL_BlendMode)
+import SDL3.Sys.Render (destroyTexture)
 
 -- | Native resources owned by a 'NanoUI.Backend.Sdl.withSdl'
 -- callback. Window, renderer, and font handles must stay on the display
@@ -117,3 +121,13 @@ data Retain = Retain
   -- ^ The pixel size the last frame used.
   , retainScale :: !Float
   }
+
+-- | Empty retained framebuffer state before allocation or after teardown.
+emptyRetain :: Retain
+emptyRetain = Retain nullPtr 0 0 0 0 0
+
+-- | Destroy the retained texture in a reference, if any, and reset it.
+dropRetainRef :: IORef Retain -> IO ()
+dropRetainRef ref = do
+  tex <- retainTexture <$> readIORef ref
+  unless (tex == nullPtr) $ writeIORef ref emptyRetain >> destroyTexture tex

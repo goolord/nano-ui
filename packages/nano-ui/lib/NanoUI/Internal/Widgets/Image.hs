@@ -36,7 +36,7 @@ import NanoUI.Internal.Widgets.Node (Response, addWidgetNode)
 -- | An image node for image @iid@ under widget @wid@. Paint finds the image
 -- by the node's image id ('setImageId'), and damage spots a switched image
 -- by it. With an 'ImageNode', paint fits, fades and rotates the image
--- ('lookDraw') and an unsized axis takes the image's size; without one the
+-- ('withLookDraw') and an unsized axis takes the image's size; without one the
 -- image is stretched, as with 'NanoUI.image'. Like a label, it passes the
 -- pointer to a control it is drawn over; its response still reports hover
 -- and clicks.

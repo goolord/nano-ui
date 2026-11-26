@@ -117,7 +117,8 @@ module NanoUI.Internal.Context
   , stepScrollGlides
   -- Animations ("NanoUI.Internal.Context.Animation")
   , anyAnimating
-  , getLiveAnimations
+  , liveAnimationKeys
+  , isAnimatingKey
   , takeAnimSettled
   , lookupAnimation
   , startAnimation

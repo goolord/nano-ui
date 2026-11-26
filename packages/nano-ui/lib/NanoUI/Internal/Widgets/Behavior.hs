@@ -44,8 +44,9 @@ import NanoUI.Internal.Layout.Arena (getParent, getWidgetId, lookupNodeByKey)
 import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askFrameInput, askInput, focusedWidget, freshWidget, liftIO, withContext)
 import NanoUI.Internal.Store (deleteSpec, findSpec, insertSpec, lookupSpec)
 import NanoUI.Internal.Store.Slots (setFlagSpec, slotDragItem, slotDragPress, slotDragStartPos, slotDrop)
-import NanoUI.Internal.Types (Rect (..), V2 (..), clamp01, rectContains, v2X, v2Y)
+import NanoUI.Internal.Types (Rect (..), V2 (..), clamp, clamp01, rectContains, v2X, v2Y)
 import NanoUI.Internal.Widgets.Node (Response, respPressed, respRect)
+import NanoUI.Internal.Widgets.SplitPane (rectDistSq)
 
 -- | Pointer slop in pixels before a held press counts as a drag.
 dragThresholdPx :: Float
@@ -194,7 +195,7 @@ useReorder order responses = do
   (wid, ctx) <- freshWidget
   inp <- askInput
   let key = intKey wid
-      V2 mx my = inputMousePos inp
+      mouse = inputMousePos inp
       press = pressedIn MouseLeft inp
       hit = fst <$> find (respPressed . snd) responses
       items = [(i, respRect r) | (i, r) <- responses]
@@ -207,16 +208,12 @@ useReorder order responses = do
         | press = hit
         | token == findSpec slotDragPress 0 key store = stored
         | otherwise = Nothing
-      startPos = if press then V2 mx my else findSpec slotDragStartPos (V2 mx my) key store
+      startPos = if press then mouse else findSpec slotDragStartPos mouse key store
       moved =
         isJust dragging
           && not press
-          && (findSpec slotDrop False key store || pastDragThreshold startPos (V2 mx my))
-      distance (Rect x y w h) =
-        let dx = max 0 (max (x - mx) (mx - x - w))
-            dy = max 0 (max (y - my) (my - y - h))
-         in dx * dx + dy * dy
-      target = if null items then Nothing else Just (fst (minimumBy (comparing (distance . snd . snd)) (zip [0 :: Int ..] items)))
+          && (findSpec slotDrop False key store || pastDragThreshold startPos mouse)
+      target = if null items then Nothing else Just (fst (minimumBy (comparing ((`rectDistSq` mouse) . snd . snd)) (zip [0 :: Int ..] items)))
       preview = case (target, dragging) of
         (Just t, Just d) | moved, d `elem` order ->
           let (before, after) = splitAt t (filter (/= d) order)
@@ -372,8 +369,7 @@ useListNavWith :: WidgetId -> Int -> Maybe Int -> ListNavScroll -> NanoUI ListNa
 useListNavWith scrollId count current scrollMode
   | count <= 0 = pure (ListNav Nothing False False)
   | otherwise =
-      let cur = clampSel <$> current
-          clampSel i = if i < 0 then 0 else min (count - 1) i
+      let cur = clamp 0 (count - 1) <$> current
        in whenKeyNavFocused scrollId (ListNav cur False False) $ \inp -> do
               let home = pressedOnceIn KeyHome inp
                   end = pressedOnceIn KeyEnd inp
@@ -384,9 +380,8 @@ useListNavWith scrollId count current scrollMode
                   act = pressedOnceIn KeyEnter inp || pressedOnceIn KeySpace inp
                   mRowRect = case scrollMode of
                     NavNoScroll -> Nothing
-                    NavUniformRow step
-                      | step > 0 -> Just (\i -> Rect 0 (fromIntegral i * step) 1 step)
-                      | otherwise -> Nothing
+                    NavUniformRow step | step > 0 -> Just (\i -> Rect 0 (fromIntegral i * step) 1 step)
+                    NavUniformRow _ -> Nothing
                     NavRowRect f -> Just f
               pageStep <-
                 if pgUp || pgDown
@@ -399,13 +394,14 @@ useListNavWith scrollId count current scrollMode
                           _ -> 0
                     pure (if viewH > 0 && stepH > 0 then max 1 (floor (viewH / stepH)) else 10)
                   else pure 10
-              let next
+              let stepBy d def = Just (maybe def (\i -> clamp 0 (count - 1) (i + d)) cur)
+                  next
                     | home = Just 0
                     | end = Just (count - 1)
-                    | pgUp = Just (maybe (count - 1) (\i -> max 0 (i - pageStep)) cur)
-                    | pgDown = Just (maybe 0 (\i -> min (count - 1) (i + pageStep)) cur)
-                    | up = Just (maybe (count - 1) (\i -> max 0 (i - 1)) cur)
-                    | down = Just (maybe 0 (\i -> min (count - 1) (i + 1)) cur)
+                    | pgUp = stepBy (-pageStep) (count - 1)
+                    | pgDown = stepBy pageStep 0
+                    | up = stepBy (-1) (count - 1)
+                    | down = stepBy 1 0
                     | otherwise = cur
                   changed = next /= cur
               when changed $

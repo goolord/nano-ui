@@ -38,7 +38,7 @@ import Data.Map.Strict qualified as M
 import Data.Foldable (for_)
 import Data.Functor ((<&>))
 import Data.IntSet qualified as IS
-import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, maybeToList)
+import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Hit
 import NanoUI.Internal.Frame.Scroll (probeScrollBarHover)
@@ -49,7 +49,7 @@ import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.ScrollGeometry (decodeScrollConfig, scrollFocusable)
-import NanoUI.Internal.Monad (ifM, unlessM, whenM, (<&&>))
+import NanoUI.Internal.Monad (ifM, mfilterM, unlessM, whenM, (<&&>))
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectFullyInside)
 import NanoUI.Internal.WidgetText (ButtonKind (..), buttonKindOf, hasFlag, textInputFlagSelectable)
 import NanoUI.Internal.Widgets.Shortcut (focusTakesChord)
@@ -321,12 +321,9 @@ finalizePointerRelease ctx@Context {ctxNodeArena = na} inp =
     when (hashWidgetId active /= 0) $ do
       -- Whether the pointer came up over the widget is decided by the first
       -- node with its id, in arena order.
-      let release over idx = do
-            wid <- getWidgetId na idx
-            if wid /= active || isJust over
-              then pure over
-              else Just <$> (getNodeRect na idx >>= \rect -> nodeClippedHit ctx idx rect mouse)
-      releasedOver <- foldNodesM na release Nothing
+      releasedOver <-
+        findNodeM na (fmap (== active) . getWidgetId na)
+          >>= traverse (\idx -> getNodeRect na idx >>= \rect -> nodeClippedHit ctx idx rect mouse)
       writeIORef (ctxActiveId ctx) (WidgetId 0)
       when (releasedOver == Just True) $
         setAnimationValue ctx active 1
@@ -374,10 +371,9 @@ finalizeSelectFocus ctx targets =
 -- text field.
 finalizeDrawingFocus :: Context -> PressTargets -> IO ()
 finalizeDrawingFocus ctx targets =
-  enabledTarget ctx (ptInteractive targets) >>= mapM_ (\wid -> do
-    let na = ctxNodeArena ctx
-        drawing = maybe (pure False) (fmap (== NodeDrawing) . getNodeType na) =<< lookupNodeByWidgetId na wid
-    whenM (drawing <&&> isFocusable ctx wid) (focusWidget ctx wid))
+  enabledTarget ctx (ptInteractive targets) >>= mapM_ (\wid ->
+    whenM (withWidgetNode ctx wid False (fmap (== NodeDrawing) . getNodeType (ctxNodeArena ctx)) <&&> isFocusable ctx wid) $
+      focusWidget ctx wid)
 
 -- | On a left press that did not focus a text field, select, or focusable
 -- drawing, focus the innermost enabled focusable scroll container
@@ -389,23 +385,15 @@ finalizeScrollFocus ctx@Context {ctxNodeArena = na} inp targets =
     when (hashWidgetId cur == 0) $ do
       let mouse = inputMousePos inp
       top <- overlayHitRoot ctx mouse
-      let hit idx = do
-            nt <- getNodeType na idx
-            if nt /= NodeScrollContainer
-              then pure False
-              else do
-                si <- getStyleIdx na idx
-                if not (scrollFocusable (decodeScrollConfig si))
-                  then pure False
-                  else do
-                    wid <- getWidgetId na idx
-                    rect <- getNodeRect na idx
-                    pure (hashWidgetId wid /= 0)
-                      <&&> nodeClippedHit ctx idx rect mouse
-                      <&&> overlayHitAllowed ctx top idx
-                      <&&> (not <$> passesPointer na idx)
-                      <&&> isFocusable ctx wid
-                      <&&> (not <$> isDisabled ctx wid)
+      let hit idx =
+            ((== NodeScrollContainer) <$> getNodeType na idx)
+              <&&> (scrollFocusable . decodeScrollConfig <$> getStyleIdx na idx)
+              <&&> do
+                wid <- getWidgetId na idx
+                pure (hashWidgetId wid /= 0)
+                  <&&> widgetUnderMouse ctx top mouse NodeScrollContainer idx
+                  <&&> isFocusable ctx wid
+                  <&&> (not <$> isDisabled ctx wid)
       findClassNodeRevM na PointerNodes hit >>= mapM_ (\idx -> getWidgetId na idx >>= focusWidget ctx)
 
 -- | Apply the view's last focus request this frame
@@ -467,7 +455,7 @@ focusWidget ctx wid = do
 -- nothing here, so a press on it takes focus away from the field that had it
 -- and gives it to no other.
 enabledTarget :: Context -> Maybe WidgetId -> IO (Maybe WidgetId)
-enabledTarget ctx = fmap listToMaybe . filterM (fmap not . isDisabled ctx) . maybeToList
+enabledTarget ctx = mfilterM (fmap not . isDisabled ctx)
 
 -- | Next focus id, or previous with Shift, wrapping at both ends. An unknown
 -- current id selects the first entry, or the last going backwards; an empty

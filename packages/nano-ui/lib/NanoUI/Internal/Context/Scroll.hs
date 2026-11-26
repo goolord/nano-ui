@@ -57,7 +57,7 @@ import NanoUI.Internal.Context.Core (damageWidget, modifyStore, getPrevRect, get
 import NanoUI.Internal.Context.Types
 import NanoUI.Internal.Draw qualified as Draw
 import NanoUI.Internal.Id (WidgetId)
-import NanoUI.Internal.Store (SlotSpec, SlotWrites (..), WidgetStore, deleteSpec, fieldFloat, findSlot, findSpec, insertSpec, lookupSpec, ownSlotSpec, slotWriteOr, specKey, specWrite, specWriteOr)
+import NanoUI.Internal.Store (SlotSpec, SlotWrites, WidgetStore, deleteSpec, fieldFloat, findSlot, findSpec, insertSpec, lookupSpec, ownSlotSpec, slotWriteOr, specKey, specWrite, specWriteOr)
 import NanoUI.Internal.Store.Slots (slotScrollAxes, slotScrollCross, slotScrollLinkX, slotScrollLinkY, slotScrollPending, slotScrollRange, slotScrollStep, slotTextAreaScroll)
 import NanoUI.Internal.Types (DamageBounds (..), Rect (..), V2 (..), clamp, onGrid, v2Add, v2X, v2Y)
 
@@ -103,7 +103,8 @@ writeScrollOffset ctx wid off = do
 getScrollOffset2D :: Context -> WidgetId -> IO V2
 getScrollOffset2D ctx wid = do
   V2 x y <- storedScrollOffset (intKey wid) <$> getStore ctx
-  V2 <$> snapScrollOffset ctx x <*> snapScrollOffset ctx y
+  s <- Draw.getDrawSnapScale (ctxDrawArena ctx)
+  pure (V2 (onGrid s x) (onGrid s y))
 
 -- | Move a scroller to an offset on both axes, in the order
 -- 'getScrollOffset2D' reads them: @(cross, main)@ for a 1D row scroller.
@@ -123,7 +124,7 @@ writeScrollOffset2D ctx wid off@(V2 x y) = do
       mirror :: SlotSpec Int -> SlotSpec Float -> Float -> SlotWrites
       mirror link to v =
         let k = findSpec link 0 key store
-         in if k == 0 then SlotWrites (const True) id else specWriteOr to 0 k v
+         in if k == 0 then mempty else specWriteOr to 0 k v
   -- Text areas only reach the first branch because `textAreaWith` seeds this
   -- slot at init; without the seed a freshly mounted editor falls through to
   -- the container slots below and its offsets are never rendered. Scroll-offset

@@ -432,28 +432,18 @@ probeScrollBarHover ctx@Context {ctxNodeArena = na} inp = do
                 nt <- getNodeType na idx
                 let isScroll = isScrollNode nt
                 pure (nt == NodeTextArea || isScroll)
-                  <&&> ( do
-                           r <- getNodeRect na idx
-                           -- A ScrollBarWindow bar sits outside the scroller's
-                           -- rect in the enclosing window's padding, so check
-                           -- its padded hit bounds rather than raw node rect.
-                           inRect <-
-                             if isScroll
-                               then do
-                                 slot <- scrollBarSlotOf na idx
-                                 pure $
-                                   if slot == ScrollBarWindow
-                                     then rectContains (Rect (rectX r) (rectY r) (rectW r + 10) (rectH r + 10)) mouse
-                                     else rectContains r mouse
-                               else pure (rectContains r mouse)
-                           pure inRect
-                       )
+                  <&&> do
+                    Rect rx ry rw rh <- getNodeRect na idx
+                    -- A ScrollBarWindow bar sits outside the scroller's rect in
+                    -- the enclosing window's padding, so expand its hit bounds.
+                    pad <- if isScroll then (\s -> if s == ScrollBarWindow then 10 else 0) <$> scrollBarSlotOf na idx else pure 0
+                    pure (rectContains (Rect rx ry (rw + pad) (rh + pad)) mouse)
                   <&&> do
                     -- A scroller's own clip is its viewport, short of its
                     -- bars; the clip around it is its parent's, cut to what
                     -- the parent gives its children (a clip container's
                     -- rect), which only a scroller or panel parent records.
-                    owner <- if isScrollNode nt then getParent na idx else pure idx
+                    owner <- if isScroll then getParent na idx else pure idx
                     let inside = maybe True (`rectContains` mouse)
                     if owner < 0
                       then pure True

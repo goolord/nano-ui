@@ -24,6 +24,7 @@ module NanoUI.Internal.Widgets.SplitPane
   , dividerLength
   , clampRatio
   , treeSplit
+  , splitBeside
   , treeAddTab
   , treeSelectTab
   , treeSetRatio
@@ -34,6 +35,7 @@ module NanoUI.Internal.Widgets.SplitPane
   , dropPreviewTreeSized
   , dropTargetForPane
   , dropTargetForPaneWith
+  , rectDistSq
   , nearestPane
   , bestPane
   , topLevelDropTarget
@@ -245,6 +247,7 @@ treeSplit targetPaneId splitId axis newOnA newPaneId = foldGrid onPane onTabs Sp
       | notElem targetPaneId pids = PaneTabs gid pids active
       | otherwise = splitBeside splitId axis newOnA newPaneId (PaneTabs gid pids active)
 
+-- | Wrap @node@ and @newPane@ in a 50/50 split along @axis@, placing @newPane@ on side A when @newOnA@ is set.
 splitBeside :: Word64 -> GridAxis -> Bool -> Word64 -> GridNode -> GridNode
 splitBeside splitId axis newOnA newPane node
   | newOnA = Split splitId axis 0.5 (Pane newPane) node
@@ -412,18 +415,21 @@ dropTargetForPaneWith centerMode r (V2 mx my) tgt
     tx = (mx - rectX r) / rectW r
     ty = (my - rectY r) / rectH r
 
+-- | Squared Euclidean distance from a point to a rectangle (0 when inside).
+{-# INLINE rectDistSq #-}
+rectDistSq :: Rect -> V2 -> Float
+rectDistSq (Rect x y w h) (V2 mx my) =
+  let dx = max 0 (max (x - mx) (mx - (x + w)))
+      dy = max 0 (max (y - my) (my - (y + h)))
+   in dx * dx + dy * dy
+
 -- | The laid-out pane whose region is closest to the point: the pane under
 -- it, or across a gutter the pane on the nearer side. A pointer crossing a
 -- gutter therefore always has a drop target, and 'dropTargetForPane' reads a
 -- point just outside a region as that region's near edge. 'Nothing' only when
 -- no pane has been laid out.
 nearestPane :: Map Word64 Rect -> V2 -> Maybe (Word64, Rect)
-nearestPane regions (V2 mx my) = bestPane (Just . dist) regions
-  where
-    dist (Rect x y w h) =
-      let dx = max 0 (max (x - mx) (mx - (x + w)))
-          dy = max 0 (max (y - my) (my - (y + h)))
-       in dx * dx + dy * dy
+nearestPane regions p = bestPane (Just . (`rectDistSq` p)) regions
 
 -- | The laid-out pane with the least score, among those the scorer accepts;
 -- the first in id order on a tie.
@@ -479,11 +485,8 @@ dropPreviewTreeSized source minSize spacing tree moved splitId baseRect dt = do
       sourceAxis (Pane _) = Nothing
       sourceAxis (PaneTabs _ _ _) = Nothing
       sourceAxis (Split _ axis _ a b)
-        | leafContains moved a || leafContains moved b = Just axis
+        | pinnedSide (== moved) a || pinnedSide (== moved) b = Just axis
         | otherwise = sourceAxis a <|> sourceAxis b
-      leafContains p (Pane q) = p == q
-      leafContains p (PaneTabs _ ps _) = elem p ps
-      leafContains _ Split{} = False
       retain r axis onA t =
         case find ((== splitId) . diSplitId) (snd (layoutNode minSize spacing t baseRect)) of
           Just d

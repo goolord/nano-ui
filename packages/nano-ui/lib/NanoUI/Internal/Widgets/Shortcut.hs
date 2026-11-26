@@ -14,6 +14,7 @@ module NanoUI.Internal.Widgets.Shortcut
 import Control.Monad (when)
 import Data.Foldable (toList)
 import Data.IntSet qualified as IS
+import Data.List (elemIndices)
 import Data.Maybe (isJust)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Input
@@ -116,8 +117,7 @@ chordShortcut once (Shortcut (Just pressedKey) mods) = do
         else withContext $ \ctx -> do
           -- Consume every press of the key, including auto-repeats, so a second
           -- binding of the chord does not fire.
-          let presses = [i | (i, k) <- zip [0 ..] (toList (inputKeys inp)), k == pressedKey]
-          took <- or <$> mapM (takeKeyPress ctx) presses
+          took <- or <$> mapM (takeKeyPress ctx) (elemIndices pressedKey (toList (inputKeys inp)))
           when (took && pressedKey == KeyTab) (markTabConsumed ctx)
           pure took
 
@@ -130,7 +130,7 @@ hardQuitUsed :: Context -> Input -> IO Bool
 hardQuitUsed ctx inp = do
   kind <- getsInteraction ctx isFocusKind
   menu <- getsInteraction ctx isTextInputMenu
-  let presses = [i | (i, k) <- zip [0 ..] (toList (inputKeys inp)), k == KeyChar 'c']
+  let presses = elemIndices (KeyChar 'c') (toList (inputKeys inp))
       -- On macOS a field copies with Cmd+C and leaves Ctrl+C alone, but a
       -- Ctrl+C typed there out of habit must not close the window either.
       takes mods = focusTakesChord kind mods (KeyChar 'c')

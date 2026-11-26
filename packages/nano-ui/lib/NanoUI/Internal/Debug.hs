@@ -12,7 +12,6 @@ module NanoUI.Internal.Debug
   , noteDebugLoop
   , noteDebugSkip
   , debugCadence
-  , noteDebugPresent
   , noteDebugFrame
   , refreshDebugSnapshot
   , formatFpsRows
@@ -166,31 +165,24 @@ debugCadence ref = do
 snapshotDue :: Double -> DebugSampler -> Bool
 snapshotDue now s = now - smLastDebugT s >= debugRefreshSec
 
--- | Record UI, render, present, and total frame durations in milliseconds,
--- followed by vertex, index, and command counts. Increments the present count.
-noteDebugPresent :: DebugSamplerRef -> Double -> Double -> Double -> Double -> Int -> Int -> Int -> IO ()
-noteDebugPresent ref uiMs renderMs presentMs frameMs verts indices cmds =
+-- | Record UI, render, present, and total frame durations from clock readings
+-- ('getMonotonicTime', in seconds) and geometry counts from @dd@, incrementing
+-- the present count. The UI pass ran from @uiStart@ to @uiEnd@, drawing from
+-- @uiEnd@ to @drawEnd@, and the present from @drawEnd@ to @presentEnd@; a
+-- backend whose present is part of its draw passes @drawEnd@ twice.
+noteDebugFrame :: DebugSamplerRef -> Double -> Double -> Double -> Double -> DrawData -> IO ()
+noteDebugFrame ref uiStart uiEnd drawEnd presentEnd dd =
   noteCore ref $ \c ->
     c
       { dbgPresents = dbgPresents c + 1
-      , dbgUiMs = uiMs
-      , dbgRenderMs = renderMs
-      , dbgPresentMs = presentMs
-      , dbgFrameMs = frameMs
-      , dbgVerts = verts
-      , dbgIndices = indices
-      , dbgCmds = cmds
+      , dbgUiMs = ms uiStart uiEnd
+      , dbgRenderMs = ms uiEnd drawEnd
+      , dbgPresentMs = ms drawEnd presentEnd
+      , dbgFrameMs = ms uiStart presentEnd
+      , dbgVerts = drawVertexCount dd
+      , dbgIndices = drawIndexCount dd
+      , dbgCmds = drawCmdCount dd
       }
-
--- | 'noteDebugPresent' from a presented frame's clock readings
--- ('getMonotonicTime', in seconds) and its draw data. The UI pass ran from
--- @uiStart@ to @uiEnd@, drawing from @uiEnd@ to @drawEnd@, and the present
--- from @drawEnd@ to @presentEnd@; a backend whose present is part of its
--- draw passes @drawEnd@ twice.
-noteDebugFrame :: DebugSamplerRef -> Double -> Double -> Double -> Double -> DrawData -> IO ()
-noteDebugFrame ref uiStart uiEnd drawEnd presentEnd dd =
-  noteDebugPresent ref (ms uiStart uiEnd) (ms uiEnd drawEnd) (ms drawEnd presentEnd) (ms uiStart presentEnd)
-    (drawVertexCount dd) (drawIndexCount dd) (drawCmdCount dd)
   where
     ms a b = (b - a) * 1000
 

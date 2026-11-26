@@ -18,8 +18,6 @@ module NanoUI.Internal.Widgets.TextArea
   , textAreaDocument'
   , textAreaDocumentWith
   , textAreaDocumentWith'
-  , textAreaText
-  , textAreaCore
   , textAreaLayout
   , textAreaBuffer
   , loadTextAreaState
@@ -48,9 +46,8 @@ import NanoUI.Internal.Types (DamageBounds (..), V2 (..), clamp, onGrid)
 import NanoUI.Internal.Var (Binding (..), bindVar, bindVarBy)
 import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.WidgetText (packTextNodeStyle)
-import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
 import NanoUI.Internal.Widgets.Node (Response, addWidgetStyled, setChanged)
-import NanoUI.Internal.Widgets.TextInput (fieldTextCommands)
+import NanoUI.Internal.Widgets.TextInput (fieldTextCommands, focusAndIme)
 import qualified NanoUI.Widgets.TextBuffer as TB
 import NanoUI.Internal.Widgets.TextDocument
 import NanoUI.Widgets.TextEditor
@@ -110,15 +107,13 @@ ensureCaretVisible state =
       vh = snd (tasViewportSize state)
       (sx, sy) = tasScrollOffset state
       caretY = fromIntegral r * lh
-      caretH = lh
-      contentH = fromIntegral (TB.getLineCount (tasBuffer state)) * lh
-      maxSy = max 0 (contentH - vh)
+      maxSy = max 0 (fromIntegral (TB.getLineCount (tasBuffer state)) * lh - vh)
       sy'
         | vh <= 0 = 0
         | caretY < sy = caretY
-        | caretY + caretH > sy + vh = caretY + caretH - vh
+        | caretY + lh > sy + vh = caretY + lh - vh
         | otherwise = sy
-  in state {tasScrollOffset = (sx, clamp 0 maxSy sy')}
+   in state {tasScrollOffset = (sx, clamp 0 maxSy sy')}
 
 --------------------------------------------------------------------------------
 -- Widget
@@ -137,7 +132,7 @@ textAreaLayout = fixedH 140 . minW 200 . fillW $ defaultLayout
 -- they touch.
 {-# INLINE textArea #-}
 textArea :: Var Text -> NanoUI ()
-textArea v = void (textAreaWith' id v)
+textArea = void . textArea'
 
 -- | 'textArea' returning its 'Response'. 'respChanged' reports a frame
 -- that changed the text; caret and selection moves leave it unset.
@@ -150,16 +145,11 @@ textArea' = textAreaWith' id
 -- 'fontColor' and the like) set the text.
 {-# INLINE textAreaWith #-}
 textAreaWith :: (Layout -> Layout) -> Var Text -> NanoUI ()
-textAreaWith f v = void (textAreaWith' f v)
+textAreaWith f = void . textAreaWith' f
 
 -- | 'textAreaWith' returning its 'Response'.
-{-# INLINE textAreaWith' #-}
 textAreaWith' :: (Layout -> Layout) -> Var Text -> NanoUI Response
-textAreaWith' f v = bindVar RenderFinal v (textAreaText f)
-
--- | 'textAreaWith' on a plain 'Text'.
-textAreaText :: (Layout -> Layout) -> Text -> NanoUI (Response, Text)
-textAreaText f value = do
+textAreaWith' f v = bindVar RenderFinal v $ \value -> do
   (wid, ctx) <- freshWidget
   store <- liftIO (getStore ctx)
   let -- The text last passed or returned, and its document: passing it back
@@ -172,9 +162,7 @@ textAreaText f value = do
   case cached of
     Just (t, d) | sameDocument d doc -> pure (resp, t)
     _ -> do
-      let out
-            | sameDocument doc incoming = value
-            | otherwise = documentText doc
+      let out = if sameDocument doc incoming then value else documentText doc
       liftIO $ modifyStore ctx (insertSpec slotTextAreaText (intKey wid) (out, doc))
       pure (resp, out)
 
@@ -185,7 +173,7 @@ textAreaText f value = do
 -- operations. Join it with 'documentText' when the whole text is needed.
 {-# INLINE textAreaDocument #-}
 textAreaDocument :: Var TextDocument -> NanoUI ()
-textAreaDocument v = void (textAreaDocumentWith' id v)
+textAreaDocument = void . textAreaDocument'
 
 -- | 'textAreaDocument' returning its 'Response'. 'respChanged' reports a
 -- frame that changed the document; caret and selection moves leave it unset.
@@ -196,7 +184,7 @@ textAreaDocument' = textAreaDocumentWith' id
 -- | 'textAreaDocument' with a modifier applied to 'textAreaLayout'.
 {-# INLINE textAreaDocumentWith #-}
 textAreaDocumentWith :: (Layout -> Layout) -> Var TextDocument -> NanoUI ()
-textAreaDocumentWith f v = void (textAreaDocumentWith' f v)
+textAreaDocumentWith f = void . textAreaDocumentWith' f
 
 -- | 'textAreaDocumentWith' returning its 'Response'. Documents compare by
 -- identity: walking their lines on every frame would cost what they save.
@@ -211,7 +199,6 @@ textAreaDocumentWith' f v = bindVarBy sameDocument RenderFinal v $ \value -> do
 textAreaCore :: (Layout -> Layout) -> WidgetId -> TextDocument -> NanoUI (Response, TextDocument)
 textAreaCore f wid value = do
   ctx <- askContext
-  liftIO $ registerFocusable ctx wid
   inp <- askInput
   store0 <- liftIO (getStore ctx)
   let layout = f textAreaLayout
@@ -245,8 +232,7 @@ textAreaCore f wid value = do
       -- changed the text; their edits carry no keys or chars, so this is the
       -- caller's respChanged pulse for them. Cleared in the state write below.
       menuPulse = memberSpec slotTextChanged key store
-  isFocus <- keyboardFocused wid
-  when isFocus $ liftIO (requestInputMethod ctx wid Nothing InputNormal)
+  isFocus <- focusAndIme ctx wid True InputNormal
   (newDoc, edited) <-
     if isFocus
       then do

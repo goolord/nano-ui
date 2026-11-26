@@ -19,13 +19,13 @@ module NanoUI.Internal.Store
   , fieldEditorMode
   , fieldLineWidths
   , fieldGrid
-  , fieldTableColumns
+  , fieldTableState
+  , fieldCombo
   , fieldRichSelection
   , fieldQuiet
   , overField
   , lookupSlot
   , findSlot
-  , memberSlot
   , insertSlot
   , deleteSlot
   , flagSlot
@@ -75,7 +75,7 @@ import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import NanoUI.Internal.Id (mix64)
 import NanoUI.Internal.Equality (eqByPtr, ptrEq, sameDouble, sameFloat)
-import NanoUI.Internal.Store.Types (GridState, LineWidths, TextHistory)
+import NanoUI.Internal.Store.Types (ComboState, GridState, LineWidths, TableState, TextHistory, sameComboVisual)
 import NanoUI.Internal.RichText.Types (RichSelection)
 import NanoUI.Internal.TextEditor.Types (EditorMode)
 import NanoUI.Internal.Types (V2)
@@ -123,7 +123,8 @@ slotChangedKeys !old !new
         ++ diffKeys (storeEditorMode old) (storeEditorMode new)
         ++ diffKeysBy ptrEq (storeLineWidths old) (storeLineWidths new)
         ++ diffKeys (storeGrid old) (storeGrid new)
-        ++ diffKeys (storeTableColumns old) (storeTableColumns new)
+        ++ diffKeys (storeTableState old) (storeTableState new)
+        ++ diffKeysBy sameComboVisual (storeCombo old) (storeCombo new)
         ++ diffKeys (storeRichSelection old) (storeRichSelection new)
 
 -- | Widget state for every widget, in maps by value type. Same-type fields
@@ -143,7 +144,8 @@ data WidgetStore = WidgetStore
   , storeEditorMode :: !(IntMap EditorMode)
   , storeLineWidths :: !(IntMap LineWidths)
   , storeGrid :: !(IntMap GridState)
-  , storeTableColumns :: !(IntMap ([Int], [Float]))
+  , storeTableState :: !(IntMap TableState)
+  , storeCombo :: !(IntMap ComboState)
   , storeRichSelection :: !(IntMap RichSelection)
   , storeQuiet :: !(IntMap Int)
   -- ^ Interaction bookkeeping that repaints nothing by itself, such as
@@ -211,9 +213,13 @@ fieldLineWidths = Field storeLineWidths (\m st -> st {storeLineWidths = m})
 fieldGrid :: Field GridState
 fieldGrid = Field storeGrid (\m st -> st {storeGrid = m})
 
--- | A table's column ids and their widths.
-fieldTableColumns :: Field ([Int], [Float])
-fieldTableColumns = Field storeTableColumns (\m st -> st {storeTableColumns = m})
+-- | A table's column order, dragged widths, hidden set, and active resize.
+fieldTableState :: Field TableState
+fieldTableState = Field storeTableState (\m st -> st {storeTableState = m})
+
+-- | A combo box's state between frames.
+fieldCombo :: Field ComboState
+fieldCombo = Field storeCombo (\m st -> st {storeCombo = m})
 
 -- | A selectable paragraph's selection, kept apart from its measurement cache.
 fieldRichSelection :: Field RichSelection
@@ -244,11 +250,6 @@ lookupSlot field k = IM.lookup k . fieldMap field
 findSlot :: Field a -> a -> Int -> WidgetStore -> a
 findSlot field def k = IM.findWithDefault def k . fieldMap field
 
--- | Whether a key exists in the selected map, regardless of its value.
-{-# INLINE memberSlot #-}
-memberSlot :: Field a -> Int -> WidgetStore -> Bool
-memberSlot field k = IM.member k . fieldMap field
-
 -- | Pure insert or replacement. Does not itself notify a context or schedule a frame.
 {-# INLINE insertSlot #-}
 insertSlot :: Field a -> Int -> a -> WidgetStore -> WidgetStore
@@ -272,6 +273,10 @@ data SlotWrites = SlotWrites (WidgetStore -> Bool) (WidgetStore -> WidgetStore)
 instance Semigroup SlotWrites where
   {-# INLINE (<>) #-}
   SlotWrites same f <> SlotWrites same' g = SlotWrites (\st -> same st && same' st) (f . g)
+
+instance Monoid SlotWrites where
+  {-# INLINE mempty #-}
+  mempty = SlotWrites (const True) id
 
 -- | Describe a write with an equality check. In @a <> b@, @a@ wins if both
 -- writes target the same field and key.
@@ -335,10 +340,10 @@ lookupSpec (SlotSpec key field dec _) k st = dec <$> lookupSlot field (key k) st
 findSpec :: SlotSpec a -> a -> Int -> WidgetStore -> a
 findSpec (SlotSpec key field dec enc) def k st = dec (findSlot field (enc def) (key k) st)
 
--- | 'memberSlot' through a spec.
+-- | Whether a key exists in the spec's map, regardless of its value.
 {-# INLINE memberSpec #-}
 memberSpec :: SlotSpec a -> Int -> WidgetStore -> Bool
-memberSpec (SlotSpec key field _ _) k = memberSlot field (key k)
+memberSpec (SlotSpec key field _ _) k = IM.member (key k) . fieldMap field
 
 -- | 'insertSlot' through a spec.
 {-# INLINE insertSpec #-}
@@ -378,7 +383,8 @@ emptyWidgetStore =
     , storeEditorMode = IM.empty
     , storeLineWidths = IM.empty
     , storeGrid = IM.empty
-    , storeTableColumns = IM.empty
+    , storeTableState = IM.empty
+    , storeCombo = IM.empty
     , storeRichSelection = IM.empty
     , storeQuiet = IM.empty
     }
@@ -483,32 +489,6 @@ data Slot
     -- (storeDouble).
     SlotSearchCommitted
   | SlotSearchAge
-  | -- | Combo box suggestion state, keyed by the field widget: the
-    -- highlighted option index (absolute into the filtered list), the start
-    -- of the visible window slice (keyboard / wheel / scrollbar scrolling),
-    -- and the scrollbar bookkeeping the overlay painter and the widget's
-    -- thumb-drag gesture share (total filtered count, widest row, x offset,
-    -- drag axis + grab offset). The quiet slots under the same keys hold the
-    -- pointer when Up or Down last moved the highlight and the wheel's
-    -- leftover rows ('NanoUI.Internal.Store.Slots.slotComboNavX',
-    -- 'NanoUI.Internal.Store.Slots.slotComboWheelRem').
-    SlotComboHighlight
-  | SlotComboScroll
-  | SlotComboCount
-  | SlotComboScrollX
-  | SlotComboContentW
-  | SlotComboDrag
-  | SlotComboDragOff
-  | -- | The last committed value (storeText): typing edits the live field text but
-    -- only Enter, a row click, or losing focus commits it (Escape reverts).
-    SlotComboCommitted
-  | -- | Had-focus flag (storeInt) so the widget can see the focus-lost transition
-    -- on the frame after blur and commit then.
-    SlotComboFocus
-  | -- | The field text as the widget last produced it (storeText): a frame-start
-    -- value that differs from it changed externally (a frame-side row pick or a
-    -- clipboard menu action), not by typing.
-    SlotComboLive
   | -- | The value a controlled widget last returned to its caller.
     SlotSeen
   | -- | A colour picker's opening colour.

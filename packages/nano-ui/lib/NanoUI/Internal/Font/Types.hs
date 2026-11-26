@@ -32,9 +32,10 @@ module NanoUI.Internal.Font.Types
   , isDefaultNodeFont
   ) where
 
+import Control.Monad.ST (runST)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (isJust)
-import Data.Primitive.PrimArray (PrimArray, imapPrimArray, indexPrimArray, mapPrimArray, primArrayFromListN, sizeofPrimArray)
+import Data.Primitive.PrimArray (PrimArray, imapPrimArray, indexPrimArray, mapPrimArray, newPrimArray, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
 import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Internal.Style (AlignX (..), FontStyle (..), FontVariant (..), FontWeight (..))
@@ -239,24 +240,28 @@ tabularFontMetrics fm
                   (_, m) -> m
         }
 
-tabularOffsets :: Float -> Float -> Text -> PrimArray Float -> (Float, [Float], PrimArray Float)
-tabularOffsets snap digitAdv txt carets =
+tabularOffsets :: Float -> Float -> Text -> PrimArray Float -> (Float, PrimArray Float, PrimArray Float)
+tabularOffsets snap digitAdv txt carets = runST $ do
   let !n = T.length txt
-      isTabDigit c = c >= '0' && c <= '9'
-      step (acc, shifts, stops) j =
-        let c0 = indexPrimArray carets j
-            c1 = indexPrimArray carets (j + 1)
-            origW = c1 - c0
-            c = T.index txt j
-         in if isTabDigit c && origW >= 0
-              then
-                let d = digitAdv - origW
-                    gShift = acc + onGrid snap (d * 0.5)
-                    acc' = acc + d
-                 in (acc', gShift : shifts, (c1 + acc') : stops)
-              else (acc, acc : shifts, (c1 + acc) : stops)
-      (totalDelta, revShifts, revStops) = foldl' step (0, [], [indexPrimArray carets 0]) [0 .. n - 1]
-   in (totalDelta, reverse revShifts, primArrayFromListN (n + 1) (reverse revStops))
+  shifts <- newPrimArray n
+  stops <- newPrimArray (n + 1)
+  writePrimArray stops 0 (indexPrimArray carets 0)
+  let go !j !acc
+        | j >= n = pure acc
+        | otherwise = do
+            let c0 = indexPrimArray carets j
+                c1 = indexPrimArray carets (j + 1)
+                origW = c1 - c0
+                c = T.index txt j
+                (!acc', !gShift)
+                  | c >= '0' && c <= '9' && origW >= 0 =
+                      let d = digitAdv - origW in (acc + d, acc + onGrid snap (d * 0.5))
+                  | otherwise = (acc, acc)
+            writePrimArray shifts j gShift
+            writePrimArray stops (j + 1) (c1 + acc')
+            go (j + 1) acc'
+  totalDelta <- go 0 0
+  (totalDelta,,) <$> unsafeFreezePrimArray shifts <*> unsafeFreezePrimArray stops
 
 tabularShape :: Float -> Float -> Text -> ShapedText -> ShapedText
 tabularShape snap digitAdv txt st@(ShapedText adv ink carets)
@@ -270,8 +275,7 @@ tabularGlyphs snap digitAdv txt (ShapedText _ _ carets) sg@(ShapedGlyphs quads)
   | T.null txt || sizeofPrimArray carets /= T.length txt + 1 = sg
   | otherwise =
       let !n = T.length txt
-          (_, shiftsList, _) = tabularOffsets snap digitAdv txt carets
-          !shifts = primArrayFromListN n shiftsList
+          (_, shifts, _) = tabularOffsets snap digitAdv txt carets
           shiftFor midX = go 0
             where
               go !j

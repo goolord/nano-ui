@@ -82,6 +82,7 @@ module NanoUI.Backend
   , EffectPassDraw (..)
   , EffectDriver (..)
   , spanEffectiveClip
+  , shiftClip
   , execEffectSpans
   , withEffectUniforms
   , emptyShaderCalls
@@ -461,7 +462,6 @@ import NanoUI.Internal.EffectDriver
   ( EffectDriver (..)
   , EffectPassDraw (..)
   , execEffectSpans
-  , spanEffectiveClip
   , withEffectUniforms
   )
 import NanoUI.Internal.Font

@@ -11,6 +11,7 @@ module NanoUI.Internal.Draw
   , emptyEffectSpans
   , emptyUniformBytes
   , DrawData (..)
+  , DrawFrameExtra (..)
   , DrawArena (..)
   , RecordedOp (..)
   , DrawOp (..)
@@ -41,13 +42,10 @@ module NanoUI.Internal.Draw
   , setClipPieces
   , getClipPieces
   , withClip
-  , setShader
-  , allocShaderCall
   , pushShaderQuad
-  , EffectSpanToken (..)
+  , EffectSpanToken
   , beginEffectSpan
   , endEffectSpan
-  , currentEffectSpanId
   , finishDraw
   , drawCmdCount
   , drawnVertexCount
@@ -97,7 +95,7 @@ import NanoUI.Internal.Draw.Types
 import NanoUI.Internal.Font
 import NanoUI.Internal.SIMD (pokeQuadCornersSIMD, pokeQuadSIMD)
 import NanoUI.Internal.Style (FontStyle (..), FontWeight (..), TextDecoration (..), Theme (..), resolveFontSize, styleBg)
-import NanoUI.Internal.Types (Color (..), Rect (..), onGrid, rectInflate, rectIntersect, isUnbounded)
+import NanoUI.Internal.Types (Color (..), Rect (..), onGrid, rectInflate, rectIntersect, spanEffectiveClip)
 
 -- | The line box, in logical pixels, that a 'DrawText' of the text anchored
 -- at @(x, y)@ by @ax@ and @ay@ occupies, measured with @fm@'s advances.
@@ -119,13 +117,7 @@ textBoxTop fm y ay
 {-# INLINE cmdEffectiveClip #-}
 cmdEffectiveClip :: Maybe Rect -> DrawCmd -> Maybe (Maybe Rect)
 cmdEffectiveClip mDamage cmd =
-  let !cmdRect = Rect (cmdClipX cmd) (cmdClipY cmd) (cmdClipW cmd) (cmdClipH cmd)
-      !cmdOpen = isUnbounded (cmdClipW cmd) || isUnbounded (cmdClipH cmd)
-   in case (mDamage, cmdOpen) of
-        (Nothing, True) -> Just Nothing
-        (Nothing, False) -> Just (Just cmdRect)
-        (Just dmg, True) -> Just (Just dmg)
-        (Just dmg, False) -> Just <$> rectIntersect dmg cmdRect
+  spanEffectiveClip mDamage (Rect (cmdClipX cmd) (cmdClipY cmd) (cmdClipW cmd) (cmdClipH cmd))
 
 {-# INLINE pushText #-}
 pushText :: DrawArena -> FontMetrics -> Float -> Float -> T.Text -> Color -> IO ()
@@ -174,6 +166,16 @@ pushPreparedTextQuads da fm x y txt col = do
 glyphSlackLines :: Float
 glyphSlackLines = 4
 
+-- | Horizontal clip bounds expanded by synthetic-oblique shear lean, plus the
+-- conservative glyph slack in logical pixels.
+{-# INLINE glyphClipBounds #-}
+glyphClipBounds :: DrawArena -> FontMetrics -> Float -> IO (Float, Float, Float)
+glyphClipBounds da fm slant = do
+  cx <- readPrimArray (daCurrentClip da) 0
+  cw <- readPrimArray (daCurrentClip da) 2
+  let !lean = abs slant * (fmLineHeight fm + abs (fmAscent fm))
+  pure (cx - lean, cx + cw + lean, glyphSlackLines * fmLineHeight fm)
+
 -- | A shaped line's glyph quads from pen @(px, py)@, sheared by @slant@
 -- around the baseline like 'pushGlyphQuads'. Glyphs wholly left or right of
 -- the current clip emit nothing. Glyph x offsets rise in visual order, to
@@ -186,14 +188,8 @@ pushShapedQuads :: DrawArena -> FontMetrics -> Float -> Float -> Float -> Shaped
 pushShapedQuads da fm slant px py (ShapedGlyphs quads) col = do
   let !count = sizeofPrimArray quads `div` 8
   when (count > 0) $ do
-    cx <- readPrimArray (daCurrentClip da) 0
-    cw <- readPrimArray (daCurrentClip da) 2
-    let -- A sheared glyph leans at most this far past its box.
-        !lean = abs slant * (fmLineHeight fm + abs (fmAscent fm))
-        !left = cx - lean
-        !right = cx + cw + lean
-        !slack = glyphSlackLines * fmLineHeight fm
-        at k = indexPrimArray quads k
+    (!left, !right, !slack) <- glyphClipBounds da fm slant
+    let at k = indexPrimArray quads k
         -- The first glyph in [lo, hi) whose x reaches @thr@.
         firstReaching !thr !lo !hi
           | lo >= hi = lo
@@ -291,18 +287,14 @@ pushGlyphQuads da fm slant px py txt col = do
   let !cap = T.length txt
   when (cap > 0) $ do
     scale <- readIORef (daSnapScale da)
-    cx <- readPrimArray (daCurrentClip da) 0
-    cw <- readPrimArray (daCurrentClip da) 2
+    (!left, !right, !slack) <- glyphClipBounds da fm slant
     setTexture da glyphAtlasTextureId
     withVertsReserve da (cap * 4) (cap * 6) $ \vp ip base baseIdx commit -> do
       let !(r, g, b, a) = unpackColorF col
           !baselineY = py + fmAscent fm
-          !lean = abs slant * (fmLineHeight fm + abs (fmAscent fm))
-          !left = cx - lean
-          !right = cx + cw + lean
-          !stop = right + glyphSlackLines * fmLineHeight fm
+          !stop = right + slack
           -- A pen this far left of the clip draws nothing, whatever its glyph.
-          !before = left - glyphSlackLines * fmLineHeight fm
+          !before = left - slack
           outside gx gw = gx + gw < left || gx > right
           -- @first@ marks the line's first character, which has nothing
           -- before it to kern against.
@@ -453,7 +445,7 @@ emitDrawOps da fm size resolve imageUv ops = go 0 []
 
 -- | Record drawing text as a host span with its line box: under external
 -- text a drawing's text has no quads and no node span, so the host draws it
--- from this one ('daTextSpans'), in the current clip and filed by layer. An
+-- from this one ('dfeTextSpans'), in the current clip and filed by layer. An
 -- empty clip records nothing, as it gets no command. Top level and out of
 -- line so the local closures of 'emitDrawOps' capture nothing more for it.
 {-# NOINLINE pushTextSpan #-}
@@ -463,8 +455,9 @@ pushTextSpan da !box t c = unless (T.null t) $ do
   when (cw > 0 && ch > 0) $ do
     layer <- currentLayer da
     let entry = (box, t, c, Color 0, clip)
-    modifyIORef' (daTextSpans da) $ \(base, overlay) ->
-      if layer >= LayerOverlay then (base, entry : overlay) else (entry : base, overlay)
+    modifyIORef' (daExtra da) $ \ex ->
+      let (base, overlay) = dfeTextSpans ex
+       in ex {dfeTextSpans = if layer >= LayerOverlay then (base, entry : overlay) else (entry : base, overlay)}
 
 -- | Paint a 'DrawImage' op; other ops paint nothing. @imageUv@ is as for
 -- 'emitDrawOps', and the op's UVs span 0 to 1 over the image. Unrotated

@@ -54,13 +54,14 @@ import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, askInput, fr
 import NanoUI.Internal.Store
 import NanoUI.Internal.Store.Slots (slotSearchAge, slotSearchCommitted, slotTextChanged, slotTextHistory, slotTextMode)
 import NanoUI.Internal.Store.Types (TextHistory (..))
-import NanoUI.Internal.Style (Layout (..), LayoutModifier, Style (..), Theme (..), defaultLayout, fieldIconColor, fillW, inheritFont, minW)
-import NanoUI.Internal.Types (Color)
+import NanoUI.Internal.Style (Layout (..), LayoutModifier, Style (..), Theme (..), defaultLayout, fieldIconColor, fillW, minW)
+import NanoUI.Internal.Types (Color, clamp)
 import NanoUI.Internal.Var (Binding (..), bindVar)
 import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.WidgetText (hasFlag, packTextNodeStyle, textInputFlagPassword, textInputFlagSearch, textInputFlagSelectable)
 import NanoUI.Internal.Widgets.Adornment (Adornments, adornWidget)
 import NanoUI.Internal.Widgets.Behavior (keyboardFocused)
+import NanoUI.Internal.Widgets.Combinators (widgetBaseLayout)
 import NanoUI.Internal.Widgets.Node (Response (..), addWidgetStyled, inertResponse, respId, setChanged, setSubmitted)
 import NanoUI.Widgets.TextBuffer qualified as TB
 import NanoUI.Widgets.TextEditor
@@ -115,16 +116,16 @@ editorTextState ed =
 cursorOffset :: Text -> TB.Cursor -> Int
 cursorOffset txt (TB.Cursor row col) =
   let ls = T.splitOn "\n" txt
-      row' = max 0 (min row (length ls - 1))
+      row' = clamp 0 (length ls - 1) row
       before = sum (map T.length (take row' ls)) + row'
       line = fromMaybe "" (listToMaybe (drop row' ls))
-   in before + max 0 (min col (T.length line))
+   in before + clamp 0 (T.length line) col
 
 -- | The row and column of character @offset@ of @txt@ ('cursorOffset'),
 -- clamped into the text.
 cursorAtOffset :: Text -> Int -> TB.Cursor
 cursorAtOffset txt offset =
-  let prefix = T.take (max 0 (min offset (T.length txt))) txt
+  let prefix = T.take (clamp 0 (T.length txt) offset) txt
       row = T.count "\n" prefix
       col = T.length (T.takeWhileEnd (/= '\n') prefix)
    in TB.Cursor row col
@@ -221,18 +222,12 @@ textInputConfigured cfg v = void (textInputConfigured' cfg v)
 -- | 'textInputConfigured' returning its 'Response'.
 textInputConfigured' :: TextInputConfig -> Var Text -> NanoUI Response
 textInputConfigured' (TextInputConfig placeholder password f adorns) v = do
-  amb <- askDefaultLayout
-  let lay = f (inheritFont amb textInputLayout)
+  lay <- widgetBaseLayout textInputLayout f
   -- Write the field's text before running adornments so an adornment
   -- control that modifies the 'Var' overwrites the field's value.
   resp <-
     bindVar RenderFinal v $ \value ->
-      buildTextInput
-        (if password then textInputFlagPassword else 0)
-        lay
-        placeholder
-        value
-        Nothing
+      buildTextInput (if password then textInputFlagPassword else 0) lay placeholder value Nothing
   -- Suppress the field's response when an adornment control captures the pointer.
   taken <- adornWidget (respId resp) lay (fieldAdornmentColor lay) adorns
   pure (if taken then inertResponse resp else resp)
@@ -311,9 +306,7 @@ buildTextInput styleIdx layout placeholder value mDebounceMs = do
   inp <- askInput
   let submitted = isFocus && pressedOnceIn KeyEnter inp
       edited = pulse || newText /= oldText
-  changed <- case mDebounceMs of
-    Nothing -> pure edited
-    Just ms -> liftIO (debounceSearchChanged ctx key isFocus edited ms)
+  changed <- maybe (pure edited) (liftIO . debounceSearchChanged ctx key isFocus edited) mDebounceMs
   -- The layout's font face, weight and slant ride in the style bits, as on
   -- a label; the flags sit above them.
   resp <- addWidgetStyled wid NodeTextInput placeholder 0 layout (styleIdx .|. packTextNodeStyle layout 0)
@@ -398,15 +391,9 @@ searchInputConfigured cfg v = void (searchInputConfigured' cfg v)
 {-# INLINE searchInputConfigured' #-}
 searchInputConfigured' :: SearchInputConfig -> Var Text -> NanoUI Response
 searchInputConfigured' cfg v = do
-  amb <- askDefaultLayout
-  let lay = sicLayout cfg (inheritFont amb searchInputLayout)
+  lay <- widgetBaseLayout searchInputLayout (sicLayout cfg)
   bindVar RenderFinal v $ \value ->
-    buildTextInput
-      textInputFlagSearch
-      lay
-      (sicPlaceholder cfg)
-      value
-      (Just (sicDebounceMs cfg))
+    buildTextInput textInputFlagSearch lay (sicPlaceholder cfg) value (Just (sicDebounceMs cfg))
 
 -- -----------------------------------------------------------------------------
 -- Selectable text

@@ -20,11 +20,9 @@ module NanoUI.Internal.Layout.ScrollGeometry
   , decodeScrollConfig
   , scrollConfigNative2D
   , scrollDefault1D
-  , scrollVerticalAuto
   , scrollVerticalHidden
   , scrollHorizontalHidden
   , scrollAxisGutter
-  , scrollGutters2D
   , scrollChromeSuppressed
   , scrollWheelSuppressed
   , isScrollStyle2D
@@ -95,21 +93,14 @@ encodeScrollConfig (ScrollConfig px py bare focusable) =
 decodeScrollConfig :: Word64 -> ScrollConfig
 decodeScrollConfig bits =
   ScrollConfig
-    (decodePolicy (SB.getField SB.scrollPolicyX bits))
-    (decodePolicy (SB.getField SB.scrollPolicyY bits))
+    (SB.decodeStyleEnum SB.scrollPolicyX ScrollAuto bits)
+    (SB.decodeStyleEnum SB.scrollPolicyY ScrollAuto bits)
     (SB.testField SB.scrollBare bits)
     (SB.testField SB.scrollFocusable bits)
-  where
-    decodePolicy raw
-      | raw >= fromEnum (minBound :: ScrollPolicy) && raw <= fromEnum (maxBound :: ScrollPolicy) = toEnum raw
-      | otherwise = ScrollAuto
 
 scrollDefault1D :: Direction -> ScrollConfig
-scrollDefault1D Column = scrollVerticalAuto
+scrollDefault1D Column = defaultScrollConfig
 scrollDefault1D Row = ScrollConfig ScrollAuto ScrollNone False False
-
-scrollVerticalAuto :: ScrollConfig
-scrollVerticalAuto = ScrollConfig ScrollNone ScrollAuto False False
 
 scrollVerticalHidden :: ScrollConfig
 scrollVerticalHidden = ScrollConfig ScrollNone ScrollHidden False False
@@ -224,6 +215,7 @@ data ScrollNode = ScrollNode
 
 -- | Content viewport of a scroll node placed at @x y w h@: its padding box
 -- minus the live scrollbar gutters.
+{-# INLINE scrollNodeViewport #-}
 scrollNodeViewport :: ScrollNode -> Float -> Float -> Float -> Float -> Rect
 scrollNodeViewport (ScrollNode slot cfg native2D dir pad contentMain contentW) x y w h
   | native2D = Rect bx by (max 0 (innerW - gutterW)) (max 0 (innerH - gutterH))

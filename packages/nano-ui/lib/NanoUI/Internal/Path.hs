@@ -36,6 +36,7 @@ module NanoUI.Internal.Path
   , transformPoint
   , invert
   , transformFinite
+  , averageStretch
     -- * Strokes, fills and paints
   , Stroke (..)
   , stroke
@@ -66,19 +67,17 @@ module NanoUI.Internal.Path
 import Control.Monad (forM_, unless, when)
 import Control.Monad.ST (ST, runST)
 import Data.Fixed (mod')
-import Data.List (sortBy, sortOn, unsnoc)
+import Data.List (minimumBy, sort, sortBy, sortOn, unsnoc)
+import Data.List.NonEmpty qualified as NE
 import Data.Ord (comparing)
 import Data.Primitive.PrimArray
   ( PrimArray
-  , copyMutablePrimArray
-  , copyPrimArray
   , emptyPrimArray
   , generatePrimArray
   , indexPrimArray
   , newPrimArray
   , primArrayFromList
   , primArrayFromListN
-  , primArrayToList
   , readPrimArray
   , runPrimArray
   , setPrimArray
@@ -91,7 +90,7 @@ import Data.Primitive.PrimArray
 import Data.Primitive.SmallArray (indexSmallArray, newSmallArray, readSmallArray, runSmallArray, smallArrayFromListN, writeSmallArray)
 import Data.Word (Word32)
 import NanoUI.Internal.Draw.Types (DrawOp (..), LineCap (..), LineJoin (..), Shade (..), defaultTextFont, quadPolygon)
-import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), finite, lerpColor, newZeroedPrimArray)
+import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), bucketOffsets, colorA, colorB, colorG, colorR, finite, lerpColor, newZeroedPrimArray)
 
 --------------------------------------------------------------------------------
 -- Paths
@@ -763,11 +762,6 @@ bridgeHoles vs outline holes = foldl' join outline (map snd (sortOn fst (map lef
             _ ->
               let (qx, m) = maximum hits
                   (mx, my) = pt m
-                  inTriangle (px, py) =
-                    let (ax, ay, cx, cy) = if hy < my then (hx, hy, qx, hy) else (qx, hy, hx, hy)
-                     in (cx - px) * (ay - py) >= (ax - px) * (cy - py)
-                          && (ax - px) * (my - py) >= (mx - px) * (ay - py)
-                          && (mx - px) * (cy - py) >= (cx - px) * (my - py)
                   -- The bridge from the hole point to ring point @k@ enters
                   -- the ring's interior at that corner.
                   locallyInside k =
@@ -781,7 +775,7 @@ bridgeHoles vs outline holes = foldl' join outline (map snd (sortOn fst (map lef
                   better (tanBest, kBest) k =
                     let (px, py) = pt k
                         t = abs (hy - py) / (hx - px)
-                     in if hx >= px && px >= mx && hx /= px && inTriangle (px, py) && locallyInside k
+                     in if hx >= px && px >= mx && hx /= px && pointInTri (px, py) (hx, hy) (qx, hy) (mx, my) && locallyInside k
                           && (t < tanBest || (t == tanBest && px > fst (pt kBest)))
                           then (t, k)
                           else (tanBest, kBest)
@@ -1028,9 +1022,6 @@ cellAlong cells origin perUnit v = max 0 (min (cells - 1) (truncate ((v - origin
 {-# INLINE gridOf #-}
 gridOf :: Int -> Float -> Float -> Float -> Float -> Int -> (Int -> (Float, Float, Float, Float)) -> Grid
 gridOf cells x0 y0 x1 y1 count boxOf = runST $ do
-  -- Count each cell's items at the next cell's start, sum the counts into
-  -- starts, then hand out the slots.
-  starts <- newZeroedPrimArray (total + 1)
   -- Explicit loops: list ranges here are shared across iterations rather
   -- than fused, and cost a cell per step.
   let forCells f = item 0
@@ -1047,14 +1038,9 @@ gridOf cells x0 y0 x1 y1 count boxOf = runST $ do
                       | c > c1 = cell (r + 1) c0
                       | otherwise = f k (r * cols + c) >> cell r (c + 1)
                 cell (cellAlong rows y0 sy by0) c0
-  forCells $ \_ c -> readPrimArray starts (c + 1) >>= writePrimArray starts (c + 1) . (+ 1)
-  forM_ [1 .. total] $ \c -> do
-    before <- readPrimArray starts (c - 1)
-    readPrimArray starts c >>= writePrimArray starts c . (+ before)
+  (starts, fill) <- bucketOffsets total (\emit -> forCells (\_ c -> emit c))
   size <- readPrimArray starts total
   items <- newPrimArray size
-  fill <- newPrimArray total
-  copyMutablePrimArray fill 0 starts 0 total
   forCells $ \k c -> do
     slot <- readPrimArray fill c
     writePrimArray items slot k
@@ -1209,20 +1195,11 @@ strokePathOps tol t st path paint
 -- | All rings' points, back to back.
 concatPoints :: [PrimArray Float] -> PrimArray Float
 concatPoints [r] = r
-concatPoints rs = runPrimArray $ do
-  out <- newPrimArray (sum (map sizeofPrimArray rs))
-  let go !_ [] = pure ()
-      go !off (r : rest) = copyPrimArray out off r 0 (sizeofPrimArray r) >> go (off + sizeofPrimArray r) rest
-  go 0 rs
-  pure out
+concatPoints rs = mconcat rs
 
 -- | Where each ring starts in 'concatPoints', and where the last ends.
 ringStarts :: [PrimArray Float] -> PrimArray Int
-ringStarts [r] = runPrimArray $ do
-  starts <- newPrimArray 2
-  writePrimArray starts 0 0
-  writePrimArray starts 1 (sizeofPrimArray r `div` 2)
-  pure starts
+ringStarts [r] = primArrayFromListN 2 [0, sizeofPrimArray r `div` 2]
 ringStarts rs = primArrayFromList (scanl (+) 0 [sizeofPrimArray r `div` 2 | r <- rs])
 
 -- | Group rings into outlines with their holes under the fill rule. Where
@@ -1395,15 +1372,13 @@ rampAt (Ramp gx gy g0 _) x y = gx * x + gy * y + g0
 -- colours) splits half a pixel either side of it instead, so the pieces
 -- beside it keep their own colours and only the pixel across it blends.
 rampSplits :: Ramp -> [Float]
-rampSplits (Ramp gx gy _ stops) = dedupe (sortOn id (concatMap around (dedupe (map fst stops))))
+rampSplits (Ramp gx gy _ stops) = nubAsc (sort (concatMap around (nubAsc (map fst stops))))
   where
     half = 0.5 * sqrt (gx * gx + gy * gy)
     around v = case [c | (o, c) <- stops, o == v] of
       c0 : rest | any (/= c0) rest -> [v - half, v + half]
       _ -> [v]
-    dedupe (v : w : rest) | v == w = dedupe (w : rest)
-    dedupe (v : rest) = v : dedupe rest
-    dedupe [] = []
+    nubAsc = map NE.head . NE.group
 
 -- | The gradient's colour at each point.
 rampShades :: Ramp -> PrimArray Float -> PrimArray Word32
@@ -1439,7 +1414,7 @@ splitEdges g vs closed pts = primArrayFromList (concat [x : y : cuts i | i <- [0
               (bx, by) = pointAt pts ((i + 1) `mod` m)
               ga = g ax ay
               gb = g bx by
-              us = sortOn id [(v - ga) / (gb - ga) | v <- vs, min ga gb < v, v < max ga gb]
+              us = sort [(v - ga) / (gb - ga) | v <- vs, min ga gb < v, v < max ga gb]
            in concat [[ax + u * (bx - ax), ay + u * (by - ay)] | u <- us]
 
 -- | Cut triangles along the lines where @g@ equals each value in @vs@
@@ -1448,7 +1423,7 @@ splitEdges g vs closed pts = primArrayFromList (concat [x : y : cuts i | i <- [0
 -- from its edge's lower-indexed end, so both triangles sharing the edge put
 -- it in exactly the same place.
 splitTriangles :: (Float -> Float -> Float) -> [Float] -> PrimArray Float -> PrimArray Int -> (PrimArray Float, PrimArray Int)
-splitTriangles g vs pts tris = (primArrayFromList (primArrayToList pts ++ concat [[x, y] | (x, y) <- reverse added]), primArrayFromList (reverse out))
+splitTriangles g vs pts tris = (pts <> primArrayFromList [c | (x, y) <- reverse added, c <- [x, y]], primArrayFromList (reverse out))
   where
     n0 = sizeofPrimArray pts `div` 2
     corner i = let (x, y) = pointAt pts i in (i, x, y, g x y)
@@ -1651,33 +1626,32 @@ transformOp tol t@(Transform a b c d _ _) op
         -- bottom right. When the old top left lands on another corner that
         -- diagonal changes, which changes the blend unless the corner
         -- colours lie on a plane.
-        | keepsRects && (even (nearest (bx, by)) || planar) ->
+        | keepsRects && (even (fst (nearest (bx, by))) || planar) ->
             [ FillQuadGradient
                 (Rect bx by bw bh)
-                (colourNear (bx, by))
-                (colourNear (bx + bw, by))
-                (colourNear (bx + bw, by + bh))
-                (colourNear (bx, by + bh))
+                (snd (nearest (bx, by)))
+                (snd (nearest (bx + bw, by)))
+                (snd (nearest (bx + bw, by + bh)))
+                (snd (nearest (bx, by + bh)))
             ]
         | otherwise ->
             -- The transformed corners, with the same order and two
             -- triangles the untransformed quad uses.
-            let quad = primArrayFromList (concat [[x, y] | (x, y) <- corners r])
+            let quad = primArrayFromList (concat [[x, y] | (x, y) <- cs])
              in [ quadPolygon quad (Shaded (primArrayFromListN 4 [w | Color w <- [tl, tr, br, bl]]))
                 | abs (a * d - b * c) > 0
                 ]
         where
+          cs = corners r
           Rect bx by bw bh = box r
-          -- The index of the old corner, clockwise from the top left,
+          -- The index and colour of the old corner, clockwise from top left,
           -- nearest a point.
-          nearest (px, py) = snd (minimumOn (\((qx, qy), _) -> (qx - px) * (qx - px) + (qy - py) * (qy - py)) (zip (corners r) [0 :: Int ..]))
-          colourNear p = case nearest p of
-            0 -> tl
-            1 -> tr
-            2 -> br
-            _ -> bl
-          planar = all (\sh -> channel sh tl + channel sh br == channel sh tr + channel sh bl) [1, 256, 65536, 16777216]
-          channel sh (Color w) = fromIntegral (w `div` sh `mod` 256) :: Int
+          tagged = zip cs (zip [0 :: Int ..] [tl, tr, br, bl])
+          nearest (px, py) =
+            snd $ minimumBy (comparing (\((qx, qy), _) -> (qx - px) * (qx - px) + (qy - py) * (qy - py))) tagged
+          planar = all sameDiag [colorR, colorG, colorB, colorA]
+          sameDiag ch =
+            fromIntegral (ch tl) + fromIntegral (ch br) == (fromIntegral (ch tr) + fromIntegral (ch bl) :: Int)
       DrawImage r angle tex u0 v0 u1 v1 col
         | angle == 0 && levelAxes ->
             -- The box runs left to right and top to bottom, so a flip, or a
@@ -1739,7 +1713,6 @@ transformOp tol t@(Transform a b c d _ _) op
           xs = map fst cs
           ys = map snd cs
        in Rect (minimum xs) (minimum ys) (maximum xs - minimum xs) (maximum ys - minimum ys)
-    minimumOn f = foldr1 (\p q -> if f p <= f q then p else q)
     -- An image rotated by @angle@ about its centre, under the transform.
     -- The centre is transformed, each side scales by how much the transform
     -- stretches the rotated image's axis along it, and the rotation follows

@@ -1,17 +1,10 @@
 -- | Measure pass, custom/text/container measurement, fit-height refit, and baselines.
 module NanoUI.Internal.Layout.Solve.Measure
-  ( FontResolver
-  , SolveEnv (..)
-  , PositionLog (..)
+  ( SolveEnv (..)
   , Measurers (..)
-  , TextWrapper
   , solveEnv
   , TextMeasurer (..)
   , nodeMeasurer
-  , measureFontLine
-  , measureFontWrapped
-  , TextBox (..)
-  , measureTextNodeAt
   , textHeightAt
   , measurePass
   , runCustomMeasure
@@ -19,15 +12,13 @@ module NanoUI.Internal.Layout.Solve.Measure
   , findAncestorMaxW
   , adornedButtonGroup
   , windowBodyScroller
-  , foldChildDimsFromParent
-  , wrapExtent
   , recomputeFitHeightAtWidth
   , loadChildrenScratch
   , flowChildSize
   , percentOr
+  , isBaselineChild
   , childBaseline
   , scrollBarSlotOf
-  , hasPanelAncestor
   , drawingHeightAt
   , measuredHeightAt
   , wrapLineCross
@@ -37,7 +28,7 @@ module NanoUI.Internal.Layout.Solve.Measure
   , readGridColumns
   ) where
 
-import Control.Monad (filterM, foldM, forM_, guard, mfilter, unless, when)
+import Control.Monad (foldM, forM_, guard, mfilter, unless, when)
 import Data.IORef (IORef, modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IM
@@ -66,12 +57,6 @@ data SolveEnv = SolveEnv
   { seArena :: !NodeArena
   , seArrays :: !NodeArenaArrays
   , seMs :: !Measurers
-  , seSub :: !(IOArr Word64)
-  -- ^ The arena's per-node subtree hashes, written by 'computeSubtreeHashes'
-  -- for this frame and read by the measure pass.
-  , seMeasured :: !(IOArr Float)
-  -- ^ The arena's per-node measured sizes (two floats), written by the
-  -- measure pass and snapshotted at capture.
   , seCache :: !(Maybe LayoutCache)
   -- ^ A non-empty captured solve, taken under the current font metrics. A
   -- node it measured the same way gets its captured size back instead of
@@ -80,16 +65,9 @@ data SolveEnv = SolveEnv
   -- ^ Where 'measureCustomNode' records each custom measurement, for the
   -- layout cache: set by 'solveLayout' only, so floating placement records
   -- nothing.
-  , sePositions :: !(Maybe PositionLog)
+  , seRecordPos :: !Bool
   -- ^ Set by 'solveLayout' only: what its position pass records and puts
   -- back ('positionNodeA').
-  }
-
--- | The position pass's record of the rects it offers, and which subtrees
--- it may put back from the cache ('naOffered', 'naSpans').
-data PositionLog = PositionLog
-  { plOffered :: !(IOArr Float)
-  , plSpans :: !(IOArr Int)
   }
 
 -- | How text and custom widgets are measured. The solve and the placement of
@@ -113,8 +91,7 @@ type TextWrapper = Int -> (Text -> IO Float) -> Text -> Float -> IO WrapResult
 solveEnv :: NodeArena -> Measurers -> Maybe LayoutCache -> IO SolveEnv
 solveEnv na ms mCache = do
   a <- arenaArrays na
-  (sub, measured) <- subtreeArrays na
-  pure (SolveEnv na a ms sub measured (mfilter ((> 0) . lcCount) mCache) Nothing Nothing)
+  pure (SolveEnv na a ms (mfilter ((> 0) . lcCount) mCache) Nothing False)
 
 -- Keep font selection and single-line/wrapped measurement together so every
 -- layout pass uses the same policy. Monospaced text uses its metrics directly;
@@ -178,23 +155,19 @@ data TextBox = TextBox
 -- when it has explicit newlines, or when @shouldWrap outerW lineW@ holds for
 -- its single-line width.
 measureTextNodeAt :: SolveEnv -> NodeIdx -> Text -> Float -> (Float -> Float -> Bool) -> IO TextBox
-measureTextNodeAt env idx txt outerW shouldWrap = do
-  si <- getStyleIdx (seArena env) idx
+measureTextNodeAt env@SolveEnv {seArena = na, seArrays = a} idx txt outerW shouldWrap = do
+  si <- getStyleIdx na idx
   measurer@TextMeasurer {tmMetrics = textFm} <- nodeMeasurer env idx NodeText si
   let wrapW = max 0 (outerW - 2 * tableStripeInset si)
       lineH = fmLineHeight textFm
-      na = seArena env
+      wrapped = do
+        (tw, th) <- memoizeWidth na (naArrWrapMemo a) idx wrapW (measureFontWrapped env measurer txt wrapW)
+        pure (TextBox True tw th lineH)
   if T.any (== '\n') txt
-    then do
-      (tw, th) <- memoizeWidth na (naWrapMemo na) idx wrapW (measureFontWrapped env measurer txt wrapW)
-      pure (TextBox True tw th lineH)
+    then wrapped
     else do
       (tw0, th0) <- measureFontLine measurer txt
-      if shouldWrap (max 0 outerW) tw0
-        then do
-          (tw, th) <- memoizeWidth na (naWrapMemo na) idx wrapW (measureFontWrapped env measurer txt wrapW)
-          pure (TextBox True tw th lineH)
-        else pure (TextBox False tw0 th0 lineH)
+      if shouldWrap (max 0 outerW) tw0 then wrapped else pure (TextBox False tw0 th0 lineH)
 
 -- | Height of text node @idx@ at width @w@, clamped to @hAx@. Text wraps at
 -- newlines, and at @w@ when @allowed@ and its line overflows a positive @w@.
@@ -243,9 +216,10 @@ measurePass env count = do
 -- before its parent.
 measureCachedNode :: SolveEnv -> LayoutCache -> IOArr Word8 -> NodeIdx -> IO ()
 measureCachedNode env lc moved !idx = do
+  let a = seArrays env
   hit <-
     if idx < lcCount lc
-      then (==) <$> readPrimArray (seSub env) idx <*> readPrimArray (lcSub lc) idx
+      then (==) <$> readPrimArray (naArrSubHash a) idx <*> readPrimArray (lcSub lc) idx
       else pure False
   restored <- restoreMeasured env lc moved hit idx
   unless restored (measureNode env idx)
@@ -261,12 +235,12 @@ measureCachedNode env lc moved !idx = do
   -- height runs that measure at its children's widths
   -- ('recomputeFitHeightAtWidth'), which the cache does not record, so
   -- it measures again however its children came out.
-  nt <- readTagEnum (seArrays env) idx TagNodeType
+  nt <- readTagEnum a idx TagNodeType
   aboveMeasure <-
     if nt == NodeDrawing
       then getWidgetId (seArena env) idx >>= fmap isJust . msLookupMeasure (seMs env)
       else (== 2) <$> readPrimArray moved idx
-  p <- readTree (seArrays env) idx TreeParent
+  p <- readTree a idx TreeParent
   when (p >= 0) $ do
     m <- readPrimArray moved p
     if aboveMeasure
@@ -276,11 +250,10 @@ measureCachedNode env lc moved !idx = do
   -- node's key hit and it came out its captured size, as did every node
   -- below it, and it holds no drawing, whose custom measure may return a
   -- different size with nothing in the arena changed.
-  case sePositions env of
-    Nothing -> pure ()
-    Just PositionLog {plSpans} -> do
-      end <- if hit && same && nt /= NodeDrawing then subtreeEnd (seArrays env) plSpans idx else pure (-1)
-      writePrimArray plSpans idx end
+  when (seRecordPos env) $ do
+    let spans = naArrSpans a
+    end <- if hit && same && nt /= NodeDrawing then subtreeEnd a spans idx else pure (-1)
+    writePrimArray spans idx end
 
 -- | Put back the measured size the captured solve recorded for a node, when
 -- that solve measured it the same way: its restore key
@@ -328,7 +301,7 @@ subtreeEnd a spans idx = do
 recordMeasured :: SolveEnv -> NodeIdx -> IO (Float, Float)
 recordMeasured env idx = do
   Rect _ _ w h <- getNodeRect (seArena env) idx
-  let ma = seMeasured env
+  let ma = naArrMeasured (seArrays env)
   writePrimArray ma (idx * 2) w
   writePrimArray ma (idx * 2 + 1) h
   pure (w, h)
@@ -503,11 +476,13 @@ measureTextNode env@SolveEnv {seArena = na} idx = do
 -- widen for it and the label would wrap into more lines than the modal
 -- measured. Windows keep their own width and truncate long lines instead.
 growParent :: NodeArena -> NodeIdx -> IO Bool
-growParent na = growParentOn na True
+growParent na = growParentOn na True False
 
--- | 'growParent' along the width with @horizontal@, else the height.
-growParentOn :: NodeArena -> Bool -> NodeIdx -> IO Bool
-growParentOn na horizontal idx = getParent na idx >>= go True
+-- | 'growParent' along the width with @horizontal@, else the height. When
+-- @allowFixed@ is set, a direct fixed-size parent also counts as assigning the
+-- size.
+growParentOn :: NodeArena -> Bool -> Bool -> NodeIdx -> IO Bool
+growParentOn na horizontal allowFixed idx = getParent na idx >>= go True
   where
     go isParent p
       | p < 0 = pure (not isParent)
@@ -516,7 +491,7 @@ growParentOn na horizontal idx = getParent na idx >>= go True
           if pTag == SizingGrow || pTag == SizingPercent
             then getParent na p >>= go False
             else if isParent
-              then pure False
+              then pure (allowFixed && pTag == SizingFixed)
               else (/= NodeModal) <$> getNodeType na p
 
 -- | Whether a container of type @nt@ reports its minimum along an axis, with
@@ -525,13 +500,7 @@ growParentOn na horizontal idx = getParent na idx >>= go True
 -- size there ('growParentOn' or a fixed-size parent).
 minAssignedOn :: NodeArena -> NodeType -> Bool -> NodeIdx -> AxisSizing -> IO Bool
 minAssignedOn na nt horizontal idx (AxisSizing tag _ lo _)
-  | tag == SizingGrow && hasExplicitMin lo && not (isFloatingNode nt) = do
-      p <- getParent na idx
-      pFixed <-
-        if p < 0
-          then pure False
-          else (== SizingFixed) . axTag <$> (if horizontal then getWidthSizing else getHeightSizing) na p
-      if pFixed then pure True else growParentOn na horizontal idx
+  | tag == SizingGrow && hasExplicitMin lo && not (isFloatingNode nt) = growParentOn na horizontal True idx
   | otherwise = pure False
 
 -- | Measure a node with no measurable content: an image, a box, a spacer,
@@ -576,6 +545,9 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seMs = Measurers {msFm =
   hAx <- readAxisSizing a idx False
   measurer@TextMeasurer {tmMetrics = fm} <- nodeMeasurer env idx nt si
   let measure = measureFontLine measurer
+      measurePadded (padX, padY) = do
+        (mw, mh) <- measure (if T.null txt then " " else txt)
+        pure (mw + padX, mh + padY)
   -- The content with its padding and whatever sits beside the label.
   (rawW, rawH) <-
     case nt of
@@ -614,26 +586,19 @@ measureWidget env@SolveEnv {seArena = na, seArrays = a, seMs = Measurers {msFm =
         ButtonRow -> do
           let (depth, _, _) = treeDecodeStyle si
           measureMarkedWidget fm measure txt (treeRowLeading fm depth) (treeItemPadding fm)
-        bkind -> do
-          let body = if T.null txt then " " else txt
-              (padX, padY) = case bkind of
-                ButtonTable -> (tableHeaderPadX, 0)
-                ButtonTab -> (2 * tabHeaderPadX, snd (buttonPadding fm))
-                -- Menu rows reserve the same gutter the text-field context
-                -- menu paints (outer pad + item pad on each side of the
-                -- label), so the generic popup panel sizes identically.
-                ButtonMenu -> (2 * (menuOuterPad + menuItemPadX), snd (buttonPadding fm))
-                _ -> buttonPadding fm
-          (mw, mh) <- measure body
-          pure (mw + padX, mh + padY)
+        bkind ->
+          measurePadded $ case bkind of
+            ButtonTable -> (tableHeaderPadX, 0)
+            ButtonTab -> (2 * tabHeaderPadX, snd (buttonPadding fm))
+            -- Menu rows reserve the same gutter the text-field context
+            -- menu paints (outer pad + item pad on each side of the
+            -- label), so the generic popup panel sizes identically.
+            ButtonMenu -> (2 * (menuOuterPad + menuItemPadX), snd (buttonPadding fm))
+            _ -> buttonPadding fm
       -- 'measureContent' sends only widgets here, and decides per node
       -- type which ones; another widget is measured as a label with the
       -- widget padding.
-      _ -> do
-        let body = if T.null txt then " " else txt
-            (padX, padY) = widgetPadding fm
-        (mw, mh) <- measure body
-        pure (mw + padX, mh + padY)
+      _ -> measurePadded (widgetPadding fm)
   -- A widget's children are its adornments ('measureAdorned').
   kids <- readTree a idx TreeFirstChild
   (w, h) <- if kids < 0 then pure (rawW, rawH) else measureAdorned env measurer idx nt si txt rawW rawH
@@ -894,14 +859,21 @@ foldChildDimsFromParent env@SolveEnv {seArena = na} idx dir gap = do
       (above', below') <- accumulateBaseline env pItems (above, below) ci h
       pure (FlowAcc 0 above' below')
 
+-- | Whether child @ci@ participates in row baseline alignment: its effective
+-- vertical alignment is 'AlignBaseline' and it does not grow vertically.
+{-# INLINE isBaselineChild #-}
+isBaselineChild :: NodeArenaArrays -> ItemsAlign -> NodeIdx -> IO Bool
+isBaselineChild a pItems ci = do
+  ay <- effectiveAlignY a pItems ci
+  if ay /= AlignBaseline then pure False else (/= SizingGrow) <$> readTagEnum a ci TagHSizing
+
 -- | Fold a row child @(ci, h)@ into the @(maxAscent, maxDescent)@ baseline
 -- envelope when it aligns to the baseline and does not grow vertically.
 {-# INLINE accumulateBaseline #-}
 accumulateBaseline :: SolveEnv -> ItemsAlign -> (Float, Float) -> NodeIdx -> Float -> IO (Float, Float)
 accumulateBaseline env@SolveEnv {seArrays = a} pItems acc@(!above, !below) ci h = do
-  ay <- effectiveAlignY a pItems ci
-  hTag <- readTagEnum a ci TagHSizing
-  if ay /= AlignBaseline || hTag == SizingGrow
+  ok <- isBaselineChild a pItems ci
+  if not ok
     then pure acc
     else (\b -> (max above b, max below (h - b))) <$> childBaseline env ci h
 
@@ -923,31 +895,44 @@ measureWrap env@SolveEnv {seArena = na} idx dir gap bound = do
         pad <- getPadding na idx
         (\w -> max 0 (w - padL pad - padR pad)) <$> findAncestorMaxW na idx
       else pure bound
-  -- A percentage width is of the line length, as placement resolves it
-  -- ('positionWrap').
-  let sized ci = do
-        Rect _ _ w h <- getNodeRect na ci
-        w' <- if dir == DirRow then (\ax -> percentOr ax limit w) <$> getWidthSizing na ci else pure w
-        pure (ci, (w', h))
-  kids <- mapM sized =<< flowChildrenInOrder na idx
-  (along, across) <- wrapExtent env idx dir gap limit kids
+  kids <- sizedWrapKids na idx dir limit
+  (along, across) <- wrapExtentWith env idx dir gap limit kids (wrapLineCross env dir)
   wTag <- axTag <$> getWidthSizing na idx
   assigned <-
     if dir == DirRow && isUnbounded limit && wTag == SizingGrow then growParent na idx else pure False
   let widest = foldl' (\m (_, (w, _)) -> max m w) 0 kids
   pure (if dir == DirRow then (if assigned then widest else along, across) else (across, along))
 
+-- | Flow children of wrapping container @idx@ with percentage widths resolved
+-- against @limit@ for wrapping rows, as placement resolves them ('positionWrap').
+sizedWrapKids :: NodeArena -> NodeIdx -> DirTag -> Float -> IO [(NodeIdx, (Float, Float))]
+sizedWrapKids na idx dir limit = mapM sized =<< flowChildrenInOrder na idx
+  where
+    sized ci = do
+      Rect _ _ w h <- getNodeRect na ci
+      w' <- if dir == DirRow then (\ax -> percentOr ax limit w) <$> getWidthSizing na ci else pure w
+      pure (ci, (w', h))
+
 -- | Extent of @kids@ broken into lines no longer than @limit@ ('wrapLines'):
--- the longest line's length, and the sum of the lines' cross sizes
--- ('wrapLineCross') plus the line gaps.
-wrapExtent :: SolveEnv -> NodeIdx -> DirTag -> Float -> Float -> [(NodeIdx, (Float, Float))] -> IO (Float, Float)
-wrapExtent env idx dir gap limit kids = do
+-- the longest line's length, and the sum of the lines' cross sizes (measured
+-- by @lineCross@) plus the line gaps.
+{-# INLINE wrapExtentWith #-}
+wrapExtentWith ::
+  SolveEnv ->
+  NodeIdx ->
+  DirTag ->
+  Float ->
+  Float ->
+  [(NodeIdx, (Float, Float))] ->
+  (ItemsAlign -> [(NodeIdx, (Float, Float))] -> IO Float) ->
+  IO (Float, Float)
+wrapExtentWith env idx dir gap limit kids lineCross = do
   lineGap <- readStyle (seArrays env) idx StyleLineGap
   pItems <- readItemsAlign (seArrays env) idx
   let along (_, (w, h)) = if dir == DirRow then w else h
       lns = wrapLines limit gap along kids
       lineLength l = sum (map along l) + gap * fromIntegral (length l - 1)
-  crosses <- mapM (wrapLineCross env dir pItems) lns
+  crosses <- mapM (lineCross pItems) lns
   pure (foldl' max 0 (map lineLength lns), sum crosses + lineGap * fromIntegral (max 0 (length lns - 1)))
 
 -- | A wrap line's cross size: its largest child's. In a row it is at least
@@ -985,7 +970,7 @@ measureGridScratch ::
 measureGridScratch env idx wTag gCols minColW innerMaxW innerAvailH gap = do
   let bounded = isBounded innerMaxW
       cols = gridColumnCount gCols minColW (if bounded then innerMaxW else 0) gap
-      colW = max 0 ((innerMaxW - gap * fromIntegral (cols - 1)) / fromIntegral cols)
+      colW = gridColWidth innerMaxW cols gap
   n <- loadChildrenScratch (seArena env) idx (flowChildSize env bounded (if bounded then colW else innerMaxW) innerAvailH)
   if n <= 0
     then pure (0, 0)
@@ -1016,12 +1001,12 @@ recomputeFitHeightAtWidth :: SolveEnv -> NodeIdx -> Float -> IO Float
 recomputeFitHeightAtWidth env@SolveEnv {seArrays = a} idx availW =
   readTagEnum a idx TagSteadyHeight >>= \case
     -- Its measured height, at any width ('markSteadyHeight').
-    True -> readPrimArray (seMeasured env) (idx * 2 + 1)
+    True -> readPrimArray (naArrMeasured a) (idx * 2 + 1)
     False -> recomputeUnsteady env idx availW
 
 recomputeUnsteady :: SolveEnv -> NodeIdx -> Float -> IO Float
 recomputeUnsteady env@SolveEnv {seArena = na, seArrays = a} idx availW =
-  fmap snd . memoizeWidth na (naFitMemo na) idx availW . fmap ((,) 0) $ do
+  fmap snd . memoizeWidth na (naArrFitMemo a) idx availW . fmap ((,) 0) $ do
     nt <- getNodeType na idx
     AxisSizing wTag wVal minW maxW <- getWidthSizing na idx
     hAx@(AxisSizing hTag _ minH maxH) <- getHeightSizing na idx
@@ -1062,7 +1047,7 @@ recomputeUnsteady env@SolveEnv {seArena = na, seArrays = a} idx availW =
               KGrid -> do
                 (gCols, minColW) <- readGridColumns a idx
                 let cols = gridColumnCount gCols minColW innerW gap
-                    colW = max 0 ((innerW - gap * fromIntegral (cols - 1)) / fromIntegral cols)
+                    colW = gridColWidth innerW cols gap
                     rows [] = []
                     rows hs = let (r, rest) = splitAt cols hs in r : rows rest
                 hs <- mapM (childH colW) =<< flowChildrenInOrder na idx
@@ -1075,22 +1060,15 @@ recomputeUnsteady env@SolveEnv {seArena = na, seArrays = a} idx availW =
               -- wrapping column's height does not depend on its width.
               KWrap
                 | dir == DirRow -> do
-                    let sized ci = do
-                          subAx <- getWidthSizing na ci
-                          Rect _ _ w h <- getNodeRect na ci
-                          pure (ci, (percentOr subAx innerW w, h))
-                    kids <- mapM sized =<< flowChildrenInOrder na idx
-                    lineGap <- readStyle a idx StyleLineGap
-                    pItems <- readItemsAlign a idx
+                    kids <- sizedWrapKids na idx DirRow innerW
                     -- A line is as thick as its measured children
                     -- ('wrapLineCross') or what they grow to at their shares
                     -- of it, as 'positionWrap' places it.
-                    let lns = wrapLines innerW gap (fst . snd) kids
-                        lineCross l = do
-                          measured <- wrapLineCross env dir pItems l
+                    let lineCross pItems l = do
+                          measured <- wrapLineCross env DirRow pItems l
                           maybe measured (max measured) <$> lineHeightAt env pItems l innerW gap
-                    crosses <- mapM lineCross lns
-                    padded (sum crosses + lineGap * fromIntegral (max 0 (length lns - 1)))
+                    (_, across) <- wrapExtentWith env idx DirRow gap innerW kids lineCross
+                    padded across
                 | otherwise -> pure oldH
               KLine
                 | dir == DirRow -> rowHeightAt env idx innerW gap >>= maybe (pure oldH) padded
@@ -1211,15 +1189,11 @@ rowChildHeightAt env@SolveEnv {seArrays = a} ci share = readTagEnum a ci TagStea
 
 rowChildHeightAtUnsteady :: SolveEnv -> NodeIdx -> Float -> IO (Maybe Float)
 rowChildHeightAtUnsteady env@SolveEnv {seArrays = a} ci share = do
-  AxisSizing wTag wVal lo hi <- readAxisSizing a ci True
+  wAx <- readAxisSizing a ci True
   hTag <- axTag <$> readAxisSizing a ci False
   iw <- readGeom a ci GeomW
   -- The width 'positionNode' gives a child offered its share.
-  let w = clamp lo hi $ case wTag of
-        SizingFixed -> wVal
-        SizingGrow -> min share hi
-        SizingPercent -> min share hi
-        _ -> min iw share
+  let w = resolveSize wAx iw share
   if abs (w - iw) <= 1.0e-3 || (hTag /= SizingFit && hTag /= SizingShrink)
     then pure Nothing
     else do
@@ -1374,16 +1348,17 @@ childBaseline env@SolveEnv {seArena = na, seArrays = a} ci h = do
             cItems <- readItemsAlign a ci
             let innerH = max 0 (h - padT pad - padB pad)
                 heightOf k = rectH <$> getNodeRect na k
-            let isBaselineKid k = do
-                  ay <- effectiveAlignY a cItems k
-                  hTag <- readTagEnum a k TagHSizing
-                  pure (ay == AlignBaseline && hTag /= SizingGrow)
-            aligned <-
-              if dir == DirRow then filterM isBaselineKid kids else pure []
-            grouped <- mapM (\k -> heightOf k >>= childBaseline env k) aligned
-            (padT pad +) <$> case grouped of
-              _ : _ -> pure (maximum grouped)
-              [] -> do
+            let foldBase !acc k = do
+                  ok <- isBaselineChild a cItems k
+                  if not ok
+                    then pure acc
+                    else do
+                      b <- heightOf k >>= childBaseline env k
+                      pure (Just (maybe b (max b) acc))
+            mBase <- if dir == DirRow then foldM foldBase Nothing kids else pure Nothing
+            (padT pad +) <$> case mBase of
+              Just b -> pure b
+              Nothing -> do
                 fh <- heightOf first
                 flow <- getFlow na ci
                 ay <-

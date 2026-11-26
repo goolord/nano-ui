@@ -186,7 +186,7 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
       (m0, om, hm0, foundContainers, foundOuter, droppedContainer) <-
         scanBackdropPrevRects na (Rect 0 0 winW winH) oldRects oldOuters oldHashes
       (walk, known) <- prevWalkFor ctx count oldRects
-      hashes <- readIORef (naPaintHash na)
+      hashes <- naArrPaintHash <$> arenaArrays na
       let go !i !m !cm !hm !foundOld !dropped
             | i >= count =
                 if dropped || foundOld /= IM.size oldRects || foundOuter /= IM.size oldOuters
@@ -319,18 +319,8 @@ keepKeyAt walk known i k tag = do
 swapClip :: MutablePrimArray RealWorld Float -> Int -> Float -> Float -> Float -> Float -> IO Bool
 swapClip clips i x y w h = do
   let !o = 4 * i
-  x0 <- readPrimArray clips o
-  y0 <- readPrimArray clips (o + 1)
-  w0 <- readPrimArray clips (o + 2)
-  h0 <- readPrimArray clips (o + 3)
-  if x0 == x && y0 == y && w0 == w && h0 == h
-    then pure False
-    else do
-      writePrimArray clips o x
-      writePrimArray clips (o + 1) y
-      writePrimArray clips (o + 2) w
-      writePrimArray clips (o + 3) h
-      pure True
+  same <- eqRectAt clips o x y w h
+  if same then pure False else True <$ writeRectAt clips o x y w h
 
 -- | Insert, returning @m@ itself when @k@ already maps to @v@, so pointer
 -- equality survives an unchanged frame.
@@ -349,24 +339,11 @@ putHash = putNew
 dropKey :: Int -> IM.IntMap a -> IM.IntMap a
 dropKey k m = if IM.member k m then IM.delete k m else m
 
--- | Floating panels in the order the frame paints them, bottom first: every
--- window, then every modal, then every popup, each kind in arena order. The
--- pointer's layer is the last of these that holds it.
-floatingPanelsInOrder :: Context -> IO [(Int, Rect)]
-floatingPanelsInOrder Context {ctxNodeArena = na} =
-  catMaybes <$> (mapM step =<< floatingNodesInPaintOrder na)
-  where
-    step idx = do
-      wid <- getWidgetId na idx
-      if hashWidgetId wid == 0
-        then pure Nothing
-        else Just . (intKey wid,) <$> getNodeRect na idx
-
--- | Floating panels in paint order that participate in pointer routing:
--- excludes 'PointerPass' panels such as tooltips so pointer events pass
--- through them to the layer underneath.
-floatingInteractiveOrder :: Context -> IO [Int]
-floatingInteractiveOrder Context {ctxNodeArena = na} =
+-- | Keyed floating panels in paint order, bottom first (every window, then
+-- every modal, then every popup): key, solved rect, and whether the panel
+-- intercepts pointer events (excluding 'PointerPass' panels such as tooltips).
+floatingPanels :: Context -> IO [(Int, Rect, Bool)]
+floatingPanels Context {ctxNodeArena = na} =
   catMaybes <$> (mapM step =<< floatingNodesInPaintOrder na)
   where
     step idx = do
@@ -374,12 +351,13 @@ floatingInteractiveOrder Context {ctxNodeArena = na} =
       if hashWidgetId wid == 0
         then pure Nothing
         else do
+          r <- getNodeRect na idx
           mode <- getPointerMode na idx
-          pure (if mode == PointerPass then Nothing else Just (intKey wid))
+          pure (Just (intKey wid, r, mode /= PointerPass))
 
 -- | Current floating-panel bounds keyed by widget id, in logical window coordinates.
 floatingPanelRects :: Context -> IO (IM.IntMap Rect)
-floatingPanelRects ctx = IM.fromList <$> floatingPanelsInOrder ctx
+floatingPanelRects ctx = IM.fromList . map (\(k, r, _) -> (k, r)) <$> floatingPanels ctx
 
 -- | State 'NanoUI.Internal.Frame' captures before the UI pass; 'writeDamage' compares
 -- it against the finished frame.
@@ -408,7 +386,7 @@ captureFrameSnapshot ctx = do
       <*> readIORef (ctxFocusVisible ctx)
       <*> getsOverlay ctx osPrevFloatingRects
       <*> pure (dsPrev ds)
-      <*> (IM.keysSet <$> getLiveAnimations ctx)
+      <*> liveAnimationKeys ctx
 
 -- | What the finished frame looks like and what changed since the snapshot.
 -- Derived fields stay lazy: a frame that is already 'DamageFull' for a cheap
@@ -420,7 +398,7 @@ data FrameDelta = FrameDelta
   -- ^ This frame's 'dsPrev'.
   , fdFloatingRects :: !(IM.IntMap Rect)
   , fdModalFlip :: !Bool
-  , fdLiveAnims :: !(IM.IntMap Animation)
+  , fdLiveAnims :: !IS.IntSet
   , fdWindowLive :: !Bool
   , fdRequests :: ![DamageRequest]
   , fdAnimLive :: Bool
@@ -449,20 +427,20 @@ data FrameDelta = FrameDelta
 writeDamage :: Context -> Input -> FrameSnapshot -> Bool -> Bool -> IO ()
 writeDamage ctx inp snap mayReuse layoutFloats = do
   newStore <- getStore ctx
-  panels <- floatingPanelsInOrder ctx
+  panels <- floatingPanels ctx
   new <- getsDamage ctx dsPrev
   modalFlip <- modalDamageFlip ctx
-  liveAnims <- getLiveAnimations ctx
+  liveAnims <- liveAnimationKeys ctx
   settled <- takeAnimSettled ctx
   windowLive <- getsInteraction ctx (\s -> isJust (isWindowDrag s) || isJust (isWindowResize s))
   requests <- getsDamage ctx dsRequests
   redrawn <- refreshCustomDrawings ctx
   wanted <- readIORef (ctxDamageWanted ctx)
   let oldStore = fsStore snap
-      newFloatingRects = IM.fromList panels
+      newFloatingRects = IM.fromList [(k, r) | (k, r, _) <- panels]
       floatingChanged = fsFloatingRects snap /= newFloatingRects
       changes = do
-        (settledMoved, churn) <- rectDeltas (map snd panels) (fsPrev snap) new
+        (settledMoved, churn) <- rectDeltas [r | (_, r, _) <- panels] (fsPrev snap) new
         let scrollChanged = not (eqByPtr (storeFloat oldStore) (storeFloat newStore))
             pointsChanged = not (eqByPtr (storePoint oldStore) (storePoint newStore))
         let delta =
@@ -475,7 +453,7 @@ writeDamage ctx inp snap mayReuse layoutFloats = do
                 , fdLiveAnims = liveAnims
                 , fdWindowLive = windowLive
                 , fdRequests = requests
-                , fdAnimLive = not (IM.null liveAnims) || settled
+                , fdAnimLive = not (IS.null liveAnims) || settled
                 , fdFloatingChanged = floatingChanged
                 , fdScrollChanged = scrollChanged
                 , fdPointsChanged = pointsChanged
@@ -525,10 +503,9 @@ writeDamage ctx inp snap mayReuse layoutFloats = do
       }
   -- Most frames have no panel now or before, and then there is nothing to write.
   prevEmpty <- getsOverlay ctx (IM.null . osPrevFloatingRects)
-  unless (null panels && prevEmpty) $ do
-    interactiveOrder <- floatingInteractiveOrder ctx
+  unless (null panels && prevEmpty) $
     modifyOverlay ctx $ \os ->
-      os {osPrevFloatingRects = newFloatingRects, osPrevFloatingOrder = interactiveOrder}
+      os {osPrevFloatingRects = newFloatingRects, osPrevFloatingOrder = [k | (k, _, True) <- panels]}
   -- The follow-up frames these request only settle placement: the flip made
   -- this frame repaint whole, and a floating change did too or, on a frame
   -- that only scrolled, damaged each moved panel where it was and is, so
@@ -624,7 +601,7 @@ fullDamageCause snap d
     -- is clipped like the rest, so a perpetual animation whose widget has
     -- left the arena (@keepAnimating@ behind a tab switch) stops repainting
     -- the window.
-    animKeys = IM.keys (fdLiveAnims d)
+    animKeys = IS.toList (fdLiveAnims d)
     firstRectless k =
       IM.notMember k newRects && (IM.member k oldRects || IS.notMember k (fsAnimKeys snap))
     orphanAnim = any firstRectless animKeys
@@ -722,7 +699,7 @@ clipDamage ctx snap d owners = do
       scrollOffsetDamage ctx (fsStore snap) (fdStore d)
     forM_ (IS.toList (IS.fromList (IM.elems owners))) $ \idx ->
       resolveSlop . intKey =<< liftIO (getWidgetId (ctxNodeArena ctx) idx)
-    forM_ (IS.toList (fsAnimKeys snap <> IM.keysSet (fdLiveAnims d))) $ \k ->
+    forM_ (IS.toList (fsAnimKeys snap <> fdLiveAnims d)) $ \k ->
       unless (k == 0) (resolveSlop k)
     -- A node the view gave other paint inputs (text, value, style, colour,
     -- scope, image) repaints. A widget repaints with its halo, where it was
@@ -739,19 +716,15 @@ clipDamage ctx snap d owners = do
     -- moves are clipped to the viewport its offset damage already covers.
     addDamageGroup (fdSettledMoved d)
     addDamageGroup (fdChurn d)
-    -- A panel paints its offset shadow past its rect ('menuPanelBounds').
-    let addFloating a b = IM.foldrWithKey (\k r rest -> unless (IM.lookup k b == Just r) (addDamageRect (menuPanelBounds r)) >> rest) (pure ()) a
-    addFloating (fsFloatingRects snap) (fdFloatingRects d)
-    addFloating (fdFloatingRects d) (fsFloatingRects snap)
-    -- Tier 2 shader effects paint halos out to their margin-expanded bounds;
-    -- unmount, mount, or margin resize must damage both old and new expanded rects.
+    -- A panel paints its offset shadow past its rect ('menuPanelBounds'), and
+    -- Tier 2 shader effects paint halos out to their margin-expanded bounds.
+    let addMapDiff f a b =
+          IM.foldrWithKey (\k r rest -> unless (IM.lookup k b == Just r) (addDamageRect (f r)) >> rest) (pure ()) a
+        diffBoth f a b = addMapDiff f a b >> addMapDiff f b a
+    diffBoth menuPanelBounds (fsFloatingRects snap) (fdFloatingRects d)
     let oldEffects = pfEffectRects old
         newEffects = pfEffectRects new
-    unless (ptrEq oldEffects newEffects) $ do
-      let addDiffEffects a b =
-            IM.foldrWithKey (\k r rest -> unless (IM.lookup k b == Just r) (addDamageRect r) >> rest) (pure ()) a
-      addDiffEffects oldEffects newEffects
-      addDiffEffects newEffects oldEffects
+    unless (ptrEq oldEffects newEffects) $ diffBoth id oldEffects newEffects
   -- Only what lands in the window counts: an empty rect, or one off the
   -- window, would stretch the bounds over pixels nothing changed.
   let added' = if null added then added else expandEffectDamage old new added
@@ -875,17 +848,10 @@ type RectUnion = IORef [Rect]
 addRect :: RectUnion -> Rect -> IO ()
 addRect acc r = modifyIORef' acc (r :)
 
--- | Edges of a running bounds: @x0, y0, x1, y1@.
-data Edges = Edges !Float !Float !Float !Float
-
 -- | The bounds of @rects@, empty ones included, or the zero rect for none.
 rectBounds :: [Rect] -> Rect
-rectBounds rects
-  | x0 > x1 = Rect 0 0 0 0
-  | otherwise = Rect x0 y0 (x1 - x0) (y1 - y0)
-  where
-    grow (Edges a b c d) (Rect x y w h) = Edges (min a x) (min b y) (max c (x + w)) (max d (y + h))
-    Edges x0 y0 x1 y1 = foldl' grow (Edges (1 / 0) (1 / 0) (-1 / 0) (-1 / 0)) rects
+rectBounds [] = Rect 0 0 0 0
+rectBounds (r : rs) = foldl' rectUnion r rs
 
 -- | A set of rects reduced to what damage needs from it.
 data RectGroup = RectGroup
@@ -1068,13 +1034,6 @@ ownerSlots =
   , SlotScrollAxes
   , SlotScrollLinkX
   , SlotScrollLinkY
-  , SlotComboHighlight
-  , SlotComboScroll
-  , SlotComboCount
-  , SlotComboFocus
-  , SlotComboDrag
-  , SlotComboLive
-  , SlotComboCommitted
   , SlotNumericHeld
   , SlotNumericRepeat
   , SlotMenuOpen

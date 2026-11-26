@@ -78,6 +78,7 @@ module NanoUI.Internal.Layout.Arena
   , readAxisSizing
   , getWidthSizing
   , getHeightSizing
+  , readPadding
   , getPadding
   , parentIsRow
   , getAlignX
@@ -135,7 +136,6 @@ module NanoUI.Internal.Layout.Arena
   , flowChildEnds
   , foldPlacedChildrenM
   , forChildrenInPaintOrder_
-  , childrenTopFirst
   , firstChildOnTopJustM
   , drawnOver
   , AdornRows (..)
@@ -159,8 +159,6 @@ module NanoUI.Internal.Layout.Arena
   , captureLayoutCache
   , layoutSigMatches
   , computeSubtreeHashes
-  , subtreeArrays
-  , positionArrays
   , restoreLayoutCache
   , restoreScrollExtents
   , subtreeSpan
@@ -171,7 +169,7 @@ module NanoUI.Internal.Layout.Arena
 import Control.Monad (forM_, unless, when)
 import Data.Bits (complement, shiftL, shiftR, xor, (.&.), (.|.))
 import Data.Hashable (Hashable, hash)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Primitive.Array (newArray, readArray, sizeofMutableArray, writeArray)
 import Data.Primitive.PrimArray
@@ -193,7 +191,7 @@ import NanoUI.Internal.Layout.Arena.Query
 import NanoUI.Internal.Layout.Arena.Types
 import NanoUI.Internal.Store (ptrEq)
 import NanoUI.Internal.Style (Direction (..), Flow (..), ItemsAlign (..), Layout (..), Padding (..), PointerMode (..))
-import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), newZeroedPrimArray)
+import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), forUpTo_, newZeroedPrimArray)
 
 -- | An empty arena. It starts with room for 256 nodes (@initialCapacity@), 64
 -- children of one container in the solver's buffers, and 256 nesting depths.
@@ -207,32 +205,17 @@ newNodeArena = do
   naScratch <- newIORef =<< newFlexScratch 64
   naSnapLevels <- newIORef =<< newArray 256 =<< newAxisSnapshot 0
   naFrameTag <- newIORef 1
-  naWrapMemo <- newIORef =<< newWidthMemo cap
-  naFitMemo <- newIORef =<< newWidthMemo cap
   naEpoch <- newIORef 1
   naIndex <- newIORef =<< newIdIndex 1024
   naScope <- newIORef 0
   naScopeSig <- newIORef 0
   naInputSig <- newZeroedPrimArray 1
   naPaintSig <- newZeroedPrimArray 1
-  -- Zeroed: the stores start as the shared 'T.empty' and '[]', which pass the
-  -- same-object check, and 0 marks a hash that was never taken.
-  naTextHash <- newIORef =<< newZeroedPrimArray cap
-  naOptionsHash <- newIORef =<< newZeroedPrimArray cap
-  naOwnHash <- newIORef =<< newPrimArray cap
-  naPaintHash <- newIORef =<< newPrimArray cap
-  naSubHash <- newIORef =<< newPrimArray cap
-  naMeasured <- newIORef =<< newPrimArray (cap * 2)
-  naOffered <- newIORef =<< newPrimArray (cap * 4)
-  naUnsnapped <- newIORef =<< newPrimArray (cap * 4)
-  naSpans <- newIORef =<< newPrimArray cap
-  naClassNodes <- newIORef =<< newPrimArray (cap * nodeClassCount)
   naClassCounts <- newZeroedPrimArray nodeClassCount
   naImages <- newIORef =<< newArray 0 noImageNode
   naImageCount <- newZeroedPrimArray 1
   naHighWater <- newIORef 0
   pure NodeArena {..}
-
 
 -- | Begin an empty frame while retaining array capacity. Invalidates node
 -- indices, width memos, and widget-id lookups, and resets paint-scope and
@@ -247,25 +230,20 @@ resetNodeArena na = do
   if prevCount < highWater
     then do
       a <- readIORef (naArrays na)
-      th <- readIORef (naTextHash na)
-      oh <- readIORef (naOptionsHash na)
       let clearAt !i = when (i < highWater) $ do
             writeArray (naArrTextStore a) i T.empty
             writeArray (naArrOptionsStore a) i []
             writeArray (naArrOptionsLast a) i []
             clearAt (i + 1)
       clearAt prevCount
-      setPrimArray th prevCount (highWater - prevCount) 0
-      setPrimArray oh prevCount (highWater - prevCount) 0
+      setPrimArray (naArrTextHash a) prevCount (highWater - prevCount) 0
+      setPrimArray (naArrOptionsHash a) prevCount (highWater - prevCount) 0
       writeIORef (naHighWater na) prevCount
     else when (prevCount > highWater) (writeIORef (naHighWater na) prevCount)
   prevImages <- readPrimArray (naImageCount na) 0
   when (prevImages > 0) $ do
     imgs <- readIORef (naImages na)
-    let clearImg !i = when (i < prevImages) $ do
-          writeArray imgs i noImageNode
-          clearImg (i + 1)
-    clearImg 0
+    forUpTo_ prevImages (\i -> writeArray imgs i noImageNode)
   writeIORef (naCount na) 0
   writeIORef (naScope na) 0
   writeIORef (naScopeSig na) 0
@@ -278,9 +256,10 @@ resetNodeArena na = do
   -- so untag them all.
   !ft <- readIORef (naFrameTag na)
   writeIORef (naFrameTag na) (if ft == maxBound then 1 else ft + 1)
-  when (ft == maxBound) $ forM_ [naWrapMemo na, naFitMemo na] $ \ref -> do
-    WidthMemo tags _ <- readIORef ref
-    getSizeofMutablePrimArray tags >>= \c -> setPrimArray tags 0 c 0
+  when (ft == maxBound) $ do
+    a <- readIORef (naArrays na)
+    forM_ [naArrWrapMemo a, naArrFitMemo a] $ \(WidthMemo tags _) ->
+      getSizeofMutablePrimArray tags >>= \c -> setPrimArray tags 0 c 0
   -- Bumping the epoch empties the id index. On wrap-around, stale entries
   -- from the previous use of that epoch would read as live, so clear it.
   !ep <- readIORef (naEpoch na)
@@ -291,55 +270,49 @@ resetNodeArena na = do
     then writeIORef (naEpoch na) 1 >> setPrimArray slots 0 (2 * (mask + 1)) 0
     else writeIORef (naEpoch na) ep'
 
-
 {-# NOINLINE ensureCapacity #-}
 ensureCapacity :: NodeArena -> Int -> IO ()
 ensureCapacity na needed = do
   cap <- readIORef (naCapacity na)
   when (needed >= cap) $ do
     let newCap = cap * 2
-    newA <- readIORef (naArrays na) >>= growNodeArenaArrays cap newCap
-    forM_ [naWrapMemo na, naFitMemo na] $ \ref -> do
-      WidthMemo tags slots <- readIORef ref
-      wmTags <- growPrimArrayCopy tags cap newCap 0
-      wmSlots <- growPrimArrayCopy slots (cap * memoStride) (newCap * memoStride) 0
-      writeIORef ref WidthMemo {..}
+    newA <- readIORef (naArrays na) >>= growNodeArenaArrays (naClassCounts na) cap newCap
     writeIORef (naArrays na) newA
-    let growRef r old new = readIORef r >>= \a -> writeIORef r =<< growPrimArrayCopy a old new 0
-    growRef (naTextHash na) cap newCap
-    growRef (naOptionsHash na) cap newCap
-    growRef (naOwnHash na) cap newCap
-    growRef (naPaintHash na) cap newCap
-    growRef (naSubHash na) cap newCap
-    growRef (naMeasured na) (cap * 2) (newCap * 2)
-    growRef (naOffered na) (cap * 4) (newCap * 4)
-    growRef (naUnsnapped na) (cap * 4) (newCap * 4)
-    growRef (naSpans na) cap newCap
-    -- Each class list starts at a multiple of the capacity, so the lists move
-    -- apart as it grows.
-    oldClass <- readIORef (naClassNodes na)
-    newClass <- newPrimArray (newCap * nodeClassCount)
-    forM_ [0 .. nodeClassCount - 1] $ \c -> do
-      k <- readPrimArray (naClassCounts na) c
-      copyMutablePrimArray newClass (c * newCap) oldClass (c * cap) k
-    writeIORef (naClassNodes na) newClass
     writeIORef (naCapacity na) newCap
 
 -- | Copy of @a@ with room for @newCap@ nodes; new slots are zero or empty.
-growNodeArenaArrays :: Int -> Int -> NodeArenaArrays -> IO NodeArenaArrays
-growNodeArenaArrays cap newCap a = do
-  naArrGeom <- growPrimArrayCopy (naArrGeom a) (cap * geomStride) (newCap * geomStride) 0
-  naArrStyle <- growPrimArrayCopy (naArrStyle a) (cap * styleStride) (newCap * styleStride) 0
-  naArrTags <- growPrimArrayCopy (naArrTags a) (cap * tagStride) (newCap * tagStride) 0
-  naArrTree <- growPrimArrayCopy (naArrTree a) (cap * treeStride) (newCap * treeStride) 0
-  naArrTextStore <- growBoxedStoreCopy T.empty (naArrTextStore a) cap newCap
-  naArrOptionsStore <- growBoxedStoreCopy [] (naArrOptionsStore a) cap newCap
-  naArrOptionsLast <- growBoxedStoreCopy [] (naArrOptionsLast a) cap newCap
-  naArrFontColor <- growPrimArrayCopy (naArrFontColor a) cap newCap 0
-  naArrStyleIdx <- growPrimArrayCopy (naArrStyleIdx a) cap newCap 0
-  naArrScope <- growPrimArrayCopy (naArrScope a) cap newCap 0
-  naArrImageId <- growPrimArrayCopy (naArrImageId a) cap newCap 0
-  pure NodeArenaArrays {..}
+growNodeArenaArrays :: IOArr Int -> Int -> Int -> NodeArenaArrays -> IO NodeArenaArrays
+growNodeArenaArrays classCounts cap newCap a = do
+  let growMemo (WidthMemo tags slots) =
+        WidthMemo <$> growPrimArrayCopy tags cap newCap 0 <*> growPrimArrayCopy slots (cap * memoStride) (newCap * memoStride) 0
+  cn <- newPrimArray (newCap * nodeClassCount)
+  forM_ [0 .. nodeClassCount - 1] $ \c -> do
+    k <- readPrimArray classCounts c
+    copyMutablePrimArray cn (c * newCap) (naArrClassNodes a) (c * cap) k
+  NodeArenaArrays
+    <$> growPrimArrayCopy (naArrGeom a) (cap * geomStride) (newCap * geomStride) 0
+    <*> growPrimArrayCopy (naArrStyle a) (cap * styleStride) (newCap * styleStride) 0
+    <*> growPrimArrayCopy (naArrTags a) (cap * tagStride) (newCap * tagStride) 0
+    <*> growPrimArrayCopy (naArrTree a) (cap * treeStride) (newCap * treeStride) 0
+    <*> growPrimArrayCopy (naArrStyleIdx a) cap newCap 0
+    <*> growBoxedStoreCopy T.empty (naArrTextStore a) cap newCap
+    <*> growBoxedStoreCopy [] (naArrOptionsStore a) cap newCap
+    <*> growBoxedStoreCopy [] (naArrOptionsLast a) cap newCap
+    <*> growPrimArrayCopy (naArrFontColor a) cap newCap 0
+    <*> growPrimArrayCopy (naArrScope a) cap newCap 0
+    <*> growPrimArrayCopy (naArrImageId a) cap newCap 0
+    <*> growPrimArrayCopy (naArrTextHash a) cap newCap 0
+    <*> growPrimArrayCopy (naArrOptionsHash a) cap newCap 0
+    <*> growPrimArrayCopy (naArrOwnHash a) cap newCap 0
+    <*> growPrimArrayCopy (naArrPaintHash a) cap newCap 0
+    <*> growPrimArrayCopy (naArrSubHash a) cap newCap 0
+    <*> growPrimArrayCopy (naArrMeasured a) (cap * 2) (newCap * 2) 0
+    <*> growPrimArrayCopy (naArrOffered a) (cap * 4) (newCap * 4) 0
+    <*> growPrimArrayCopy (naArrUnsnapped a) (cap * 4) (newCap * 4) 0
+    <*> growPrimArrayCopy (naArrSpans a) cap newCap 0
+    <*> pure cn
+    <*> growMemo (naArrWrapMemo a)
+    <*> growMemo (naArrFitMemo a)
 
 -- | Keep a non-negative parent; otherwise attach to node 0 if it exists, or
 -- return -1 for an empty arena. This keeps top-level floating nodes reachable
@@ -456,49 +429,42 @@ addNode na nt parent Layout {..} = do
   -- The creation inputs from a constant seed, with no position: the node's
   -- paint hash starts here. Its own hash, the layout cache's key, adds its
   -- index and parent.
-  let !content =
-        foldl'
-          (\acc (t, v) -> mixTagged acc t v)
-          (0x6E616E6F2D7569 :: Word64)
-          [ (0x4e54, fromIntegral (fromEnum nt))
-          , (0x4449, fromIntegral (fromEnum layoutDirection))
-          , (0x5754, fromIntegral (fromEnum wTag))
-          , (0x5746, fromIntegral (castFloatToWord32 wVal))
-          , (0x4854, fromIntegral (fromEnum hTag))
-          , (0x4846, fromIntegral (castFloatToWord32 hVal))
-          , (0x504c, fromIntegral (castFloatToWord32 (padL pad)))
-          , (0x5052, fromIntegral (castFloatToWord32 (padR pad)))
-          , (0x5054, fromIntegral (castFloatToWord32 (padT pad)))
-          , (0x5042, fromIntegral (castFloatToWord32 (padB pad)))
-          , (0x4741, fromIntegral (castFloatToWord32 layoutGap))
-          , (0x4d57, fromIntegral (castFloatToWord32 layoutMinW))
-          , (0x4d48, fromIntegral (castFloatToWord32 layoutMinH))
-          , (0x5857, fromIntegral (castFloatToWord32 layoutMaxW))
-          , (0x5848, fromIntegral (castFloatToWord32 layoutMaxH))
-          , (0x4743, fromIntegral layoutGridCols)
-          , (0x474d, fromIntegral (castFloatToWord32 layoutGridMinColW))
-          , (0x4648, fromIntegral (castFloatToWord32 layoutFontSize))
-          , (0x4158, fromIntegral axByte)
-          , (0x4159, fromIntegral ayByte)
-          , (0x4941, fromIntegral (fromEnum layoutItemsAlign) .|. fromIntegral (fromEnum layoutJustify) `shiftL` 8)
-          , (0x464c, fromIntegral (fromEnum flow))
-          , (0x4c47, fromIntegral (castFloatToWord32 lineGap))
-          , (0x5049, fromIntegral (fromEnum pinned))
-          , (0x5058, fromIntegral (castFloatToWord32 pinX))
-          , (0x5059, fromIntegral (castFloatToWord32 pinY))
-          , (0x4153, fromIntegral (castFloatToWord32 layoutAspect) .|. fromIntegral (fromEnum layoutLineAlign) `shiftL` 32)
-          ]
+  let packW :: Word32 -> Word32 -> Word64
+      packW hi lo = fromIntegral hi `shiftL` 32 .|. fromIntegral lo
+      !enumsWord =
+        fromIntegral (fromEnum nt)
+          .|. (fromIntegral (fromEnum layoutDirection) `shiftL` 8)
+          .|. (fromIntegral (fromEnum wTag) `shiftL` 16)
+          .|. (fromIntegral (fromEnum hTag) `shiftL` 24)
+          .|. (fromIntegral axByte `shiftL` 32)
+          .|. (fromIntegral ayByte `shiftL` 40)
+          .|. (fromIntegral (fromEnum layoutItemsAlign) `shiftL` 48)
+          .|. (fromIntegral (fromEnum layoutJustify) `shiftL` 56)
+      !flagsWord =
+        fromIntegral (fromEnum flow)
+          .|. (fromIntegral (fromEnum pinned) `shiftL` 8)
+          .|. (fromIntegral (fromEnum layoutLineAlign) `shiftL` 16)
+      !content =
+        let !h1 = mixTagged 0x6E616E6F2D7569 1 enumsWord
+            !h2 = mixTagged h1 2 flagsWord
+            !h3 = mixTagged h2 3 (packF2 wVal hVal)
+            !h4 = mixTagged h3 4 (packF2 (padL pad) (padR pad))
+            !h5 = mixTagged h4 5 (packF2 (padT pad) (padB pad))
+            !h6 = mixTagged h5 6 (packF2 layoutGap lineGap)
+            !h7 = mixTagged h6 7 (packF2 layoutMinW layoutMinH)
+            !h8 = mixTagged h7 8 (packF2 layoutMaxW layoutMaxH)
+            !h9 = mixTagged h8 9 (packW (fromIntegral layoutGridCols) (castFloatToWord32 layoutGridMinColW))
+            !h10 = mixTagged h9 10 (packF2 layoutFontSize layoutAspect)
+         in mixTagged h10 11 (packF2 pinX pinY)
       !nodeSig = mixTagged (mixTagged content 0x4958 (fromIntegral idx)) 0x5041 (fromIntegral (parent + 1))
   mixInputSig na 0x4e4f nodeSig
-  ownA <- readIORef (naOwnHash na)
-  writePrimArray ownA idx nodeSig
+  writePrimArray (naArrOwnHash a) idx nodeSig
   scope <- readIORef (naScope na)
   writePrimArray (naArrScope a) idx scope
   -- Bit 1 marks inert (input-only) scopes, which have no visual effect and
   -- must not trigger paint-scope invalidation.
   let !paintScope = scope .&. complement 2
-  paintA <- readIORef (naPaintHash na)
-  writePrimArray paintA idx (mixTagged content 0x5343 (fromIntegral paintScope))
+  writePrimArray (naArrPaintHash a) idx (mixTagged content 0x5343 (fromIntegral paintScope))
 
   -- The font colour is paint state, so the input signature leaves it out.
   case layoutFontColor of
@@ -518,14 +484,14 @@ addNode na nt parent Layout {..} = do
     cc <- readTree a parent TreeChildCount
     writeTree a parent TreeChildCount (cc + 1)
     when pinned $ markAncestorTag a TagPinnedBelow parent
-  when (isFloatingNode nt) $ pushClassNode na FloatingNodes idx
-  when (nt == NodePanel || nt == NodeScrollContainer) $ pushClassNode na BackdropNodes idx
-  when (flow == Layered || pinned) $ pushClassNode na LayeredNodes idx
+  when (isFloatingNode nt) $ pushClassNode na a FloatingNodes idx
+  when (nt == NodePanel || nt == NodeScrollContainer) $ pushClassNode na a BackdropNodes idx
+  when (flow == Layered || pinned) $ pushClassNode na a LayeredNodes idx
   when (isWidgetNode nt || isScrollNode nt || pointerMode == PointerBlock) $ do
-    pushClassNode na PointerNodes idx
+    pushClassNode na a PointerNodes idx
     when (isScrollNode nt || nt == NodeTextArea || pointerMode == PointerBlock) $
       markAncestorTag a TagScrollerBelow idx
-  when (nt == NodeDrawing) $ pushClassNode na DrawingNodes idx
+  when (nt == NodeDrawing) $ pushClassNode na a DrawingNodes idx
   writeIORef (naCount na) (idx + 1)
   pure idx
 
@@ -541,13 +507,12 @@ markAncestorTag a tag = go
 
 -- | Append node @idx@ to the list of class @c@. 'addNode' has made room.
 {-# INLINE pushClassNode #-}
-pushClassNode :: NodeArena -> NodeClass -> NodeIdx -> IO ()
-pushClassNode na c idx = do
+pushClassNode :: NodeArena -> NodeArenaArrays -> NodeClass -> NodeIdx -> IO ()
+pushClassNode na a c idx = do
   let ci = fromEnum c
   k <- readPrimArray (naClassCounts na) ci
   cap <- readIORef (naCapacity na)
-  arr <- readIORef (naClassNodes na)
-  writePrimArray arr (ci * cap + k) idx
+  writePrimArray (naArrClassNodes a) (ci * cap + k) idx
   writePrimArray (naClassCounts na) ci (k + 1)
 
 -- | 'addNode' as a call instead of inlined, for the view's many call sites.
@@ -562,11 +527,10 @@ setNodeText :: NodeArena -> NodeIdx -> Text -> IO ()
 setNodeText na idx txt = do
   a <- arenaArrays na
   old <- readArray (naArrTextStore a) idx
-  h <- cachedHash (naTextHash na) idx (old `ptrEq` txt) 0x54455854 txt
+  h <- cachedHash (naArrTextHash a) idx (old `ptrEq` txt) 0x54455854 txt
   writeArray (naArrTextStore a) idx txt
   writeTree a idx TreeTextIdx idx
   mixNodeInput na idx 0x5458 h
-
 
 -- | Set image node @idx@'s look and natural size. The size is a layout
 -- input, so it is mixed into the node's hash.
@@ -585,29 +549,33 @@ setImageNode na idx node@ImageNode {inWidth = w, inHeight = h} = do
   writePrimArray (naImageCount na) 0 (k + 1)
   a <- arenaArrays na
   writePrimArray (naArrStyleIdx a) idx (fromIntegral (k + 1))
-  mixNodeInput na idx 0x494d (fromIntegral (castFloatToWord32 w) `shiftL` 32 .|. fromIntegral (castFloatToWord32 h))
+  mixNodeInput na idx 0x494d (packF2 w h)
   mixPaintSig na idx 0x4c4b (lookWord (inLook node))
 
 -- | A hash of everything a look draws with, for 'getPaintSignature'.
 lookWord :: ImageLook -> Word64
 lookWord look =
-  foldl'
-    (\acc (t, v) -> mixTagged acc t v)
-    0
-    [ (1, fromIntegral (fromEnum (lookFit look)))
-    , (2, fromIntegral (fromEnum (lookAlignX look)))
-    , (3, fromIntegral (fromEnum (lookAlignY look)))
-    , (4, floatWord (lookOpacity look))
-    , (5, case lookRotation look of RotateFloating r -> floatWord r; RotateSolid r -> 0x100000000 .|. floatWord r)
-    , (6, maybe 0 (const 1) crop)
-    , (7, maybe 0 (\(Rect x y _ _) -> floatWord x `shiftL` 32 .|. floatWord y) crop)
-    , (8, maybe 0 (\(Rect _ _ w h) -> floatWord w `shiftL` 32 .|. floatWord h) crop)
-    , (9, floatWord (lookScale look))
-    , (10, let Color w = lookTint look in fromIntegral w)
-    ]
+  let !h1 =
+        mixTagged 0 1 $
+          fromIntegral (fromEnum (lookFit look))
+            .|. (fromIntegral (fromEnum (lookAlignX look)) `shiftL` 8)
+            .|. (fromIntegral (fromEnum (lookAlignY look)) `shiftL` 16)
+            .|. maybe 0 (const 0x1000000) crop
+      !h2 = mixTagged h1 2 (packF2 (lookOpacity look) (lookScale look))
+      !h3 =
+        mixTagged h2 3 $ case lookRotation look of
+          RotateFloating r -> fromIntegral (castFloatToWord32 r)
+          RotateSolid r -> 0x100000000 .|. fromIntegral (castFloatToWord32 r)
+      !h4 = mixTagged h3 4 (maybe 0 (\(Rect x y _ _) -> packF2 x y) crop)
+      !h5 = mixTagged h4 5 (maybe 0 (\(Rect _ _ w h) -> packF2 w h) crop)
+      Color tintWord = lookTint look
+   in mixTagged h5 6 (fromIntegral tintWord)
   where
     crop = lookCrop look
-    floatWord = fromIntegral . castFloatToWord32
+
+{-# INLINE packF2 #-}
+packF2 :: Float -> Float -> Word64
+packF2 x y = fromIntegral (castFloatToWord32 x) `shiftL` 32 .|. fromIntegral (castFloatToWord32 y)
 
 -- | Set image node @idx@'s image id: the 'NanoUI.ImageId'
 -- it draws, or 0 for none. Layout does not read it, so it is paint state
@@ -629,18 +597,16 @@ setOptions na idx opts = do
   -- cleared: against that, every list would rehash and an empty one would
   -- take an old list's hash.
   old <- readArray (naArrOptionsLast a) idx
-  h <- cachedHash (naOptionsHash na) idx (old `ptrEq` opts) 0x4f505453 opts
+  h <- cachedHash (naArrOptionsHash a) idx (old `ptrEq` opts) 0x4f505453 opts
   writeArray (naArrOptionsStore a) idx opts
   writeArray (naArrOptionsLast a) idx opts
-
   mixNodeInput na idx 0x4f50 h
 
--- | The node's value hash from @ref@ when @same@ says the value is the
+-- | The node's value hash from @arr@ when @same@ says the value is the
 -- object last hashed there, else a fresh hash of @x@, salted and cached.
 {-# INLINE cachedHash #-}
-cachedHash :: Hashable a => IORef (IOArr Word64) -> NodeIdx -> Bool -> Word64 -> a -> IO Word64
-cachedHash ref idx same salt x = do
-  arr <- readIORef ref
+cachedHash :: Hashable a => IOArr Word64 -> NodeIdx -> Bool -> Word64 -> a -> IO Word64
+cachedHash arr idx same salt x = do
   c <- readPrimArray arr idx
   if same && c /= 0
     then pure c
@@ -746,7 +712,7 @@ getPaintSignature na = do
   paint <- readPrimArray (naPaintSig na) 0
   pure (mixTagged (mixTagged (mixTagged input 1 (fromIntegral count)) 2 scope) 3 paint)
 
--- | Compute every node's restore key ('naSubHash'). A first pass, parents
+-- | Compute every node's restore key ('naArrSubHash'). A first pass, parents
 -- before children, parks each node's ancestor chain (its ancestors' own
 -- hashes) in its slot. A second pass, from the last node down so each child's
 -- key is final before its parent reads it, folds the node's own hash and chain
@@ -756,9 +722,9 @@ computeSubtreeHashes :: NodeArena -> IO ()
 computeSubtreeHashes na = do
   n <- arenaCount na
   a <- arenaArrays na
-  own <- readIORef (naOwnHash na)
-  sub <- readIORef (naSubHash na)
-  let chain !i
+  let own = naArrOwnHash a
+      sub = naArrSubHash a
+      chain !i
         | i >= n = pure ()
         | otherwise = do
             p <- readTree a i TreeParent
@@ -790,17 +756,6 @@ walkKids a sub !pos !h !c
       nxt <- readTree a c TreeNextSibling
       walkKids a sub (pos + 1) (mixTagged h pos sh) nxt
 
--- | The subtree-hash and measured-size arrays the solver reads and writes
--- during a solve. Do not retain them across arena growth.
-subtreeArrays :: NodeArena -> IO (IOArr Word64, IOArr Float)
-subtreeArrays na = (,) <$> readIORef (naSubHash na) <*> readIORef (naMeasured na)
-
--- | The offered-rect, unsnapped-rect and span arrays ('naOffered',
--- 'naUnsnapped', 'naSpans') the solver writes during a solve. Do not retain
--- them across arena growth.
-positionArrays :: NodeArena -> IO (IOArr Float, IOArr Float, IOArr Int)
-positionArrays na = (,,) <$> readIORef (naOffered na) <*> readIORef (naUnsnapped na) <*> readIORef (naSpans na)
-
 -- | Store a style code encoded for this node's type. Part of the layout
 -- input signature, except on box, image, and drawing nodes: their style code
 -- is paint data (a colour, a version), which goes in the paint signature
@@ -831,8 +786,8 @@ ensureAxisSnapshot na depth needed = do
         empty <- newAxisSnapshot 0
         levels <- growBoxedStoreCopy empty levels0 sz (max (depth + 1) (sz * 2))
         levels <$ writeIORef (naSnapLevels na) levels
-  s <- readArray levels depth
-  cap <- getSizeofMutablePrimArray (asIdx s)
+  s@(AxisSnapshot idxArr _) <- readArray levels depth
+  cap <- getSizeofMutablePrimArray idxArr
   if needed <= cap
     then pure s
     else do
@@ -847,10 +802,9 @@ newAxisSnapshot cap = AxisSnapshot <$> newPrimArray cap <*> newPrimArray cap
 -- an entry: text that fits 144 px exactly wraps at 143.8, so a wider
 -- tolerance can hand back a different line count than paint draws.
 {-# INLINE memoizeWidth #-}
-memoizeWidth :: NodeArena -> IORef WidthMemo -> NodeIdx -> Float -> IO (Float, Float) -> IO (Float, Float)
-memoizeWidth na ref idx key compute = do
+memoizeWidth :: NodeArena -> WidthMemo -> NodeIdx -> Float -> IO (Float, Float) -> IO (Float, Float)
+memoizeWidth na (WidthMemo tags slots) idx key compute = do
   ft <- readIORef (naFrameTag na)
-  WidthMemo tags slots <- readIORef ref
   tag <- readPrimArray tags idx
   let !base = idx * memoStride
   hit <-

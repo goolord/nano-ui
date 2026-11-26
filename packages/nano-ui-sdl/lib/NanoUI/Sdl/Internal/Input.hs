@@ -21,6 +21,7 @@ module NanoUI.Sdl.Internal.Input
   , syncTextInput
   ) where
 
+import Control.Exception (bracket)
 import Control.Monad (mfilter, void, when)
 import Data.Bits ((.&.))
 import Data.Char (chr, isPrint, toLower)
@@ -43,66 +44,11 @@ import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import NanoUI (Rect (..), V2 (..), WidgetId (..), v2Add)
 import NanoUI.Backend
 import NanoUI.Sdl.Internal.Display (refreshEventType)
-import SDL3.Sys.Bindgen.Events
-  ( SDL_Event (..)
-  , SDL_EventType (..)
-  , SDL_KeyboardEvent
-  )
+import SDL3.Sys.Bindgen.Events (SDL_Event (..), SDL_EventType (..), SDL_KeyboardEvent)
 import SDL3.Sys.Bindgen.Events qualified as Events
 import SDL3.Sys.Events (pollEventSafe, waitEventSafe, waitEventTimeoutSafe)
-import SDL3.Sys.Bindgen.Keycode
-  ( SDL_Keycode (..)
-  , SDL_Keymod (..)
-  , sDLK_APPLICATION
-  , sDLK_BACKSPACE
-  , sDLK_CAPSLOCK
-  , sDLK_DELETE
-  , sDLK_DOWN
-  , sDLK_END
-  , sDLK_ESCAPE
-  , sDLK_F1
-  , sDLK_F12
-  , sDLK_F13
-  , sDLK_F24
-  , sDLK_HOME
-  , sDLK_INSERT
-  , sDLK_KP_0
-  , sDLK_KP_1
-  , sDLK_KP_2
-  , sDLK_KP_3
-  , sDLK_KP_4
-  , sDLK_KP_5
-  , sDLK_KP_6
-  , sDLK_KP_7
-  , sDLK_KP_8
-  , sDLK_KP_9
-  , sDLK_KP_DIVIDE
-  , sDLK_KP_ENTER
-  , sDLK_KP_EQUALS
-  , sDLK_KP_MINUS
-  , sDLK_KP_MULTIPLY
-  , sDLK_KP_PERIOD
-  , sDLK_KP_PLUS
-  , sDLK_LEFT
-  , sDLK_MENU
-  , sDLK_NUMLOCKCLEAR
-  , sDLK_PAGEDOWN
-  , sDLK_PAGEUP
-  , sDLK_PAUSE
-  , sDLK_PRINTSCREEN
-  , sDLK_RETURN
-  , sDLK_RIGHT
-  , sDLK_SCANCODE_MASK
-  , sDLK_SCROLLLOCK
-  , sDLK_SPACE
-  , sDLK_TAB
-  , sDLK_UP
-  , sDL_KMOD_ALT
-  , sDL_KMOD_CTRL
-  , sDL_KMOD_GUI
-  , sDL_KMOD_NUM
-  , sDL_KMOD_SHIFT
-  )
+import SDL3.Sys.Bindgen.Keycode (SDL_Keycode (..), SDL_Keymod (..))
+import SDL3.Sys.Bindgen.Keycode qualified as K
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Stdinc (Uint32 (..))
 import SDL3.Sys.Bindgen.Video (SDL_Window)
@@ -195,74 +141,61 @@ waitWindowEvent ms =
     got <- if ms < 0 then waitEventSafe p else waitEventTimeoutSafe p (fromIntegral ms)
     if got then refreshEventType >>= \ty -> decodeWindowEvent ty p else pure Nothing
 
--- | 'decodeEvent' with the window id. Every event decoded for one window
--- (window, keyboard, text, mouse, drop and render events) keeps it right
--- after the common header, at the same offset in each.
+-- | Translate one SDL event with its window id (0 for events addressed to
+-- every window); 'Nothing' for events the UI ignores. Every per-window event
+-- (window, keyboard, text, mouse, drop and render events) keeps its window id
+-- right after the common header, at byte offset 16. A lost render device,
+-- which ends the session, throws.
 decodeWindowEvent :: Word32 -> Ptr SDL_Event -> IO (Maybe (Word32, SdlEvent))
-decodeWindowEvent refreshTy p =
-  decodeEvent refreshTy p >>= traverse (\case
-    EvQuit -> pure (0, EvQuit)
-    EvRefresh -> pure (0, EvRefresh)
-    EvSystemThemeChanged -> pure (0, EvSystemThemeChanged)
-    -- A display's mode change names the display, not a window: it is for
-    -- every window.
-    EvDisplayChanged -> peek p.type' >>= \(Uint32 ty) ->
-      if SDL_EventType (fromIntegral ty) == Events.SDL_EVENT_WINDOW_DISPLAY_CHANGED
-        then (,EvDisplayChanged) <$> peekByteOff p 16
-        else pure (0, EvDisplayChanged)
-    ev -> (,ev) <$> peekByteOff p 16)
-
--- | Translate one SDL event, given the refresh event type; 'Nothing' for
--- events the UI ignores. A lost render device, which ends the session,
--- throws.
-decodeEvent :: Word32 -> Ptr SDL_Event -> IO (Maybe SdlEvent)
-decodeEvent refreshTy p = do
+decodeWindowEvent refreshTy p = do
   Uint32 w <- peek p.type'
+  let global ev = pure (Just (0, ev))
+      winEv ev = (\wid -> Just (wid, ev)) <$> peekByteOff p 16
   if refreshTy /= 0 && w == refreshTy
-    then pure (Just EvRefresh)
+    then global EvRefresh
     else case SDL_EventType (fromIntegral w) of
-      Events.SDL_EVENT_QUIT -> pure (Just EvQuit)
-      Events.SDL_EVENT_WINDOW_RESIZED -> pure (Just EvWindowChanged)
-      Events.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED -> pure (Just EvWindowChanged)
-      Events.SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED -> pure (Just EvWindowChanged)
-      Events.SDL_EVENT_SYSTEM_THEME_CHANGED -> pure (Just EvSystemThemeChanged)
-      Events.SDL_EVENT_WINDOW_DISPLAY_CHANGED -> pure (Just EvDisplayChanged)
-      Events.SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED -> pure (Just EvDisplayChanged)
+      Events.SDL_EVENT_QUIT -> global EvQuit
+      Events.SDL_EVENT_SYSTEM_THEME_CHANGED -> global EvSystemThemeChanged
+      -- A display's mode change names the display, not a window: it is for
+      -- every window.
+      Events.SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED -> global EvDisplayChanged
+      Events.SDL_EVENT_WINDOW_DISPLAY_CHANGED -> winEv EvDisplayChanged
+      Events.SDL_EVENT_WINDOW_RESIZED -> winEv EvWindowChanged
+      Events.SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED -> winEv EvWindowChanged
+      Events.SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED -> winEv EvWindowChanged
       -- The window manager damaged our window surface (occlusion, compositor
-      -- effects, restore). The backbuffer contents are gone; the next present
-      -- must be full or stale regions flash.
-      Events.SDL_EVENT_WINDOW_EXPOSED -> pure (Just EvWindowRedraw)
-      Events.SDL_EVENT_WINDOW_RESTORED -> pure (Just EvWindowRedraw)
-      -- The renderer's targets lost their contents, the retained frame's
-      -- among them.
-      Events.SDL_EVENT_RENDER_TARGETS_RESET -> pure (Just EvWindowRedraw)
+      -- effects, restore) or reset render targets. The backbuffer contents are
+      -- gone; the next present must be full or stale regions flash.
+      Events.SDL_EVENT_WINDOW_EXPOSED -> winEv EvWindowRedraw
+      Events.SDL_EVENT_WINDOW_RESTORED -> winEv EvWindowRedraw
+      Events.SDL_EVENT_RENDER_TARGETS_RESET -> winEv EvWindowRedraw
       -- Every texture lost its contents, the atlases too (a Direct3D device
       -- removed by a driver update or a remote desktop reconnecting).
-      Events.SDL_EVENT_RENDER_DEVICE_RESET -> pure (Just EvRenderDeviceReset)
+      Events.SDL_EVENT_RENDER_DEVICE_RESET -> winEv EvRenderDeviceReset
       Events.SDL_EVENT_RENDER_DEVICE_LOST -> ioError (userError "SDL lost the render device, and with it the renderer")
-      Events.SDL_EVENT_KEY_DOWN -> Just . keyEvent True <$> peek p.key
-      Events.SDL_EVENT_KEY_UP -> Just . keyEvent False <$> peek p.key
-      Events.SDL_EVENT_TEXT_INPUT -> textInput p
-      Events.SDL_EVENT_TEXT_EDITING -> textEditing p
+      Events.SDL_EVENT_KEY_DOWN -> peek p.key >>= winEv . keyEvent True
+      Events.SDL_EVENT_KEY_UP -> peek p.key >>= winEv . keyEvent False
+      Events.SDL_EVENT_TEXT_INPUT -> textInput p >>= traverse (\ev -> (,ev) <$> peekByteOff p 16)
+      Events.SDL_EVENT_TEXT_EDITING -> textEditing p >>= winEv
       -- SDL stops text input while the window is in the background, which
       -- can drop the composition silently. End it here, or a field would
       -- keep showing it and routing keys to it.
-      Events.SDL_EVENT_WINDOW_FOCUS_LOST -> pure (Just EvFocusLost)
-      Events.SDL_EVENT_WINDOW_CLOSE_REQUESTED -> pure (Just EvCloseRequested)
+      Events.SDL_EVENT_WINDOW_FOCUS_LOST -> winEv EvFocusLost
+      Events.SDL_EVENT_WINDOW_CLOSE_REQUESTED -> winEv EvCloseRequested
       Events.SDL_EVENT_MOUSE_MOTION -> do
         me <- peek p.motion
-        Just . EvMouseMotion (v2 (getField @"x" me) (getField @"y" me)) <$> peekModifiers
-      Events.SDL_EVENT_WINDOW_MOUSE_LEAVE -> pure (Just EvMouseLeave)
-      Events.SDL_EVENT_MOUSE_BUTTON_DOWN -> Just <$> mouseButton p True
-      Events.SDL_EVENT_MOUSE_BUTTON_UP -> Just <$> mouseButton p False
+        peekModifiers >>= winEv . EvMouseMotion (v2 (getField @"x" me) (getField @"y" me))
+      Events.SDL_EVENT_WINDOW_MOUSE_LEAVE -> winEv EvMouseLeave
+      Events.SDL_EVENT_MOUSE_BUTTON_DOWN -> mouseButton p True >>= winEv
+      Events.SDL_EVENT_MOUSE_BUTTON_UP -> mouseButton p False >>= winEv
       Events.SDL_EVENT_MOUSE_WHEEL -> do
         we <- peek p.wheel
-        pure (Just (EvScroll (v2 (getField @"x" we) (negate (getField @"y" we)))))
-      Events.SDL_EVENT_DROP_FILE -> dropEvent p DropFile
-      Events.SDL_EVENT_DROP_TEXT -> dropEvent p DropText
-      Events.SDL_EVENT_DROP_BEGIN -> dropEvent p DropBegin
-      Events.SDL_EVENT_DROP_COMPLETE -> dropEvent p DropComplete
-      Events.SDL_EVENT_DROP_POSITION -> dropEvent p DropPosition
+        winEv (EvScroll (v2 (getField @"x" we) (negate (getField @"y" we))))
+      Events.SDL_EVENT_DROP_FILE -> dropEvent p DropFile >>= winEv
+      Events.SDL_EVENT_DROP_TEXT -> dropEvent p DropText >>= winEv
+      Events.SDL_EVENT_DROP_BEGIN -> dropEvent p DropBegin >>= winEv
+      Events.SDL_EVENT_DROP_COMPLETE -> dropEvent p DropComplete >>= winEv
+      Events.SDL_EVENT_DROP_POSITION -> dropEvent p DropPosition >>= winEv
       _ -> pure Nothing
 
 v2 :: CFloat -> CFloat -> V2
@@ -283,51 +216,62 @@ keyEvent down ke = maybe (EvModifiers mods) (\k -> EvKey k down mods) (sdlKey co
 sdlKey :: CUInt -> SDL_Keymod -> Maybe Key
 sdlKey code km
   | Just named <- lookup code namedKeys = Just named
-  | Just typed <- lookup code keypadKeys = keypadKey (word32 km .&. word32 sDL_KMOD_NUM /= 0) typed
-  | code >= sDLK_F1 && code <= sDLK_F12 = Just (KeyF (fromIntegral (code - sDLK_F1) + 1))
-  | code >= sDLK_F13 && code <= sDLK_F24 = Just (KeyF (fromIntegral (code - sDLK_F13) + 13))
-  | code .&. sDLK_SCANCODE_MASK == 0 && code <= 0x10FFFF, isPrint c = Just (KeyChar (toLower c))
+  | Just typed <- lookup code keypadKeys = keypadKey (word32 km .&. word32 K.sDL_KMOD_NUM /= 0) typed
+  | code >= K.sDLK_F1 && code <= K.sDLK_F12 = Just (KeyF (fromIntegral (code - K.sDLK_F1) + 1))
+  | code >= K.sDLK_F13 && code <= K.sDLK_F24 = Just (KeyF (fromIntegral (code - K.sDLK_F13) + 13))
+  | code .&. K.sDLK_SCANCODE_MASK == 0 && code <= 0x10FFFF, isPrint c = Just (KeyChar (toLower c))
   | otherwise = Nothing
   where
     c = chr (fromIntegral code)
 
 namedKeys :: [(CUInt, Key)]
 namedKeys =
-  [ (sDLK_ESCAPE, KeyEscape)
-  , (sDLK_RETURN, KeyEnter)
-  , (sDLK_TAB, KeyTab)
-  , (sDLK_BACKSPACE, KeyBackspace)
-  , (sDLK_DELETE, KeyDelete)
-  , (sDLK_LEFT, KeyLeft)
-  , (sDLK_RIGHT, KeyRight)
-  , (sDLK_UP, KeyUp)
-  , (sDLK_DOWN, KeyDown)
-  , (sDLK_HOME, KeyHome)
-  , (sDLK_END, KeyEnd)
-  , (sDLK_PAGEUP, KeyPageUp)
-  , (sDLK_PAGEDOWN, KeyPageDown)
-  , (sDLK_INSERT, KeyInsert)
-  , (sDLK_SPACE, KeySpace)
-  , (sDLK_PRINTSCREEN, KeyPrintScreen)
-  , (sDLK_PAUSE, KeyPause)
-  , (sDLK_CAPSLOCK, KeyCapsLock)
-  , (sDLK_NUMLOCKCLEAR, KeyNumLock)
-  , (sDLK_SCROLLLOCK, KeyScrollLock)
-  , (sDLK_APPLICATION, KeyMenu)
-  , (sDLK_MENU, KeyMenu)
-  , (sDLK_KP_ENTER, KeyEnter)
-  , (sDLK_KP_DIVIDE, KeyChar '/')
-  , (sDLK_KP_MULTIPLY, KeyChar '*')
-  , (sDLK_KP_MINUS, KeyChar '-')
-  , (sDLK_KP_PLUS, KeyChar '+')
-  , (sDLK_KP_EQUALS, KeyChar '=')
+  [ (K.sDLK_ESCAPE, KeyEscape)
+  , (K.sDLK_RETURN, KeyEnter)
+  , (K.sDLK_TAB, KeyTab)
+  , (K.sDLK_BACKSPACE, KeyBackspace)
+  , (K.sDLK_DELETE, KeyDelete)
+  , (K.sDLK_LEFT, KeyLeft)
+  , (K.sDLK_RIGHT, KeyRight)
+  , (K.sDLK_UP, KeyUp)
+  , (K.sDLK_DOWN, KeyDown)
+  , (K.sDLK_HOME, KeyHome)
+  , (K.sDLK_END, KeyEnd)
+  , (K.sDLK_PAGEUP, KeyPageUp)
+  , (K.sDLK_PAGEDOWN, KeyPageDown)
+  , (K.sDLK_INSERT, KeyInsert)
+  , (K.sDLK_SPACE, KeySpace)
+  , (K.sDLK_PRINTSCREEN, KeyPrintScreen)
+  , (K.sDLK_PAUSE, KeyPause)
+  , (K.sDLK_CAPSLOCK, KeyCapsLock)
+  , (K.sDLK_NUMLOCKCLEAR, KeyNumLock)
+  , (K.sDLK_SCROLLLOCK, KeyScrollLock)
+  , (K.sDLK_APPLICATION, KeyMenu)
+  , (K.sDLK_MENU, KeyMenu)
+  , (K.sDLK_KP_ENTER, KeyEnter)
+  , (K.sDLK_KP_DIVIDE, KeyChar '/')
+  , (K.sDLK_KP_MULTIPLY, KeyChar '*')
+  , (K.sDLK_KP_MINUS, KeyChar '-')
+  , (K.sDLK_KP_PLUS, KeyChar '+')
+  , (K.sDLK_KP_EQUALS, KeyChar '=')
   ]
 
 -- | Keypad digits and decimal point, with the character each types
 -- ('keypadKey').
 keypadKeys :: [(CUInt, Char)]
 keypadKeys =
-  zip [sDLK_KP_0, sDLK_KP_1, sDLK_KP_2, sDLK_KP_3, sDLK_KP_4, sDLK_KP_5, sDLK_KP_6, sDLK_KP_7, sDLK_KP_8, sDLK_KP_9, sDLK_KP_PERIOD] "0123456789."
+  [ (K.sDLK_KP_0, '0')
+  , (K.sDLK_KP_1, '1')
+  , (K.sDLK_KP_2, '2')
+  , (K.sDLK_KP_3, '3')
+  , (K.sDLK_KP_4, '4')
+  , (K.sDLK_KP_5, '5')
+  , (K.sDLK_KP_6, '6')
+  , (K.sDLK_KP_7, '7')
+  , (K.sDLK_KP_8, '8')
+  , (K.sDLK_KP_9, '9')
+  , (K.sDLK_KP_PERIOD, '.')
+  ]
 
 textInput :: Ptr SDL_Event -> IO (Maybe SdlEvent)
 textInput p = do
@@ -338,12 +282,12 @@ textInput p = do
 -- | The input method's composition. The session sets
 -- @SDL_HINT_IME_IMPLEMENTED_UI@ to @composition@, so SDL sends it to us
 -- instead of letting the input method draw it over the window.
-textEditing :: Ptr SDL_Event -> IO (Maybe SdlEvent)
+textEditing :: Ptr SDL_Event -> IO SdlEvent
 textEditing p = do
   ee <- peek p.edit
   txt <- fromMaybe "" <$> peekText (getField @"text" ee)
   let int v = fromIntegral v :: Int
-  pure (Just (EvEditing txt (int (getField @"start" ee)) (int (getField @"length" ee))))
+  pure (EvEditing txt (int (getField @"start" ee)) (int (getField @"length" ee)))
 
 -- | A button going down or up. SDL numbers buttons the same way as
 -- 'mouseButtonNumber': left, middle, right, X1, X2 from 1, then any extra
@@ -354,7 +298,7 @@ mouseButton p down = do
   let btn = mouseButtonNumber (fromIntegral (getField @"button" be))
   EvMouseButton btn down (v2 (getField @"x" be) (getField @"y" be)) <$> peekModifiers
 
-dropEvent :: Ptr SDL_Event -> DropType -> IO (Maybe SdlEvent)
+dropEvent :: Ptr SDL_Event -> DropType -> IO SdlEvent
 dropEvent p ty = do
   de <- peek p.drop
   let -- A drag entering or finishing has no position.
@@ -362,7 +306,7 @@ dropEvent p ty = do
         | ty == DropBegin || ty == DropComplete = Nothing
         | otherwise = Just (v2 (getField @"x" de) (getField @"y" de))
   payload <- fromMaybe "" <$> peekText (getField @"data'" de)
-  pure (Just (EvDrop (DropEvent ty pos payload)))
+  pure (EvDrop (DropEvent ty pos payload))
 
 -- | Decode an event's UTF-8 string, or 'Nothing' for a null pointer. Bytes
 -- that are not UTF-8 (a dropped file named in a legacy encoding) become
@@ -374,7 +318,13 @@ peekModifiers :: IO Modifiers
 peekModifiers = modFromKeymod <$> getModState
 
 modFromKeymod :: SDL_Keymod -> Modifiers
-modFromKeymod km = modifiersFromBits (word32 km) (word32 sDL_KMOD_SHIFT) (word32 sDL_KMOD_CTRL) (word32 sDL_KMOD_ALT) (word32 sDL_KMOD_GUI)
+modFromKeymod km =
+  modifiersFromBits
+    (word32 km)
+    (word32 K.sDL_KMOD_SHIFT)
+    (word32 K.sDL_KMOD_CTRL)
+    (word32 K.sDL_KMOD_ALT)
+    (word32 K.sDL_KMOD_GUI)
 
 word32 :: Integral a => a -> Word32
 word32 = fromIntegral
@@ -401,9 +351,9 @@ applyEvent inp ev =
     -- damage decides what is presented, if anything.
     EvRefresh -> inp
     EvQuit -> inp
-    EvCloseRequested -> inp
     EvWindowChanged -> inp
     EvSystemThemeChanged -> inp
+    EvCloseRequested -> inp
     EvDisplayChanged -> inp
 
 -- | Events with their pointer and drop positions moved from window
@@ -480,12 +430,11 @@ syncTextInput (TextInputSync ref) win zoom ctx inp = do
 -- | Start text input for a purpose. It picks the on-screen keyboard: a
 -- password's input hides what is typed, and a number's keyboard has digits.
 startTextInput :: Ptr SDL_Window -> InputPurpose -> IO ()
-startTextInput win purpose = do
-  props <- createPropertiesSafe
-  _ <- BS.useAsCString sDL_PROP_TEXTINPUT_TYPE_NUMBER $ \name ->
-    setNumberPropertySafe props (PtrConst.unsafeFromPtr name) (fromIntegral textType)
-  _ <- startTextInputWithPropertiesSafe win props
-  destroyPropertiesSafe props
+startTextInput win purpose =
+  bracket createPropertiesSafe destroyPropertiesSafe $ \props -> do
+    _ <- BS.useAsCString sDL_PROP_TEXTINPUT_TYPE_NUMBER $ \name ->
+      setNumberPropertySafe props (PtrConst.unsafeFromPtr name) (fromIntegral textType)
+    void (startTextInputWithPropertiesSafe win props)
   where
     SDL_TextInputType textType = case purpose of
       InputNormal -> Keyboard.SDL_TEXTINPUT_TYPE_TEXT

@@ -23,7 +23,7 @@
 --   safe for another reason: SDL_PushEvent waits for the lock SDL holds
 --   while the resize watch runs.
 -- * A callback made with a @wrapper@ import is freed with
---   'freeHaskellFunPtr' when it is removed ('installResizeWatch'); the file
+--   'freeHaskellFunPtr' when it is removed ('watchResizes'); the file
 --   dialog's callback is made once per process, so SDL can never call a freed
 --   one. The C objects nano-ui creates (render batch, text atlas) are
 --   destroyed by the session that created them, and text SDL returns (the
@@ -39,7 +39,6 @@ module NanoUI.Sdl.Internal.Display
   , outPair
   , zoomWindow
   , windowPosCentered
-  , installResizeWatch
   , ResizeWatches (..)
   , newResizeWatches
   , watchResizes
@@ -126,20 +125,6 @@ outPair f = alloca $ \pa -> alloca $ \pb -> do
   r <- f pa pb
   (r,,) <$> peek pa <*> peek pb
 
--- | Install a resize event watch scoped to a window (or any window when null).
--- Windows runs a modal loop while the user drags the border, so the app
--- event loop does not run. SDL still delivers resize events to this watch.
-installResizeWatch :: Ptr SDL_Window -> IO () -> IO (IO ())
-installResizeWatch win act = do
-  fp <- mkResizeCb act
-  handle <- installResizeWatchC win fp
-  when (handle == nullPtr) $ do
-    freeHaskellFunPtr fp
-    sdlFail "SDL_AddEventWatch failed"
-  pure $ do
-    removeResizeWatchC handle
-    freeHaskellFunPtr fp
-
 -- | What the resize watches of a session's windows share.
 data ResizeWatches = ResizeWatches
   { rwDrawing :: !DrawingLock
@@ -157,14 +142,19 @@ data ResizeWatches = ResizeWatches
 newResizeWatches :: IO ResizeWatches
 newResizeWatches = ResizeWatches <$> newDrawingLock <*> newIORef Nothing
 
--- | Install a resize watch on a window ('installResizeWatch') whose action
--- runs under the drawing lock and keeps its exception for the loop; answer
--- the action that removes it.
+-- | Install a resize event watch scoped to a window (or any window when null)
+-- whose action runs under the drawing lock and keeps its exception for the
+-- loop; answer the action that removes it. Windows runs a modal loop while the
+-- user drags the border, so the app event loop does not run; SDL still
+-- delivers resize events to this watch.
 watchResizes :: ResizeWatches -> Ptr SDL_Window -> IO () -> IO (IO ())
-watchResizes rws win frame =
-  installResizeWatch win $ whenM (isNothing <$> readIORef (rwFailure rws)) $
+watchResizes rws win frame = do
+  fp <- mkResizeCb $ whenM (isNothing <$> readIORef (rwFailure rws)) $
     E.handle (\(e :: SomeException) -> writeIORef (rwFailure rws) (Just e)) $
       void (tryWithDrawingLock (rwDrawing rws) frame)
+  handle <- installResizeWatchC win fp
+  when (handle == nullPtr) $ freeHaskellFunPtr fp >> sdlFail "SDL_AddEventWatch failed"
+  pure (removeResizeWatchC handle >> freeHaskellFunPtr fp)
 
 -- | Throw the exception a watch frame threw, if any, on the loop's thread.
 rethrowResizeFailure :: ResizeWatches -> IO ()
@@ -192,7 +182,7 @@ initRefreshEvent =
 --
 -- The push is a safe foreign call. SDL_PushEvent waits for the lock SDL
 -- holds while it runs event watches, and the resize watch
--- ('installResizeWatch') runs Haskell. Pushed from a worker thread as an
+-- ('watchResizes') runs Haskell. Pushed from a worker thread as an
 -- unsafe call, it would keep the capability that watch is waiting for
 -- while it waits for the lock the watch holds, and the program would hang.
 pushRefreshEvent :: IO ()

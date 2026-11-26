@@ -25,7 +25,7 @@ import NanoUI.Internal.Layout.ScrollGeometry (scrollAxisRange, scrollBare, scrol
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Input (MouseButton (..), inputMousePos, inputScroll)
 import NanoUI.Internal.Layout.Arena (setStyleIdx, setWidgetId)
-import NanoUI.Internal.Monad (NanoUI, askDefaultLayout, askInput, disabledWhen, freshWidget, lastRect, nextId, liftIO, styled, uiFontSize, uiTheme, withContext, withKey)
+import NanoUI.Internal.Monad (NanoUI, askInput, disabledWhen, freshWidget, lastRect, nextId, liftIO, styled, uiFontSize, uiTheme, withContext, withKey)
 import NanoUI.Internal.Var (Binding (..), bindVarOn)
 import NanoUI.Internal.Var.Types (Var, zoomVar)
 import NanoUI.Internal.Store (fieldInt, findSpec, lookupSlot, slotWrite, specKey, specWrite)
@@ -34,7 +34,7 @@ import NanoUI.Internal.Style
 import NanoUI.Internal.Types (Color, Rect (..), clamp, rectContains, rectIntersect, rectW, v2Y)
 import NanoUI.Internal.WidgetText (TabChrome (..), buttonCloseTab, buttonFlagClose, tabChromeEncode, tabEncodeStyle)
 import NanoUI.Internal.Widgets.Adornment (Adornments, adornButton, control, trailing, view)
-import NanoUI.Internal.Widgets.Combinators (buttonStyledEx)
+import NanoUI.Internal.Widgets.Combinators (buttonStyledEx, widgetBaseLayout)
 import NanoUI.Internal.Widgets.Layout (column', columnWith, labelEx, panel', row', rowWith, scrollAreaIdConfigured)
 import NanoUI.Internal.Widgets.Node
 
@@ -61,6 +61,9 @@ data TabOrientation = TabTop | TabBottom | TabLeft | TabRight
 
 instance Hashable TabOrientation where
   hashWithSalt salt = hashWithSalt salt . fromEnum
+
+isVertical :: TabOrientation -> Bool
+isVertical o = o == TabLeft || o == TabRight
 
 -- | Header look and placement for 'tabsConfigured' and 'tabBarConfigured'.
 data TabsConfig = TabsConfig
@@ -154,7 +157,7 @@ tabStrip ::
   NanoUI (TabResponse a)
 tabStrip (TabsConfig style orient trailingView) cur tabList mRenderBody = do
   (groupId, ctx) <- freshWidget
-  let vertical = orient == TabLeft || orient == TabRight
+  let vertical = isVertical orient
       -- Headers ahead of the body take this frame's clicks. A body ahead of
       -- them ran with the key passed in, so they show it too, and the
       -- binding reruns the view to show the new one.
@@ -378,26 +381,19 @@ renderHeaders ctx style orient follow cur tabList = do
 renderHeader :: Eq a => TabStyle -> TabOrientation -> a -> Tab a body -> NanoUI (a, Response, Bool)
 renderHeader style orient cur t = disabledWhen (tabDisabled t) $ do
   theme <- uiTheme
-  amb <- askDefaultLayout
+  lay <- widgetBaseLayout (tabHeaderLay (isVertical orient)) id
   let isActive = tabKey t == cur
       packed = tabEncodeStyle (fromEnum style) (fromEnum orient)
-      lay = inheritFont amb (tabHeaderLay (orient == TabLeft || orient == TabRight))
       labelCol = styleFg (tabHeaderVisualStyle theme packed isActive)
   resp <- buttonStyledEx (not (tabDisabled t)) (tabTitle t) (if isActive then 1 else 0) lay packed
-  closeRef <- if tabClosable t then Just <$> liftIO (newIORef Nothing) else pure Nothing
+  closeRef <- if tabClosable t then Just <$> liftIO (newIORef False) else pure Nothing
   let badge = foldMap (trailing . view . tabBadgeView labelCol) (tabBadge t)
-      closeButton ref =
-        buttonStyledEx True "\215" 0 (tight . fixedWH 18 18 . fontColor labelCol $ defaultLayout) (buttonFlagClose .|. buttonCloseTab)
-          >>= liftIO . writeIORef ref . Just
-      close = foldMap (trailing . control . closeButton) closeRef
-  header <- adornButton resp lay (const labelCol) (tabAdornments t <> badge <> close)
-  closeResp <- maybe (pure Nothing) (liftIO . readIORef) closeRef
-  let closed =
-        tabClosable t
-          && ( maybe False (\c -> respClicked c || respClickedWith MouseMiddle c) closeResp
-                 || respClickedWith MouseMiddle header
-             )
-  pure (tabKey t, header, closed)
+      closeButton ref = do
+        c <- buttonStyledEx True "\215" 0 (tight . fixedWH 18 18 . fontColor labelCol $ defaultLayout) (buttonFlagClose .|. buttonCloseTab)
+        liftIO (writeIORef ref (respClicked c || respClickedWith MouseMiddle c))
+  header <- adornButton resp lay (const labelCol) (tabAdornments t <> badge <> foldMap (trailing . control . closeButton) closeRef)
+  btnClosed <- maybe (pure False) (liftIO . readIORef) closeRef
+  pure (tabKey t, header, tabClosable t && (btnClosed || respClickedWith MouseMiddle header))
 
 -- | A badge: its text, smaller, in a pill of the label colour @col@.
 tabBadgeView :: Color -> Text -> NanoUI ()
@@ -440,8 +436,7 @@ tabsConfigured' cfg active inputTabs = bindTabs cfg True active (\cur -> tabStri
     -- surface the selected header opens onto.
     body k = do
       let contained = tabsStyle cfg == TabContained
-          vertical = tabsOrientation cfg `elem` [TabLeft, TabRight]
-          surface = if contained then padAll 12 . (if vertical then fillH else id) else id
+          surface = if contained then padAll 12 . (if isVertical (tabsOrientation cfg) then fillH else id) else id
       bodyId <- if contained then withKey ("tab-body" :: Text) (Just <$> nextId) else pure Nothing
       columnWith (surface . tight . fillW) $ do
         mapM_ (\wid -> tagTabChrome wid TabChromeBody (tabsStyle cfg) (tabsOrientation cfg)) bodyId

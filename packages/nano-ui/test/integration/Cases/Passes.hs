@@ -99,7 +99,7 @@ runPerBuildResetTest ctx failed = do
     when (want == got) $ complain ("the test view leaves " <> name <> " at its initial value " <> want)
   root : _ <- filterM doesDirectoryExist ["lib", "packages/nano-ui/lib"]
   src <- TIO.readFile (root </> "NanoUI" </> "Internal" </> "Context" </> "Types.hs")
-  let tags = T.count "Reset by 'NanoUI.Internal.Frame.resetUiBuild'." (T.unwords (filter (/= "--") (T.words src)))
+  let tags = T.count "Reset by @resetUiBuild@." (T.unwords (filter (/= "--") (T.words src)))
   when (tags /= length fresh) $
     complain (show tags <> " Context fields are tagged as reset per build; this test checks " <> show (length fresh))
   where

@@ -65,11 +65,10 @@ import Data.Word (Word64)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Font (FontMetrics (..), buttonPadding)
 import NanoUI.Internal.Input
-import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askInput, damageWidgetNow, focusedWidget, freshWidget, lastRect, releaseFocus, liftIO, takeEscape, uiTheme, whenM, withIdFrame, withKey)
+import NanoUI.Internal.Monad (NanoUI, askContext, askInput, damageWidgetNow, focusedWidget, freshWidget, lastRect, releaseFocus, liftIO, takeEscape, uiTheme, whenM, withIdFrame, withKey)
 import NanoUI.Internal.Id (IdContext (..), WidgetId, hashWidgetId, scopeIdContext)
 import NanoUI.Internal.Var (bindVarOn, requestRerun)
 import NanoUI.Internal.Var.Types (Var)
-import NanoUI.Internal.Frame.Hit (nodeInteractionHit)
 import NanoUI.Internal.Layout.ScrollGeometry (padContentClip)
 import NanoUI.Internal.Shortcut qualified as Shortcut
 import NanoUI.Internal.Store (fieldGrid, insertSlot, lookupSlot)
@@ -82,7 +81,7 @@ import NanoUI.Widgets.Custom
 import NanoUI.Internal.Widgets.Button (buttonWith')
 import NanoUI.Internal.Widgets.Display (box)
 import NanoUI.Internal.Widgets.Layout (column', columnWith, labelWith, row', rowWith, rowWith', separator)
-import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount, getNodeType, getWidgetId, isWidgetNode)
+import NanoUI.Internal.Layout.Arena (NodeType (..), arenaCount)
 import NanoUI.Internal.Widgets.Node
 import NanoUI.Internal.Widgets.Shortcut (shortcutOnce)
 import NanoUI.Internal.Widgets.SplitPane
@@ -360,11 +359,9 @@ data GridEnv = GridEnv
   , gePaneScope :: !IdContext
     -- ^ Pane ids are rooted at the grid, not the split tree, so rearranging
     -- splits keeps pane state.
-  , geCfg :: !(PaneGridConfig)
+  , geCfg :: !PaneGridConfig
   , geGutter :: !Float
-  , geThickness :: !Float
   , geMinSize :: !Float
-  , geLeeway :: !Float
   , geRegions :: !(Map Word64 Rect)
     -- ^ Prev-frame pane regions; drives hit testing and 'pgcRect'.
   , geState :: !GridState
@@ -372,7 +369,8 @@ data GridEnv = GridEnv
   , geLifted :: !Bool
     -- ^ The dragged pane is lifted out: not rendered, and its slot left
     -- empty in a drop preview.
-  , geMakeCtx :: Word64 -> Rect -> Bool -> Bool -> IORef (Maybe Rect) -> PaneGridCtx
+  , geMaxPane :: !Word64
+  , geDragMoved :: !Bool
   }
 
 -- -----------------------------------------------------------------------------
@@ -490,26 +488,12 @@ paneGridCore cfg controlled given = do
           , gePaneScope = scopeIdContext (hashWidgetId wid)
           , geCfg = cfg
           , geGutter = gutter
-          , geThickness = spacing
           , geMinSize = minSize
-          , geLeeway = leeway
           , geRegions = visibleRegions
           , geState = gs
           , geLifted = lifted
-          , geMakeCtx = \pid rect inTabs dragging handle ->
-              PaneGridCtx
-                { pgcPaneId = pid
-                , pgcRect = rect
-                , pgcMaximized = maxPane == pid
-                , pgcInTabs = inTabs
-                , pgcDragging = dragging
-                , pgcDndActive = dragMoved
-                , pgcSplit = splitPane env pid
-                , pgcClose = closePane env pid
-                , pgcMaximize = maximizePane env pid
-                , pgcRestore = restorePane env
-                , pgcHandle = handle
-                }
+          , geMaxPane = maxPane
+          , geDragMoved = dragMoved
           }
 
   -- Tagged so next frame reads the grid's rect.
@@ -581,14 +565,12 @@ resolveExternalDrop env wid baseRect mouse end = do
   let ctx = geCtx env
       gs = geState env
       edgeBand = max 0 (pgEdgeBand (geCfg env))
-  covered <- pointerCovered ctx wid
-  clip <- getPrevClipRect ctx wid
+  reachable <- pointerReachable ctx wid mouse
   pure $
-    if covered
-      || not (maybe True (`rectContains` mouse) clip)
+    if not reachable
       || gsGesture gs /= NoGesture
       || gsGesture end /= NoGesture
-      || fst (maybe (0, 0) (`paneFocus` gs) (gsTree gs)) /= 0
+      || geMaxPane env /= 0
       || gsMax end /= 0
       || gsTree end /= gsTree gs
       || not (rectContains baseRect mouse)
@@ -605,11 +587,7 @@ resolveExternalDrop env wid baseRect mouse end = do
         (location, proposed) <- case fromMaybe (dropTargetForPaneWith (pgCenterDrop (geCfg env)) r mouse q) (topLevelDropTarget edgeBand baseRect mouse) of
           DropSplit p ax onA -> Just (BesidePane p (edge ax onA), treeSplit p seed ax onA np tree)
           DropTab p mIdx -> Just (IntoTabs p, treeAddTab p seed mIdx np tree)
-          DropTop ax onA ->
-            Just
-              ( OutsideGrid (edge ax onA)
-              , if onA then Split seed ax 0.5 (Pane np) tree else Split seed ax 0.5 tree (Pane np)
-              )
+          DropTop ax onA -> Just (OutsideGrid (edge ax onA), splitBeside seed ax onA np tree)
           DropSwap _ -> Nothing
         let rect = M.findWithDefault (Rect 0 0 0 0) np (fst (layoutNode (geMinSize env) (geGutter env) proposed baseRect))
         pure (PaneGridDrop location rect q wid end proposed)
@@ -661,23 +639,7 @@ withPaneKey env pid =
 hitChildControl :: Context -> Input -> Int -> IO Bool
 hitChildControl ctx inp start
   | not (pressedIn MouseLeft inp) = pure False
-  | otherwise = do
-      let arena = ctxNodeArena ctx
-      end <- arenaCount arena
-      let hitFrom idx
-            | idx >= end = pure False
-            | otherwise = do
-                nt <- getNodeType arena idx
-                hit <- pure (isWidgetNode nt) <&&> do
-                  child <- getWidgetId arena idx
-                  dis <- isDisabled ctx child
-                  if dis
-                    then pure False
-                    else do
-                      r <- getPrevRect ctx child
-                      maybe (pure False) (\childRect -> nodeInteractionHit ctx idx childRect (inputMousePos inp)) r
-                if hit then pure True else hitFrom (idx + 1)
-      hitFrom start
+  | otherwise = arenaCount (ctxNodeArena ctx) >>= anyControlHitInRange ctx (inputMousePos inp) start
 
 -- | Render one pane's content via 'pgViewPane' under the pane's stable key.
 renderPane ::
@@ -690,10 +652,22 @@ renderPane env inTabs pid rect =
   withPaneKey env pid $ do
     inp <- askInput
     let ctx = geCtx env
-        arena = ctxNodeArena ctx
-    start <- liftIO (arenaCount arena)
+    start <- liftIO (arenaCount (ctxNodeArena ctx))
     handleRef <- liftIO (newIORef Nothing)
-    let ctxt = geMakeCtx env pid rect inTabs (draggingPane env pid) handleRef
+    let ctxt =
+          PaneGridCtx
+            { pgcPaneId = pid
+            , pgcRect = rect
+            , pgcMaximized = geMaxPane env == pid
+            , pgcInTabs = inTabs
+            , pgcDragging = draggingPane env pid
+            , pgcDndActive = geDragMoved env
+            , pgcSplit = splitPane env pid
+            , pgcClose = closePane env pid
+            , pgcMaximize = maximizePane env pid
+            , pgcRestore = restorePane env
+            , pgcHandle = handleRef
+            }
     view <- clipContainer (paneLay (geMinSize env)) (pgViewPane (geCfg env) pid ctxt)
     controlHit <- liftIO (hitChildControl ctx inp start)
     handleRect0 <- liftIO (readIORef handleRef)
@@ -816,7 +790,7 @@ draggingPane env pid = case gsGesture (geState env) of
   _ -> False
 
 -- | The divider: a drawing that covers the whole gutter, so all of it grabs.
--- Painted as a faint rail with a solid 'geThickness' strip in the middle.
+-- Painted as a faint rail with a solid 'pgSpacing' strip in the middle.
 dividerWidget :: GridEnv -> GridAxis -> NanoUI ()
 dividerWidget env axis =
   void $
@@ -845,8 +819,8 @@ dividerWidget env axis =
         , widgetCursor = Just (\_ _ _ -> if axis == AxisV then UiCursorEwResize else UiCursorNsResize)
         }
   where
-    thickness = geThickness env
-    leeway = geLeeway env
+    thickness = max 0 (pgSpacing (geCfg env))
+    leeway = max 0 (pgLeeway (geCfg env))
     color = pgDividerColor (geCfg env)
 
 -- | The drag indicator and drop-zone highlight, drawn over the grid by its
@@ -887,13 +861,11 @@ runGestures ::
   NanoUI ()
 runGestures wid env dividers rendered moved zone = do
   inp <- askInput
-  covered <- liftIO (pointerCovered (geCtx env) wid)
-  clip <- liftIO (getPrevClipRect (geCtx env) wid)
-  disabled <- liftIO (isDisabled (geCtx env) wid)
+  let mouse = inputMousePos inp
+  reachable <- liftIO (pointerReachable (geCtx env) wid mouse)
   -- A press that grabbed a scrollbar, before the view ran, is the bar's.
   barDrag <- liftIO (getsInteraction (geCtx env) (isJust . isScrollDrag))
-  let mouse = inputMousePos inp
-      down = heldIn MouseLeft inp
+  let down = heldIn MouseLeft inp
       setGesture rerun g = void (updateGrid env rerun (\s -> s {gsGesture = g}))
       -- A gesture keeps the press it starts with, for 'paneGridCore' to end
       -- it once that press is gone.
@@ -909,8 +881,7 @@ runGestures wid env dividers rendered moved zone = do
       pickHit = flip find rendered $ \pane ->
         any (`rectContains` mouse) (rpHandle pane)
           || (pvDraggable (rpView pane) && any (`rectContains` mouse) (M.lookup (rpPaneId pane) (geRegions env)))
-  when (pressedIn MouseLeft inp && not (covered || disabled || barDrag)
-      && maybe True (`rectContains` mouse) clip
+  when (pressedIn MouseLeft inp && reachable && not barDrag
       && gsGesture (geState env) == NoGesture && not (any rpControlHit rendered)) $
     case (hitDiv, pickHit) of
       -- From the ratio the divider is drawn at, which the panes' minima may

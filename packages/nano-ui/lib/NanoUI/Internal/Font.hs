@@ -9,7 +9,6 @@ module NanoUI.Internal.Font
   , wrapTextIO
   , wrapTextLinesIO
   , truncateTextIO
-  , truncateTextMiddleIO
   , truncateTextWithIO
   , truncateTextPure
   ) where
@@ -220,11 +219,7 @@ takeTailWidth guess lineW maxW txt
 
 -- | Truncate @txt@ with a trailing ellipsis if it exceeds @maxW@ using @lineW@.
 truncateTextIO :: (Text -> IO Float) -> Float -> Text -> IO Text
-truncateTextIO = truncateTextEndM
-
--- | Truncate @txt@ in the middle (@"prefix...suffix"@) if it exceeds @maxW@.
-truncateTextMiddleIO :: (Text -> IO Float) -> Float -> Text -> IO Text
-truncateTextMiddleIO = truncateTextMiddleM
+truncateTextIO = truncateTextWithM EllipsisEnd
 
 -- | Truncate @txt@ according to an explicit 'TextEllipsis' mode.
 truncateTextWithIO :: TextEllipsis -> (Text -> IO Float) -> Float -> Text -> IO Text
@@ -236,12 +231,7 @@ truncateTextPure ell fm maxW txt =
   runIdentity (truncateTextWithM ell (Identity . lineWidth fm) maxW txt)
 
 truncateTextWithM :: Monad m => TextEllipsis -> (Text -> m Float) -> Float -> Text -> m Text
-truncateTextWithM EllipsisEnd = truncateTextEndM
-truncateTextWithM EllipsisMiddle = truncateTextMiddleM
-truncateTextWithM EllipsisStart = truncateTextStartM
-
-truncateTextEndM :: Monad m => (Text -> m Float) -> Float -> Text -> m Text
-truncateTextEndM lineW maxW txt
+truncateTextWithM ell lineW maxW txt
   | maxW <= 0 = pure ""
   | otherwise = do
       w <- lineW txt
@@ -249,66 +239,41 @@ truncateTextEndM lineW maxW txt
         then pure txt
         else do
           ellW <- lineW "..."
+          let fitHead lim = fst <$> takeWidth (charsPerWidth w txt lim) lineW lim txt
+              fitTail lim = takeTailWidth (charsPerWidth w txt lim) lineW lim txt
+              remW = maxW - ellW
+              endCase = do
+                fit <- fitHead remW
+                let dotted = T.dropWhileEnd (== '.') fit <> "..."
+                tooWide <- if clusterLength fit == T.length fit then (> maxW) <$> lineW dotted else pure False
+                if tooWide then fitHead maxW else pure dotted
+              startCase = do
+                suf <- fitTail remW
+                let dotted = "..." <> T.dropWhile (== '.') suf
+                tooWide <- (> maxW) <$> lineW dotted
+                if tooWide then fitTail maxW else pure dotted
           if maxW <= ellW
-            then fst <$> takeWidth (charsPerWidth w txt maxW) lineW maxW txt
-            else do
-              (fit, _) <- takeWidth (charsPerWidth w txt (maxW - ellW)) lineW (maxW - ellW) txt
-              let dotted = T.dropWhileEnd (== '.') fit <> "..."
-              tooWide <- if clusterLength fit == T.length fit then (> maxW) <$> lineW dotted else pure False
-              if tooWide
-                then fst <$> takeWidth (charsPerWidth w txt maxW) lineW maxW txt
-                else pure dotted
-
-truncateTextStartM :: Monad m => (Text -> m Float) -> Float -> Text -> m Text
-truncateTextStartM lineW maxW txt
-  | maxW <= 0 = pure ""
-  | otherwise = do
-      w <- lineW txt
-      if w <= maxW
-        then pure txt
-        else do
-          ellW <- lineW "..."
-          if maxW <= ellW
-            then takeTailWidth (charsPerWidth w txt maxW) lineW maxW txt
-            else do
-              suf <- takeTailWidth (charsPerWidth w txt (maxW - ellW)) lineW (maxW - ellW) txt
-              let dotted = "..." <> T.dropWhile (== '.') suf
-              tooWide <- (> maxW) <$> lineW dotted
-              if tooWide
-                then takeTailWidth (charsPerWidth w txt maxW) lineW maxW txt
-                else pure dotted
-
-truncateTextMiddleM :: Monad m => (Text -> m Float) -> Float -> Text -> m Text
-truncateTextMiddleM lineW maxW txt
-  | maxW <= 0 = pure ""
-  | otherwise = do
-      w <- lineW txt
-      if w <= maxW
-        then pure txt
-        else do
-          ellW <- lineW "..."
-          if maxW <= ellW
-            then fst <$> takeWidth (charsPerWidth w txt maxW) lineW maxW txt
-            else do
-              let remW = maxW - ellW
-                  halfW = remW * 0.5
-              suf <- takeTailWidth (charsPerWidth w txt halfW) lineW halfW txt
-              sufW <- if T.null suf then pure 0 else lineW suf
-              let preBudget = max 0 (remW - sufW)
-                  prePool = T.take (max 0 (T.length txt - T.length suf)) txt
-              pre0 <- takeFitPrefix (charsPerWidth w txt preBudget) lineW preBudget prePool
-              if T.null pre0 && T.null suf
-                then fst <$> takeWidth (charsPerWidth w txt maxW) lineW maxW txt
-                else do
-                  let dotted0 = T.dropWhileEnd (== '.') pre0 <> "..." <> suf
-                  ok0 <- (<= maxW) <$> lineW dotted0
-                  if ok0
-                    then pure dotted0
-                    else
-                      if not (T.null pre0)
+            then (if ell == EllipsisStart then fitTail else fitHead) maxW
+            else case ell of
+              EllipsisEnd -> endCase
+              EllipsisStart -> startCase
+              EllipsisMiddle -> do
+                suf <- fitTail (remW * 0.5)
+                sufW <- if T.null suf then pure 0 else lineW suf
+                let preBudget = max 0 (remW - sufW)
+                    prePool = T.take (max 0 (T.length txt - T.length suf)) txt
+                pre0 <- takeFitPrefix (charsPerWidth w txt preBudget) lineW preBudget prePool
+                if T.null pre0 && T.null suf
+                  then fitHead maxW
+                  else do
+                    let dotted0 = T.dropWhileEnd (== '.') pre0 <> "..." <> suf
+                    ok0 <- (<= maxW) <$> lineW dotted0
+                    if ok0
+                      then pure dotted0
+                      else if not (T.null pre0)
                         then do
                           let (s, _) = clusterBounds pre0 (max 0 (T.length pre0 - 1))
                               dotted1 = T.dropWhileEnd (== '.') (T.take s pre0) <> "..." <> suf
                           ok1 <- (<= maxW) <$> lineW dotted1
-                          if ok1 then pure dotted1 else truncateTextEndM lineW maxW txt
-                        else truncateTextStartM lineW maxW txt
+                          if ok1 then pure dotted1 else endCase
+                        else startCase

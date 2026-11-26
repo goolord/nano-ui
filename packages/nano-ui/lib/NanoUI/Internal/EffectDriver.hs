@@ -9,6 +9,7 @@ module NanoUI.Internal.EffectDriver
   ( EffectPassDraw (..)
   , EffectDriver (..)
   , spanEffectiveClip
+  , shiftClip
   , execEffectSpans
   , withEffectUniforms
   ) where
@@ -17,6 +18,7 @@ import Control.Exception (finally)
 import Control.Monad (when)
 import Data.Foldable (for_)
 import Data.List (sortOn)
+import Data.Maybe (isJust)
 import Data.Primitive.ByteArray (ByteArray, copyByteArrayToAddr, sizeofByteArray)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray)
 import Data.Word (Word8)
@@ -26,7 +28,7 @@ import Foreign.Marshal.Utils (fillBytes)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (pokeByteOff)
 import NanoUI.Internal.Draw.Types (EffectSpan (..), ShaderCall (..))
-import NanoUI.Internal.Types (Rect (..), V2 (..), rectIntersect)
+import NanoUI.Internal.Types (Rect (..), V2 (..), rectIntersect, shiftClip, spanEffectiveClip)
 import NanoUI.Internal.Uniforms (sysUniformBytes)
 
 -- | Geometry, UVs, and clipping state for compositing one Tier 2 shader pass.
@@ -82,18 +84,6 @@ data EffectDriver passHandle = EffectDriver
     -- ^ Composite one pass onto the currently bound target of size @(dstW, dstH)@.
   }
 
--- | Combine a parent's optional damage rect with a span's logical clip rect.
--- Returns 'Nothing' when the intersection is empty (the span can be skipped),
--- @Just Nothing@ for unclipped, or @Just (Just r)@ for logical clip @r@.
-spanEffectiveClip :: Maybe Rect -> Rect -> Maybe (Maybe Rect)
-spanEffectiveClip mDamage clip@(Rect _ _ cw ch) =
-  let !open = cw >= 1e8 || ch >= 1e8
-   in case (mDamage, open) of
-        (Nothing, True) -> Just Nothing
-        (Nothing, False) -> Just (Just clip)
-        (Just dmg, True) -> Just (Just dmg)
-        (Just dmg, False) -> Just <$> rectIntersect dmg clip
-
 -- | Recursively execute draw commands in @[rangeStart, rangeEnd)@ with Tier 2
 -- 'EffectSpan' capture, multi-pass ping-pong shader execution, and compositing.
 {-# NOINLINE execEffectSpans #-}
@@ -147,11 +137,7 @@ execEffectSpans drv spans parentId parentSlot parentSize@(parentW, parentH) pare
           expanded@(Rect ex ey ew eh) = Rect (bx - mx) (by - my) (bw + 2 * mx) (bh + 2 * my)
           passes = esPasses sp
           !nPasses = sizeofSmallArray passes
-          inDamage = case parentDmg of
-            Nothing -> True
-            Just dmg -> case rectIntersect dmg expanded of
-              Just _ -> True
-              Nothing -> False
+          inDamage = maybe True (isJust . rectIntersect expanded) parentDmg
       when inDamage $ do
         mHandles <-
           if nPasses <= 0 || ew <= 0 || eh <= 0
@@ -234,11 +220,7 @@ execEffectSpans drv spans parentId parentSlot parentSize@(parentW, parentH) pare
                                       okPar <- edBindTarget drv parentSlot False parentOx parentOy
                                       when okPar $
                                         for_ (spanEffectiveClip parentDmg (esClip sp)) $ \mClip -> do
-                                          let shiftedClip =
-                                                if parentOx == 0 && parentOy == 0
-                                                  then mClip
-                                                  else fmap (\(Rect x y w h) -> Rect (x - parentOx) (y - parentOy) w h) mClip
-                                              pd = mkPassDraw srcSlot srcCapW srcCapH destPx destPy False shiftedClip
+                                          let pd = mkPassDraw srcSlot srcCapW srcCapH destPx destPy False (shiftClip parentOx parentOy mClip)
                                           edCompositePass drv handle sc pd parentW parentH
                         if nPasses > 1
                           then do

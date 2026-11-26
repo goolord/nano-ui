@@ -138,7 +138,7 @@ import NanoUI.Internal.Font (checkboxBoxSize)
 import NanoUI.Internal.Id (WidgetId, mix64)
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena (NodeType (NodeDrawing))
-import NanoUI.Internal.Monad (NanoUI, askContext, askDefaultLayout, askInput, freshWidget, nextId, liftIO, uiTime, withContext)
+import NanoUI.Internal.Monad (NanoUI, askContext, askInput, freshWidget, nextId, liftIO, uiTime, withContext)
 import NanoUI.Path qualified as P
 import NanoUI.Internal.Store
 import NanoUI.Internal.Store.Slots (slotDragPoint, slotDragPress)
@@ -147,7 +147,7 @@ import NanoUI.Internal.Types
 import NanoUI.Internal.Var (Binding (..), bindVar, bindVarBy)
 import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Widgets.Behavior (dragPressLive, leftPress, navStep, useKeyNav)
-import NanoUI.Internal.Widgets.Combinators (finishInput, finishToggle)
+import NanoUI.Internal.Widgets.Combinators (finishInput, finishToggle, widgetBaseLayout)
 import NanoUI.Internal.Widgets.Node
 import NanoUI.Internal.Widgets.Animate (wakeAfter)
 import NanoUI.Internal.Sensor.Types (Watch (..))
@@ -255,9 +255,9 @@ customWidgetWithId :: WidgetId -> CustomWidgetSpec a -> NanoUI (Response, a)
 customWidgetWithId wid spec = do
   ctx <- askContext
   inp <- askInput
-  amb <- askDefaultLayout
+  lay <- widgetBaseLayout defaultLayout (widgetLayout spec)
   liftIO (when (widgetFocusable spec) $ registerFocusable ctx wid)
-  resp0 <- addWidget wid NodeDrawing T.empty 0 (widgetLayout spec (inheritFont amb defaultLayout))
+  resp0 <- addWidget wid NodeDrawing T.empty 0 lay
   -- Registered on the node just added ('NanoUI.Internal.Context.ctxNodeCustom').
   liftIO $ do
     mapM_ (registerCustomMeasure ctx wid) (widgetMeasure spec)
@@ -267,9 +267,7 @@ customWidgetWithId wid spec = do
 
 -- | Instantiates a custom widget from a 'CustomWidgetSpec'.
 customWidget :: CustomWidgetSpec a -> NanoUI (Response, a)
-customWidget spec = do
-  wid <- nextId
-  customWidgetWithId wid spec
+customWidget spec = nextId >>= (`customWidgetWithId` spec)
 
 -- | Draw into a rectangle sized by the layout modifier. Curves are flattened
 -- for the current display ('runCanvasFor'). Ops are rebuilt and compared
@@ -352,24 +350,20 @@ data Drag2D = Drag2D
 -- > drag <- useDrag2DOn resp
 -- > when (dragActive drag) (setPan (dragPosition drag))
 useDrag2DOn :: HasResponse r => r -> NanoUI Drag2D
-useDrag2DOn r = drag2DFrom (respRect r) (respPressed r)
-
--- | A left-button drag already under way, or starting with a press this
--- frame when @onIt@; the position is clamped to @bounds@.
-drag2DFrom :: Rect -> Bool -> NanoUI Drag2D
-drag2DFrom bounds onIt = do
+useDrag2DOn r = do
   (wid, ctx) <- freshWidget
   inp <- askInput
   -- The press that started the drag is quiet bookkeeping (it causes no
   -- damage); the last pointer position goes in a point slot. As in
   -- 'useDrag1D', the drag lasts only under that press, so one released while
   -- this hook did not run does not come back.
-  let key = intKey wid
+  let bounds = respRect r
+      key = intKey wid
       mouse = inputMousePos inp
   store <- liftIO (getStore ctx)
   let held = findSpec slotDragPress 0 key store
   active0 <- liftIO (dragPressLive ctx key store)
-  let active = heldIn MouseLeft inp && (active0 || (pressedIn MouseLeft inp && onIt))
+  let active = heldIn MouseLeft inp && (active0 || (pressedIn MouseLeft inp && respPressed r))
       prev = findSpec slotDragPoint mouse key store
       delta = if active && active0 then v2Sub mouse prev else V2 0 0
       clampedMouse =
@@ -382,19 +376,16 @@ drag2DFrom bounds onIt = do
       if active
         then insertSpec slotDragPress key press . insertSpec slotDragPoint key mouse
         else deleteSpec slotDragPress key . deleteSpec slotDragPoint key
-  pure Drag2D { dragPosition = clampedMouse, dragActive = active, dragDelta = delta }
+  pure Drag2D {dragPosition = clampedMouse, dragActive = active, dragDelta = delta}
 
 -- | This frame's wheel delta while the widget is hovered ('respHovered').
 -- Returns @(0, 0)@ when covered by an overlay, clipped out of view, or disabled.
 -- The widget does not take the wheel from a scroller around it: one that can
 -- still scroll that way moves by the same notches on the same frame.
 useWheelDeltaOn :: HasResponse r => r -> NanoUI (Float, Float)
-useWheelDeltaOn r = wheelIf (respHovered r)
-
-wheelIf :: Bool -> NanoUI (Float, Float)
-wheelIf on = do
+useWheelDeltaOn r = do
   V2 x y <- inputScroll <$> askInput
-  pure (if on then (x, y) else (0, 0))
+  pure (if respHovered r then (x, y) else (0, 0))
 
 -- -----------------------------------------------------------------------------
 -- Reference Custom Widgets

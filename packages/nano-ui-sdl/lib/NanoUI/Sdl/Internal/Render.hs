@@ -26,10 +26,11 @@ import Data.Vector.Unboxed qualified as U
 import Data.Word (Word64, Word8)
 import Foreign.C.Types (CFloat (..), CInt (..))
 import Foreign.ForeignPtr (withForeignPtr)
-import Foreign.Marshal.Alloc (alloca, allocaBytes, free, malloc)
+import Foreign.Marshal.Alloc (allocaBytes, free, malloc)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
-import Foreign.Storable (peek, poke)
+import Foreign.Storable (poke)
 import NanoUI (Rect (..), colorA, colorB, colorG, colorR)
+import NanoUI.Sdl.Internal.Display (outPair)
 import NanoUI.Sdl.Internal.Image (ImageAtlas, lookupImage)
 import NanoUI.Backend
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
@@ -61,6 +62,9 @@ toClipKey scale r =
   let (x0, y0, x1, y1) = clipPixelEdges scale r
    in ClipKey x0 y0 (max 1 (x1 - x0)) (max 1 (y1 - y0))
 
+clearClip :: Ptr SDL_Renderer -> IO ()
+clearClip ren = void $ setRenderClipRect ren (PtrConst.unsafeFromPtr nullPtr)
+
 applyClipState ::
   RenderBatch -> IORef ClipState -> Ptr SDL_Renderer -> ClipState -> IO ()
 applyClipState batch ref ren next = do
@@ -68,11 +72,11 @@ applyClipState batch ref ren next = do
   when (prev /= next) $ do
     flushRenderBatch batch
     writeIORef ref next
-    void $ case next of
-      ClipNone -> setRenderClipRect ren (PtrConst.unsafeFromPtr nullPtr)
+    case next of
+      ClipNone -> clearClip ren
       ClipKey px py pw ph -> do
         poke (rbClipRect batch) (SDL_Rect (fromIntegral px) (fromIntegral py) (fromIntegral pw) (fromIntegral ph))
-        setRenderClipRect ren (PtrConst.unsafeFromPtr (rbClipRect batch))
+        void $ setRenderClipRect ren (PtrConst.unsafeFromPtr (rbClipRect batch))
 
 -- | Draw every command in layer order, clipped to its own rect and to
 -- the damage. A full repaint clears the target to 'drawClear' first.
@@ -96,7 +100,7 @@ renderDrawDataPass batch ren scale drawData images glyphs damage =
   unless (damageIsEmpty damage) $ do
     batchBegin (rbBatch batch) (realToFrac scale)
     clipRef <- newIORef ClipNone
-    void $ setRenderClipRect ren (PtrConst.unsafeFromPtr nullPtr)
+    clearClip ren
     mDamage <- case damage of
       DamageFull -> do
         let clear = drawClear drawData
@@ -118,11 +122,7 @@ renderDrawDataPass batch ren scale drawData images glyphs damage =
                 Just (Rect x y w h) -> (1, realToFrac x, realToFrac y, realToFrac w, realToFrac h)
               !shIdx = fromIntegral (cmdShader cmd) :: Int
           when (count >= 3) $ for_ (cmdEffectiveClip curDmg cmd) $ \mClip -> do
-            let shiftedClip =
-                  if ox == 0 && oy == 0
-                    then mClip
-                    else fmap (shiftRect (-ox) (-oy)) mClip
-            applyClipState batch clipRef ren (maybe ClipNone (toClipKey scale) shiftedClip)
+            applyClipState batch clipRef ren (maybe ClipNone (toClipKey scale) (shiftClip (-ox) (-oy) mClip))
             let !texId = cmdTextureId cmd
             tex <- if textureGlyphPage texId >= 0 then glyphPageTexture glyphs (textureGlyphPage texId) else lookupImage images texId
             if shIdx > 0 && shIdx <= sizeofSmallArray calls
@@ -149,7 +149,7 @@ renderDrawDataPass batch ren scale drawData images glyphs damage =
                       , edFlipY = False
                       , edPreparePasses = \passes ->
                           pure $
-                            if all (\i -> let p = scProgram (indexSmallArray passes i) in isJust (spSpirv p) || isJust (spMsl p)) [0 .. sizeofSmallArray passes - 1]
+                            if all (\sc -> let p = scProgram sc in isJust (spSpirv p) || isJust (spMsl p)) passes
                               then Just passes
                               else Nothing
                       , edAcquireTarget = acquireTarget (rbBatch batch)
@@ -160,7 +160,7 @@ renderDrawDataPass batch ren scale drawData images glyphs damage =
                             then pure False
                             else do
                               writeIORef clipRef ClipNone
-                              unless clr (void $ setRenderClipRect ren (PtrConst.unsafeFromPtr nullPtr))
+                              unless clr (clearClip ren)
                               batchSetOrigin (rbBatch batch) (realToFrac ox) (realToFrac oy)
                               pure True
                       , edFlush = flushRenderBatch batch
@@ -178,10 +178,6 @@ renderDrawDataPass batch ren scale drawData images glyphs damage =
           applyClipState batch clipRef ren ClipNone
       )
       `onException` discardRenderBatch batch
-
-{-# INLINE shiftRect #-}
-shiftRect :: Float -> Float -> Rect -> Rect
-shiftRect dx dy (Rect x y w h) = Rect (x + dx) (y + dy) w h
 
 -- | The texture of a glyph atlas page: null for a page never opened, one past
 -- the last, or a null atlas.
@@ -232,6 +228,14 @@ foreign import ccall unsafe "nano_ui_batch_discard"
 foreign import ccall unsafe "nano_ui_batch_begin"
   batchBegin :: Ptr () -> CFloat -> IO ()
 
+withShaderCode :: ShaderProgram -> (Ptr Word8 -> CInt -> Ptr Word8 -> CInt -> IO a) -> IO a
+withShaderCode prog k =
+  withOptBS (spSpirv prog) $ \spvPtr spvLen ->
+    withOptBS (TE.encodeUtf8 <$> spMsl prog) (k spvPtr spvLen)
+  where
+    withOptBS Nothing f = f nullPtr 0
+    withOptBS (Just bs) f = BSU.unsafeUseAsCStringLen bs $ \(p, l) -> f (castPtr p) (fromIntegral l)
+
 {-# NOINLINE drawShaderCmd #-}
 drawShaderCmd ::
   Ptr () ->
@@ -247,23 +251,16 @@ drawShaderCmd batchPtr vp vc ip idxStart idxCount tex hasDmg dx dy dw dh sc unif
       !uOff = scUniformOffset sc
       !uLen = min (scUniformLength sc) (max 0 (sizeofByteArray uniformBytes - uOff))
       !needsTex = if spNeedsTex prog then 1 else 0 :: CInt
-      withOptBS Nothing k = k nullPtr 0
-      withOptBS (Just bs) k = BSU.unsafeUseAsCStringLen bs $ \(p, l) -> k (castPtr p) (fromIntegral l)
-      withOptText Nothing k = k nullPtr 0
-      withOptText (Just t) k = withOptBS (Just (TE.encodeUtf8 t)) k
-  withOptBS (spSpirv prog) $ \spvPtr spvLen ->
-    withOptText (spMsl prog) $ \mslPtr mslLen -> do
-      ok <-
-        if uLen > 0
-          then allocaBytes uLen $ \uPtr -> do
-            copyByteArrayToAddr uPtr uniformBytes uOff uLen
-            batchDrawShader batchPtr vp vc ip idxStart idxCount tex hasDmg dx dy dw dh
-              (scHash sc) spvPtr spvLen mslPtr mslLen needsTex uPtr (fromIntegral uLen)
-          else
-            batchDrawShader batchPtr vp vc ip idxStart idxCount tex hasDmg dx dy dw dh
-              (scHash sc) spvPtr spvLen mslPtr mslLen needsTex nullPtr 0
-      when (ok == 0) $
-        batchDrawRange batchPtr vp vc ip idxStart idxCount nullPtr hasDmg dx dy dw dh
+  withShaderCode prog $ \spvPtr spvLen mslPtr mslLen -> do
+    let call uPtr len =
+          batchDrawShader batchPtr vp vc ip idxStart idxCount tex hasDmg dx dy dw dh
+            (scHash sc) spvPtr spvLen mslPtr mslLen needsTex uPtr len
+    ok <-
+      if uLen > 0
+        then allocaBytes uLen $ \uPtr -> copyByteArrayToAddr uPtr uniformBytes uOff uLen >> call uPtr (fromIntegral uLen)
+        else call nullPtr 0
+    when (ok == 0) $
+      batchDrawRange batchPtr vp vc ip idxStart idxCount nullPtr hasDmg dx dy dw dh
 
 -- | Queue a command: the batch, the vertices and their count, the indices,
 -- the command's first index and index count, its texture, then whether to
@@ -312,34 +309,20 @@ foreign import ccall unsafe "nano_ui_batch_composite_effect"
     -> IO CInt
 
 acquireTarget :: Ptr () -> Int -> Int -> IO (Int, Int, Int)
-acquireTarget batchPtr minW minH =
-  alloca $ \pW ->
-    alloca $ \pH -> do
-      slot <- batchAcquireTarget batchPtr (fromIntegral minW) (fromIntegral minH) pW pH
-      if slot < 0
-        then pure (-1, 0, 0)
-        else do
-          cw <- peek pW
-          ch <- peek pH
-          pure (fromIntegral slot, fromIntegral cw, fromIntegral ch)
+acquireTarget batchPtr minW minH = do
+  (slot, cw, ch) <- outPair (batchAcquireTarget batchPtr (fromIntegral minW) (fromIntegral minH))
+  pure (if slot < 0 then (-1, 0, 0) else (fromIntegral slot, fromIntegral cw, fromIntegral ch))
 
 {-# NOINLINE compositeEffectPass #-}
 compositeEffectPass :: Ptr () -> ShaderCall -> ByteArray -> EffectPassDraw -> IO ()
-compositeEffectPass batchPtr sc uniformBytes pd = do
-  let prog = scProgram sc
-      withOptBS Nothing k = k nullPtr 0
-      withOptBS (Just bs) k = BSU.unsafeUseAsCStringLen bs $ \(p, l) -> k (castPtr p) (fromIntegral l)
-      withOptText Nothing k = k nullPtr 0
-      withOptText (Just t) k = withOptBS (Just (TE.encodeUtf8 t)) k
-      blendCopy = if epdIntermediate pd then 1 else 0 :: CInt
-  withOptBS (spSpirv prog) $ \spvPtr spvLen ->
-    withOptText (spMsl prog) $ \mslPtr mslLen ->
-      withEffectUniforms sc uniformBytes pd $ \uPtr uLen ->
-        void $
-          batchCompositeEffect
-            batchPtr (fromIntegral (epdSrcSlot pd))
-            (realToFrac (epdDstX pd)) (realToFrac (epdDstY pd)) (realToFrac (epdDstW pd)) (realToFrac (epdDstH pd))
-            (realToFrac (epdU0 pd)) (realToFrac (epdV0 pd)) (realToFrac (epdU1 pd)) (realToFrac (epdV1 pd))
-            blendCopy (scHash sc)
-            spvPtr spvLen mslPtr mslLen
-            uPtr (fromIntegral uLen)
+compositeEffectPass batchPtr sc uniformBytes pd =
+  withShaderCode (scProgram sc) $ \spvPtr spvLen mslPtr mslLen ->
+    withEffectUniforms sc uniformBytes pd $ \uPtr uLen ->
+      void $
+        batchCompositeEffect
+          batchPtr (fromIntegral (epdSrcSlot pd))
+          (realToFrac (epdDstX pd)) (realToFrac (epdDstY pd)) (realToFrac (epdDstW pd)) (realToFrac (epdDstH pd))
+          (realToFrac (epdU0 pd)) (realToFrac (epdV0 pd)) (realToFrac (epdU1 pd)) (realToFrac (epdV1 pd))
+          (if epdIntermediate pd then 1 else 0) (scHash sc)
+          spvPtr spvLen mslPtr mslLen
+          uPtr (fromIntegral uLen)

@@ -27,6 +27,7 @@ import NanoUI.Internal.Frame.TextArea (drawTextAreaContentWith, resolveTextAreaF
 import NanoUI.Internal.Frame.TextInput
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Layout.Arena
+import NanoUI.Internal.Monad ((<&&>))
 import NanoUI.Internal.Style (AlignX (..), Style, Theme, fadeAlpha, fieldIconColor, styleBg, styleBorder, styleFg, themeAccent, themeButton, themeInput, themeOnAccent)
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, clamp01, colorA, lerpColor, onGrid, rectInflate, rectNonEmpty)
 import NanoUI.Internal.WidgetText
@@ -195,27 +196,16 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
         opaqueBg
           && drawStroke
           && (nt == NodeSelect || (nt == NodeButton && (bkind == ButtonPlain || bkind == ButtonContent)))
+  let na = peNodeArena env
+  p <- if canGroup then getParent na idx else pure (-1)
   grouped <-
-    if not canGroup
-      then pure False
-      else do
-        let na = peNodeArena env
-        p <- getParent na idx
-        if p < 0
-          then pure False
-          else do
-            pt <- getNodeType na p
-            if pt /= NodeContainer
-              then pure False
-              else do
-                psi <- getStyleIdx na p
-                if not (hasFlag containerFlagButtonGroup psi)
-                  then pure False
-                  else do
-                    (firstC, lastC) <- flowChildEnds na p
-                    dir <- getDirection na p
-                    paintGroupedButton da style dir (idx == firstC) (idx == lastC) (Rect x y w h)
-                    pure True
+    pure (p >= 0)
+      <&&> ((== NodeContainer) <$> getNodeType na p)
+      <&&> (hasFlag containerFlagButtonGroup <$> getStyleIdx na p)
+  when grouped $ do
+    (firstC, lastC) <- flowChildEnds na p
+    dir <- getDirection na p
+    paintGroupedButton da style dir (idx == firstC) (idx == lastC) (Rect x y w h)
   unless grouped $ do
     when opaqueBg $ fillStyledRect da style menuRowRect
     when drawStroke $ strokeStyledRect da style (Rect x y w h)
@@ -359,9 +349,9 @@ drawSortTriangle da cx cy down =
   let tip = if down then 3.5 else -3.5
    in pushFilledTriangle da (cx - 5) (cy - tip) (cx + 5) (cy - tip) cx (cy + tip)
 
--- | Draw a single-line field's text, and its selection and caret while it is
--- being edited, inside @clip@. @penX/penY@ locate @txt@ (absolute), drawn in
--- the font style packed in @si@ ('pushFieldText').
+-- | Draw a single-line field's text, its selection, and (when @showCaret@ is
+-- set) its caret while it is being edited, inside @clip@. @penX/penY@ locate
+-- @txt@ (absolute), drawn in the font style packed in @si@ ('pushFieldText').
 {-# INLINE paintClippedFieldText #-}
 paintClippedFieldText ::
   Context ->
@@ -371,6 +361,7 @@ paintClippedFieldText ::
   Word64 ->
   Style ->
   NodeIdx ->
+  Bool ->
   Maybe FieldEdit ->
   Rect ->
   Float ->
@@ -378,12 +369,13 @@ paintClippedFieldText ::
   T.Text ->
   Color ->
   IO ()
-paintClippedFieldText ctx da fm native si style idx mEdit clip penX penY txt fg =
+paintClippedFieldText ctx da fm native si style idx showCaret mEdit clip penX penY txt fg =
   withClip da clip $ do
     mapM_ (drawTextInputSelection da ctx idx) mEdit
     unless (T.null txt) $
       pushFieldText da fm native si penX penY txt fg
-    mapM_ (\edit -> drawTextInputCaret da edit (styleFg style)) mEdit
+    when showCaret $
+      mapM_ (\edit -> drawTextInputCaret da edit (styleFg style)) mEdit
 
 -- | A caption-less field filling @box@: the box, @chrome@, then its value,
 -- or its label as a placeholder (dimmed) while empty and unfocused when it
@@ -399,9 +391,8 @@ paintCaptionlessField env style idx focus box clip hasPlaceholder chrome = do
     resolveTextInputFrame ctx idx si focus box clip
   placeholder <- if hasPlaceholder then getText (ctxNodeArena ctx) idx else pure ""
   let display = textInputFieldText placeholder shown focus
-  fgBase <- fieldTextColor ctx idx (styleFg style)
-  let fg = if T.null value && not focus then lerpColor fgBase (styleBg style) 0.40 else fgBase
-  paintClippedFieldText ctx da fm native si style idx mEdit clip penX rowY display fg
+  fg <- textInputFg ctx idx (styleFg style) (styleBg style) value focus
+  paintClippedFieldText ctx da fm native si style idx True mEdit clip penX rowY display fg
   pure value
 
 -- | A stepper arrow in its half of the stepper, nudged toward the other half so
@@ -433,10 +424,7 @@ paintSelectableText env style idx rect@(Rect x y _ h) = do
   value <- textInputValue ctx idx
   let (penX, ty, _) = selectableTextGeometry fm x y h
   mEdit <- readFieldEdit ctx idx rect penX
-  withClip da rect $ do
-    mapM_ (drawTextInputSelection da ctx idx) mEdit
-    unless (T.null value) $
-      pushFieldText da fm native si penX ty value fg
+  paintClippedFieldText ctx da fm native si style idx False mEdit rect penX ty value fg
 
 drawSearchMagnifier :: DrawArena -> Rect -> Color -> IO ()
 drawSearchMagnifier da (Rect x y w h) col = do

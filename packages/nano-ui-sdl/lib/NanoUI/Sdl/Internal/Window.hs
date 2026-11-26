@@ -59,7 +59,7 @@ import Data.Word (Word64)
 import Foreign.C.String (CString)
 import Foreign.C.Types (CInt (..))
 import Foreign.Marshal.Utils (fromBool, maybePeek)
-import Foreign.Ptr (Ptr, castPtr, nullPtr)
+import Foreign.Ptr (Ptr, castPtr)
 import NanoUI (Appearance, ImageId, Input (..), NanoUI, ShaderCapabilities (..), Size (..), Theme, V2 (..), WindowMode (..), WindowSettings (..), defaultWindowSettings, unlessM)
 import NanoUI.Backend
   ( Backend (..), BackendSession, SBackend (..), askBackendSession, setBackendSession, withBackendSession, cancelTasks
@@ -68,7 +68,7 @@ import NanoUI.Backend
   )
 import NanoUI.Internal.Context (Context (..), followSystemTheme, setDrawSnapScale)
 import NanoUI.Sdl.Internal.Display
-import NanoUI.Sdl.Internal.Env (PresentProbe (..), Retain (..), SdlEnv (..))
+import NanoUI.Sdl.Internal.Env (PresentProbe (..), Retain (..), SdlEnv (..), dropRetainRef, emptyRetain)
 import NanoUI.Sdl.Internal.Pacing
   ( notePresent
   , presentPaces
@@ -112,7 +112,6 @@ import SDL3.Sys.Keyboard (stopTextInputSafe)
 import SDL3.Sys.Render
   ( createWindowAndRendererSafe
   , destroyRendererSafe
-  , destroyTexture
   , getRendererName
   , setRenderDrawBlendMode
   , setRenderScale
@@ -452,25 +451,24 @@ acquireWindowAndRenderer opts flags =
   mkAcquire
     ( do
         fromEnv <- isJust <$> lookupEnv "SDL_RENDER_DRIVER"
-        let createStandard =
-              withRenderDriver (sdlRenderDriver opts) $
-                TextForeign.withCString (wsTitle settings) $ \titlePtr -> do
+        TextForeign.withCString (wsTitle settings) $ \titlePtr -> do
+          let (rw, rh) = (round w, round h)
+              createStandard =
+                withRenderDriver (sdlRenderDriver opts) $ do
                   (ok, win, ren) <-
-                    outPair (createWindowAndRendererSafe (PtrConst.unsafeFromPtr titlePtr) (round w) (round h) flags)
+                    outPair (createWindowAndRendererSafe (PtrConst.unsafeFromPtr titlePtr) rw rh flags)
                   unless ok $ sdlFail "SDL_CreateWindowAndRenderer failed"
                   pure (win, ren)
-            tryGpu =
-              TextForeign.withCString (wsTitle settings) $ \titlePtr -> do
-                (ok, win, ren) <-
-                  outPair (c_createWindowAndGpuRenderer titlePtr (round w) (round h) (fromIntegral flags))
+              tryGpu = do
+                (ok, win, ren) <- outPair (c_createWindowAndGpuRenderer titlePtr (fromIntegral rw) (fromIntegral rh) (fromIntegral flags))
                 pure (if ok /= 0 then Just (win, ren) else Nothing)
-        case sdlRenderDriver opts of
-          _ | fromEnv -> createStandard
-          RenderDriverGpu ->
-            tryGpu >>= maybe (sdlFail "SDL 3.4 GPU renderer creation failed") pure
-          RenderDriverAuto ->
-            tryGpu >>= maybe createStandard pure
-          _ -> createStandard
+          case sdlRenderDriver opts of
+            _ | fromEnv -> createStandard
+            RenderDriverGpu ->
+              tryGpu >>= maybe (sdlFail "SDL 3.4 GPU renderer creation failed") pure
+            RenderDriverAuto ->
+              tryGpu >>= maybe createStandard pure
+            _ -> createStandard
     )
     ( \(win, ren) -> do
         void $ setRenderScale ren 1 1
@@ -534,9 +532,7 @@ startSdlWindow opts flags ctx fontSource monoSource first = do
   sdlDebug <- liftIO newDebugSampler
   sdlDebugPublished <- liftIO (newIORef Nothing)
   sdlFrameTrace <- liftIO $ isJust <$> lookupEnv "NANO_FRAME_TRACE"
-  sdlRetain <- mkAcquire (newIORef (Retain nullPtr 0 0 0 0 0)) $ \ref -> do
-    tex <- retainTexture <$> readIORef ref
-    unless (tex == nullPtr) $ destroyTexture tex
+  sdlRetain <- mkAcquire (newIORef emptyRetain) dropRetainRef
   sdlFontCache <-
     mkAcquire
       (newSdlFontCache fontSource monoSource glyphAtlas (sdlAppFontSize opts) sdlScaleRef)

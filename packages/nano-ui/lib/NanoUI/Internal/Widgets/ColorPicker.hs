@@ -192,6 +192,7 @@ drawColorPickerPart na idx fm da store style rect = do
     border = styleBorder style
     white = colorRGBA 255 255 255 255
     handleCol = colorRGBA 0 0 0 180
+    pushVGrad r topC botC = pushQuadGradient da r topC topC botC botC
     -- A bar's outline and its handle, @frac@ of the way down.
     barHandle frac = do
       let handle = Rect (x - 3) (y + frac * h - 2) (w + 6) 4
@@ -200,34 +201,31 @@ drawColorPickerPart na idx fm da store style rect = do
       pushRoundedStroke da handle 2 1 handleCol
   case part of
     PickerSv -> do
-      let
-        hueCol = hsvToRgb hue 1 1
-        dot = Rect (x + sat * w - 3) (y + (1 - val) * h - 3) 6 6
+      let hueCol = hsvToRgb hue 1 1
+          dot = Rect (x + sat * w - 3) (y + (1 - val) * h - 3) 6 6
       -- Horizontal: white to hue. Vertical overlay: fade to black (alpha over).
       pushQuadGradient da area white hueCol hueCol white
-      pushQuadGradient da area (colorRGBA 0 0 0 0) (colorRGBA 0 0 0 0) (colorRGBA 0 0 0 255) (colorRGBA 0 0 0 255)
+      pushVGrad area (colorRGBA 0 0 0 0) (colorRGBA 0 0 0 255)
       pushRoundedStroke da area 4 1 border
       pushRoundedRect da dot 3 white
       pushRoundedStroke da dot 3 1 handleCol
     PickerHue -> do
       -- Vertical rainbow: each of six stop bands fades into the next.
-      let
-        cellH = h / 6
-        stop i = hsvToRgb (60 * fromIntegral i) 1 1
+      let cellH = h / 6
+          stop i = hsvToRgb (60 * fromIntegral i) 1 1
       forM_ [0 .. 5 :: Int] $ \i ->
-        pushQuadGradient da (Rect x (y + fromIntegral i * cellH) w cellH) (stop i) (stop i) (stop (i + 1)) (stop (i + 1))
+        pushVGrad (Rect x (y + fromIntegral i * cellH) w cellH) (stop i) (stop (i + 1))
       barHandle (hue / 360)
     PickerAlpha -> do
       drawChecker da area
-      pushQuadGradient da area (fadeAlpha newCol 0) (fadeAlpha newCol 0) (fadeAlpha newCol 255) (fadeAlpha newCol 255)
+      pushVGrad area (fadeAlpha newCol 0) (fadeAlpha newCol 255)
       barHandle (fromIntegral (colorA newCol) / 255)
     PickerPreview -> do
-      let
-        (_, current, _, new) = colorPickerPreviewGeom fm area
-        swatch r col = do
-          drawChecker da r
-          pushRect da r col
-          pushRoundedStroke da r 0 1 border
+      let (_, current, _, new) = colorPickerPreviewGeom fm area
+          swatch r col = do
+            drawChecker da r
+            pushRect da r col
+            pushRoundedStroke da r 0 1 border
       swatch current (widgetStoreBaseColor store owner colorPickerDefaultColor)
       swatch new newCol
 

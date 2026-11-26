@@ -95,7 +95,18 @@ popupWith open cfg f child = void (popupWith' open cfg f child)
 
 -- | 'popupWith' returning the body's result and the 'Response'.
 popupWith' :: Var Bool -> PopupConfig -> (Layout -> Layout) -> NanoUI a -> NanoUI (Response, Maybe a)
-popupWith' open cfg f child = bindOpen open (\shown -> popupShown shown cfg f child)
+popupWith' open cfg f child = bindOpen open $ \shown -> do
+  ctx <- askContext
+  let -- The popup's padding and gap are defaults the caller's modifier can change.
+      layout = f ((tight defaultLayout) {layoutPadding = Padding 6 6 6 6, layoutGap = 4})
+      addPopupNode wid parent = do
+        registerPopupConfig ctx wid (popupAnchor cfg) (popupPlacement cfg) (popupOffset cfg)
+        addNodeFromLayout (ctxNodeArena ctx) NodePopup parent layout
+      dismiss
+        | not (popupDismissable cfg) = Nothing
+        | AnchorRect r <- popupAnchor cfg = Just r
+        | otherwise = Just (Rect 0 0 0 0)
+  floatingOverlay shown dismiss addPopupNode (pure ()) ((,) False <$> child)
 
 -- | Bind a floating panel's open state to a 'Var', mutating it to 'False' when
 -- the panel reports a dismissal. Because the panel nodes were already emitted
@@ -106,29 +117,6 @@ bindOpen v run = bindVar Conservative v $ \open -> do
   r <- run open
   let !keep = open && not (respClicked (fst r))
   pure (r, keep)
-
--- | 'popupWith'' on a plain open flag. The 'Response' reports a dismissal
--- as a click, and the caller closes the popup.
-popupShown ::
-  Bool ->
-  PopupConfig ->
-  (Layout -> Layout) ->
-  NanoUI a ->
-  NanoUI (Response, Maybe a)
-popupShown open cfg f child = do
-  ctx <- askContext
-  let
-    -- The popup's padding and gap are defaults the caller's modifier can change.
-    layout = f ((tight defaultLayout) {layoutPadding = Padding 6 6 6 6, layoutGap = 4})
-    addPopupNode wid parent = do
-      registerPopupConfig ctx wid (popupAnchor cfg) (popupPlacement cfg) (popupOffset cfg)
-      addNodeFromLayout (ctxNodeArena ctx) NodePopup parent layout
-
-    dismiss
-      | not (popupDismissable cfg) = Nothing
-      | AnchorRect r <- popupAnchor cfg = Just r
-      | otherwise = Just (Rect 0 0 0 0)
-  floatingOverlay open dismiss addPopupNode (pure ()) ((,) False <$> child)
 
 -- | The floating panel behind popups, modals and windows, shown while @open@
 -- with its body in its own id scope. @addPanel@, given the panel's id, and
@@ -313,10 +301,8 @@ withTooltip ::
   NanoUI () ->
   NanoUI a
 withTooltip mainChild tipChild = do
-  base <- askDefaultLayout
-  (res, contResp) <- containerResponse NodeContainer (tight base) mainChild
-  tooltipWidget contResp tipChild
-  pure res
+  (res, contResp) <- mouseArea id mainChild
+  res <$ tooltipWidget contResp tipChild
 
 -- | 'tooltip' with a placement. 'PlacementAtCursor' follows the pointer.
 tooltipAt ::

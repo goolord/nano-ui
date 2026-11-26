@@ -20,7 +20,6 @@ module NanoUI.Internal.Draw.Types
   , DrawCmd (..)
   , ShaderCall (..)
   , EffectSpan (..)
-  , PendingEffectSpan (..)
   , emptyShaderCalls
   , emptyEffectSpans
   , emptyUniformBytes
@@ -29,6 +28,8 @@ module NanoUI.Internal.Draw.Types
   , drawCmdNull
   , forDrawCmdsInLayer_
   , drawCmdElems
+  , DrawFrameExtra (..)
+  , emptyDrawExtra
   , DrawArena (..)
   , RecordedOp (..)
   , vertexSize
@@ -44,7 +45,7 @@ where
 import Data.Int (Int32)
 import Data.IORef (IORef)
 import Data.Primitive.ByteArray (ByteArray, MutableByteArray, emptyByteArray)
-import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, imapPrimArray, indexPrimArray, primArrayFromListN)
+import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, emptyPrimArray, imapPrimArray, indexPrimArray, primArrayFromListN)
 import qualified Data.Text as T
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
 import Data.Word (Word32, Word64, Word8)
@@ -351,20 +352,6 @@ data EffectSpan = EffectSpan
   -- ^ Shader passes applied in order to the offscreen texture.
   }
 
--- | Unfinalized 'EffectSpan' recorded during painting before 'finishDraw'
--- maps raw command indices through piece cutting and layer grouping.
-data PendingEffectSpan = PendingEffectSpan
-  { pesId :: {-# UNPACK #-} !Int
-  , pesParent :: {-# UNPACK #-} !Int
-  , pesLayer :: !Layer
-  , pesRawStart :: {-# UNPACK #-} !Int
-  , pesRawEnd :: {-# UNPACK #-} !Int
-  , pesBounds :: !Rect
-  , pesClip :: !Rect
-  , pesMargin :: !V2
-  , pesPasses :: !(SmallArray ShaderCall)
-  }
-
 -- | Shared empty 'SmallArray' for frames without shader calls.
 emptyShaderCalls :: SmallArray ShaderCall
 emptyShaderCalls = smallArrayFromList []
@@ -434,65 +421,54 @@ forDrawCmdsInLayer_ ly dd f =
 drawCmdElems :: DrawData -> [DrawCmd]
 drawCmdElems = U.toList . drawCommands
 
+-- | Per-paint cold state reset as a single CAF on 'resetDrawArena'.
+data DrawFrameExtra = DrawFrameExtra
+  { dfeClipPieces :: !(PrimArray Float)
+  -- ^ Damage pieces as @x0, y0, x1, y1@ runs; empty when the clip is the one piece.
+  , dfeTextSpans :: !([(Rect, T.Text, Color, Color, Rect)], [(Rect, T.Text, Color, Color, Rect)])
+  -- ^ Drawing text spans recorded under external text (base, overlay) in reverse order.
+  , dfeRecordedOps :: ![RecordedOp]
+  -- ^ Solid shapes recorded in reverse order when 'daRecordOps' is enabled.
+  , dfeShaderCalls :: ![ShaderCall]
+  -- ^ Shader dispatch metadata accumulated in reverse order during paint.
+  , dfeEffectSpans :: ![EffectSpan]
+  -- ^ Tier 2 effect spans accumulated in reverse order during paint.
+  , dfeEffectStack :: ![Int]
+  -- ^ Stack of currently open Tier 2 effect span IDs.
+  }
+
+-- | Initial 'DrawFrameExtra' shared by 'newDrawArena' and 'resetDrawArena'.
+emptyDrawExtra :: DrawFrameExtra
+emptyDrawExtra = DrawFrameExtra emptyPrimArray ([], []) [] [] [] []
+
 data DrawArena = DrawArena
   { daVertexFPtr :: !(IORef (ForeignPtr Word8))
   , daVertexCap :: !(IORef Int)
   , daIndexFPtr :: !(IORef (ForeignPtr Word8))
   , daIndexCap :: !(IORef Int)
   , daCounts :: !(MutablePrimArray RealWorld Int)
-  -- ^ Vertex count, index count, command count and the pending command's
-  -- start index, unboxed so the per-primitive writes do not allocate.
+  -- ^ Unboxed integer state: vertex/index/cmd counts, pending command start,
+  -- current texture, current shader, no-merge floor, shader call count,
+  -- uniform byte length, and next effect span ID.
   , daCmdStore :: !(IORef (U.MVector RealWorld DrawCmd))
   , daCurrentLayer :: !(IORef Layer)
   , daCurrentClip :: !(MutablePrimArray RealWorld Float)
-  -- ^ The current clip rect: x, y, width and height.
-  , daCurrentTexture :: !(IORef Int)
+  -- ^ Four floats: x, y, w, h of the active clip rect.
   , daSnapScale :: !(IORef Float)
   , daSquareGeometry :: !(IORef Bool)
   , daExternalText :: !(IORef Bool)
-  , daClipPieces :: !(IORef (PrimArray Float))
-  -- ^ Disjoint rects as @x0, y0, x1, y1@ runs that every command is cut to,
-  -- one copy per rect it meets; empty for none.
-  , daTextSpans :: !(IORef ([(Rect, T.Text, Color, Color, Rect)], [(Rect, T.Text, Color, Color, Rect)]))
-  -- ^ Under external text, the drawing text this paint recorded as host
-  -- spans (bounds, text, foreground, transparent background, clip), newest
-  -- first: base layers, then overlay layers. Read by
-  -- 'NanoUI.Internal.Frame.Spans.collectRasterSpans' and emptied only by
-  -- 'NanoUI.Internal.Draw.Arena.resetDrawArena', so a reused frame keeps
-  -- the spans of the paint that drew it.
   , daClear :: !(IORef Color)
-  -- ^ This paint's clear colour; see 'drawClear'.
+  -- ^ Background colour the frame clears with.
   , daRecordOps :: !(IORef Bool)
-  -- ^ Whether the shape emitters record what they draw ('daRecordedOps').
-  -- Persists across 'NanoUI.Internal.Draw.Arena.resetDrawArena'.
-  , daRecordedOps :: !(IORef [RecordedOp])
-  -- ^ While 'daRecordOps' is on, the shapes and images this paint drew, newest
-  -- first. Emptied only by 'NanoUI.Internal.Draw.Arena.resetDrawArena', so
-  -- a reused frame keeps the shapes of the paint that drew it.
+  -- ^ When 'True', emitters also append the solid shapes they draw to 'dfeRecordedOps'.
   , daRecordOpacity :: !(IORef Float)
-  -- ^ Active SVG group opacity multiplier when 'daRecordOps' is on (@1.0@
-  -- outside opacity effects).
-  , daCurrentShader :: !(IORef Int32)
-  -- ^ Active 1-based shader call index, or @0@ for the standard UI pipeline.
-  , daNoMergeBefore :: !(IORef Int)
-  -- ^ Minimum command count before which 'flushCmd' may not coalesce into the
-  -- preceding command (updated at effect span boundaries).
-  , daShaderCalls :: !(IORef [ShaderCall])
-  -- ^ Shader calls emitted this paint, newest first.
-  , daShaderCallCount :: !(IORef Int)
-  -- ^ Number of entries in 'daShaderCalls'.
+  -- ^ Active group opacity recorded into 'RecordedOp' (1.0 outside opacity effects).
   , daUniformBuf :: !(IORef (MutableByteArray RealWorld))
-  -- ^ Reusable flat std140 uniform staging buffer, grown lazily on shader use.
-  , daUniformLen :: !(IORef Int)
-  -- ^ Number of bytes written into 'daUniformBuf' this paint.
-  , daEffectSpans :: !(IORef [PendingEffectSpan])
-  -- ^ Closed effect spans recorded this paint, newest first.
-  , daEffectStack :: !(IORef [Int])
-  -- ^ Currently open effect span IDs, innermost first.
-  , daEffectNextId :: !(IORef Int)
-  -- ^ Next 1-based effect span ID.
+  -- ^ Flat growable byte buffer holding packed user uniform payloads for shader calls.
   , daPixelScale :: !(IORef Float)
-  -- ^ Logical-to-physical scale forwarded in shader system uniforms (@uMeta.x@).
+  -- ^ Physical pixels per logical pixel, written into shader system uniforms.
+  , daExtra :: !(IORef DrawFrameExtra)
+  -- ^ Per-paint cold state reset on 'resetDrawArena'.
   }
 
 -- | A solid shape as an emitter drew it: its layer, the clip it drew under,

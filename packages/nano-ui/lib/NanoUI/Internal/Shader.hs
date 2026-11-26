@@ -36,13 +36,7 @@ import Data.Bits (xor)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Dynamic (Dynamic)
-import Data.Primitive.ByteArray
-  ( ByteArray
-  , MutableByteArray
-  , fillByteArray
-  , newByteArray
-  , unsafeFreezeByteArray
-  )
+import Data.Primitive.ByteArray (ByteArray, MutableByteArray)
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Data.Text.Encoding qualified as TE
@@ -54,6 +48,7 @@ import NanoUI.Internal.Uniforms
   ( UniformField (..)
   , Uniforms (..)
   , hashUniformBytes
+  , packZeroedBytes
   , uniformLayout
   , uniformSize
   )
@@ -148,7 +143,7 @@ hashShaderProgram sp =
     mixByte !h !b = (h `xor` fromIntegral b) * 0x100000001b3
     mixInt :: Word64 -> Int -> Word64
     mixInt !h !n = (h `xor` fromIntegral n) * 0x100000001b3
-    mixBytes !h0 bs = BS.foldl' mixByte (mixInt h0 (BS.length bs)) bs
+    mixBytes !h bs = BS.foldl' mixByte (mixInt h (BS.length bs)) bs
 
 -- | Fragment evaluation context passed to a CPU fallback evaluator.
 data CpuFragCtx = CpuFragCtx
@@ -284,22 +279,8 @@ data PackedShaderPass = PackedShaderPass
 -- std140 bytes and compute its content hash.
 packShaderPass :: ShaderPass u -> u -> IO PackedShaderPass
 packShaderPass pass u = do
-  let !sz = spUniformSize pass
-  mba <- newByteArray sz
-  whenPos sz $ do
-    fillByteArray mba 0 sz 0
-    spPack pass u mba 0
-  ba <- unsafeFreezeByteArray mba
-  let !uHash = hashUniformBytes ba
-  pure
-    PackedShaderPass
-      { pspHash = spHash pass
-      , pspProgram = spProgram pass
-      , pspUniforms = ba
-      , pspUniformHash = uHash
-      }
-  where
-    whenPos n act = if n > 0 then act else pure ()
+  ba <- packZeroedBytes (spUniformSize pass) (\mba -> spPack pass u mba 0)
+  pure (PackedShaderPass (spHash pass) (spProgram pass) ba (hashUniformBytes ba))
 
 -- | Registration attached to a 'NanoUI.Internal.Layout.Arena.NodeShader' in 'NanoUI.Internal.Context.Types.NodeCustom'.
 data ShaderNodeEntry = ShaderNodeEntry

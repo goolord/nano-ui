@@ -77,13 +77,18 @@ useHeldBy (Resource key cell) k acquire =
             when (s == frame) $ modifyPrimVar stampedVar (subtract 1)
           void (holdingRelease old `catch` \(_ :: SomeException) -> pure (pure ()))
         (v, release) <- restore (acquire ctx ((\(_, v, _) -> v) <$> entry))
-        seen <- newPrimVar frame
-        let holding = Holding (writeIORef cell Nothing >> release) seen
+        holding <- registerHolding registry frame key (writeIORef cell Nothing >> release)
         writeIORef cell (Just (k, v, holding))
-        modifyIORef' ref (IM.insert key holding)
-        modifyPrimVar stampedVar (+ 1)
-        modifyPrimVar countVar (+ 1)
         pure v
+
+registerHolding :: Held -> Int -> Int -> IO (IO ()) -> IO Holding
+registerHolding registry frame key release = do
+  seen <- newPrimVar frame
+  let holding = Holding release seen
+  modifyIORef' (heldEntries registry) (IM.insert key holding)
+  modifyPrimVar (heldStamped registry) (+ 1)
+  modifyPrimVar (heldCount registry) (+ 1)
+  pure holding
 
 touch :: Held -> Int -> Holding -> IO ()
 touch registry frame holding = do
@@ -107,15 +112,9 @@ holdAction release = do
       Just holding -> touch registry frame holding
       Nothing -> do
         key <- hashUnique <$> newUnique
-        seen <- newPrimVar frame
-        let cleanup = do
-              modifyIORef' (heldWidgets registry) (IM.delete widget)
-              release
-              pure (pure ())
         modifyIORef' (heldWidgets registry) (IM.insert widget key)
-        modifyIORef' (heldEntries registry) (IM.insert key (Holding cleanup seen))
-        modifyPrimVar (heldStamped registry) (+ 1)
-        modifyPrimVar (heldCount registry) (+ 1)
+        void $ registerHolding registry frame key $
+          pure () <$ (modifyIORef' (heldWidgets registry) (IM.delete widget) >> release)
 
 -- | State of a 'useTaskStatus' job. The 'Maybe' is the latest result from an
 -- earlier key, so the view can keep showing it instead of flickering.

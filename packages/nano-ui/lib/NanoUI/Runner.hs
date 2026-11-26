@@ -372,10 +372,7 @@ runSessionLoop drv ctx0 inp0 = do
             waitT <- if wakeAt > 0 then getMonotonicTime else pure 0
             others <- maybe (pure (-1)) lwWait (sdWindows drv)
             let wakeMs = wakeTimeoutMs wakeAt waitT
-                idleMs
-                  | not debugActive = wakeMs
-                  | wakeMs < 0 = debugHudTimeout
-                  | otherwise = min debugHudTimeout wakeMs
+                idleMs = if debugActive then shorterWait debugHudTimeout wakeMs else wakeMs
                 -- A continuous session whose presents do not wait for the
                 -- display, though vsync was asked for, is paced by time.
                 continuousPaced = sdContinuous drv && not presentPaces && not (sdVsyncOff drv)

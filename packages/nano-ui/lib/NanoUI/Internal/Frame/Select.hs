@@ -22,19 +22,19 @@ module NanoUI.Internal.Frame.Select
 import Control.Monad (filterM, forM, forM_, unless, when)
 import Data.IORef (readIORef)
 import Data.IntMap.Strict qualified as IM
-import Data.Maybe (fromMaybe, isJust, listToMaybe, maybeToList)
+import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import qualified Data.Text as T
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (DrawArena (..))
 import NanoUI.Internal.Font (FontMetrics, centeredTextY, menuItemPadX, menuItemRowH, menuOuterPad, widgetContentInset)
 import NanoUI.Internal.Frame.Chrome (overlayMenuStyle)
 import NanoUI.Internal.Frame.Hit (widgetOverlayAllowed)
-import NanoUI.Internal.Layout.ScrollGeometry (scrollThumbSpan)
+import NanoUI.Internal.Layout.ScrollGeometry (ScrollBarLayout (..), scrollThumbSpan)
 import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable (..), anyButtonPressed, anyButtonReleased, inputPointerHeld, shiftAtMost)
 import NanoUI.Internal.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), getClipBounds, getFirstChild, getNodeType, lookupNodeByKey, lookupNodeByWidgetId, getOptions, getNodeRect, getWidgetId, setClipRect, setRect, subtreeSpan)
 import NanoUI.Internal.Layout.Solve (computePopupPosition)
-import NanoUI.Internal.Monad (whenM, (<&&>))
+import NanoUI.Internal.Monad (mfilterM, whenM, (<&&>))
 import NanoUI.Internal.Store (fieldInt, findSlot, insertSlot)
 import NanoUI.Internal.Style (Style (..), Theme (..), themeAccent)
 import NanoUI.Internal.Types (Color (..), PopupAnchor (..), PopupPlacement (..), Rect (..), Size (..), V2 (..), clamp, rectContains, rectIntersect, rectNonEmpty)
@@ -196,7 +196,7 @@ finalizeSelectKeyboard ctx@Context {ctxNodeArena = na} inp = do
     -- select: a field that took focus without closing it keeps its keys.
     let enabledSelect idx = ((== NodeSelect) <$> getNodeType na idx) <&&> (not <$> isDisabled ctx focus)
     focused <-
-      if wantStep || wantEnter then keepNode enabledSelect =<< lookupNodeByWidgetId na focus else pure Nothing
+      if wantStep || wantEnter then mfilterM enabledSelect =<< lookupNodeByWidgetId na focus else pure Nothing
     target <- case focused of
       Just idx -> pure (Just (idx, isSelectOpen store (intKey focus)))
       Nothing
@@ -231,18 +231,14 @@ openSelectNode :: Context -> WidgetStore -> IO (Maybe NodeIdx)
 openSelectNode Context {ctxNodeArena = na} store
   | not (anySelectOpen store) = pure Nothing
   | otherwise =
-      keepNode (fmap (== NodeSelect) . getNodeType na) =<< lookupNodeByKey na (storeOpenSelect store)
+      mfilterM (fmap (== NodeSelect) . getNodeType na) =<< lookupNodeByKey na (storeOpenSelect store)
 
 -- | The focused node when it is a combo (a text input carrying options),
 -- which owns an open dropdown for as long as it holds focus.
 focusedComboNode :: Context -> IO (Maybe NodeIdx)
 focusedComboNode ctx@Context {ctxNodeArena = na} =
-  keepNode (\idx -> ((== NodeTextInput) <$> getNodeType na idx) <&&> (not . null <$> getOptions na idx))
+  mfilterM (\idx -> ((== NodeTextInput) <$> getNodeType na idx) <&&> (not . null <$> getOptions na idx))
     =<< lookupNodeByWidgetId na =<< readIORef (ctxFocusId ctx)
-
--- | The node, when it satisfies @p@.
-keepNode :: (NodeIdx -> IO Bool) -> Maybe NodeIdx -> IO (Maybe NodeIdx)
-keepNode p = fmap listToMaybe . filterM p . maybeToList
 
 -- | Vertical gap between the select widget and its dropdown menu.
 selectDropGap :: Float
@@ -326,8 +322,8 @@ comboSbMinThumb = 24
 -- and the widget's thumb-drag gesture. The list has no outer margin: rows
 -- fill the drop rect edge to edge, and a vertical lane sits on the right
 -- when rows overflow the window, a horizontal one on the bottom when the
--- widest row overflows the width. Returns (inner rows area, vertical
--- (track, thumb), horizontal (track, thumb), usable content width).
+-- widest row overflows the width. Returns (inner rows area, vertical bar,
+-- horizontal bar, usable content width).
 comboScrollGeom ::
   Rect ->
   Int ->
@@ -335,7 +331,7 @@ comboScrollGeom ::
   Int ->
   Float ->
   Float ->
-  (Rect, Maybe (Rect, Rect), Maybe (Rect, Rect), Float)
+  (Rect, Maybe ScrollBarLayout, Maybe ScrollBarLayout, Float)
 comboScrollGeom (Rect dx dy dw dh) n vis win xOff contentW =
   (Rect dx dy usableW usableH, vSb, hSb, usableW)
   where
@@ -344,19 +340,20 @@ comboScrollGeom (Rect dx dy dw dh) n vis win xOff contentW =
     hScroll = contentW > usableW && contentW > 0
     -- Rows fill the drop rect from the top, stopping short of the lanes.
     usableH = max 0 (dh - if hScroll then comboSbW else 0)
+    maxWin = fromIntegral (max 0 (n - vis))
+    maxOffX = max 0 (contentW - usableW)
     -- Lanes sit flush against the dropdown border and share the corner. A
     -- thumb shows @num / den@ of its track, @off@ of @maxOff@ along it.
     thumb track num den off = scrollThumbSpan track comboSbMinThumb num den off
     vx = dx + dw - comboSbW
     hy = dy + dh - comboSbW
-    (ty, thumbH) =
-      thumb usableH (fromIntegral vis) (fromIntegral n) (fromIntegral win) (fromIntegral (max 1 (n - vis)))
-    (tx, thumbW) = thumb usableW usableW contentW xOff (max 1 (contentW - usableW))
+    (ty, thumbH) = thumb usableH (fromIntegral vis) (fromIntegral n) (fromIntegral win) (max 1 maxWin)
+    (tx, thumbW) = thumb usableW usableW contentW xOff (max 1 maxOffX)
     vSb
-      | vScroll = Just (Rect vx dy comboSbW usableH, Rect (vx + 2) (dy + ty) (comboSbW - 4) thumbH)
+      | vScroll = Just (ScrollBarLayout (Rect vx dy comboSbW usableH) (Rect (vx + 2) (dy + ty) (comboSbW - 4) thumbH) maxWin)
       | otherwise = Nothing
     hSb
-      | hScroll = Just (Rect dx hy usableW comboSbW, Rect (dx + tx) (hy + 2) thumbW (comboSbW - 4))
+      | hScroll = Just (ScrollBarLayout (Rect dx hy usableW comboSbW) (Rect (dx + tx) (hy + 2) thumbW (comboSbW - 4)) maxOffX)
       | otherwise = Nothing
 
 -- | Combo dropdown rect: like a select's ('dropRect'), but with no outer

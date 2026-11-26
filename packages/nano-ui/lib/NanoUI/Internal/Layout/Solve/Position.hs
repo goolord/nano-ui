@@ -3,11 +3,10 @@ module NanoUI.Internal.Layout.Solve.Position
   ( positionNodeA
   , placeFloatingNodes
   , computePopupPosition
-  , placeWindowNode
   , scrollBarSlotOf
   ) where
 
-import Control.Monad (foldM, foldM_, join, unless, when, zipWithM_)
+import Control.Monad (foldM, foldM_, unless, when, zipWithM_)
 import Data.IORef (IORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IM
@@ -20,7 +19,7 @@ import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve.Flex
 import NanoUI.Internal.Layout.Solve.Measure
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), ItemsAlign (..), Justify (..), Padding (..), lineAlignFraction, windowMargin)
-import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp, foldUpTo, forUpTo_)
+import NanoUI.Internal.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp, eqRectAt, foldUpTo, forUpTo_, writeRectAt)
 import NanoUI.Internal.WidgetText
 
 -- | Place a widget's adornment rows ('adornRows'), each centred on its
@@ -58,48 +57,33 @@ positionNodeA ::
   NodeIdx ->
   Rect ->
   IO ()
-positionNodeA env !depth !idx rect@(Rect x y w h) = case sePositions env of
-  Nothing -> positionNode env depth idx rect
-  Just pl@PositionLog {plOffered} -> do
-    let !o = idx * 4
-    offeredBefore <- not . isNaN <$> readPrimArray plOffered o
-    if offeredBefore
-      -- A second offer reads what the first placed, so neither is put back.
-      then writePrimArray plOffered (o + 2) (0 / 0) >> positionNode env depth idx rect
-      else do
-        reused <- case seCache env of
-          Just lc -> reusePositions env lc pl idx rect
-          Nothing -> pure False
-        unless reused $ do
-          writePrimArray plOffered o x
-          writePrimArray plOffered (o + 1) y
-          writePrimArray plOffered (o + 2) w
-          writePrimArray plOffered (o + 3) h
-          positionNode env depth idx rect
+positionNodeA env@SolveEnv {seArrays = a} !depth !idx rect@(Rect x y w h)
+  | not (seRecordPos env) = positionNode env depth idx rect
+  | otherwise = do
+      let offered = naArrOffered a
+          !o = idx * 4
+      offeredBefore <- not . isNaN <$> readPrimArray offered o
+      if offeredBefore
+        -- A second offer reads what the first placed, so neither is put back.
+        then writePrimArray offered (o + 2) (0 / 0) >> positionNode env depth idx rect
+        else do
+          reused <- maybe (pure False) (\lc -> reusePositions a lc idx rect) (seCache env)
+          unless reused $ writeRectAt offered o x y w h >> positionNode env depth idx rect
 
 -- | Put back what the captured solve's position pass left in @idx@'s subtree
 -- (its unsnapped rects, the rects offered its nodes and its scroll extents),
 -- when the measure pass found that solve placed the subtree as this one
--- would ('plSpans') and it offered the node @rect@ too. 'False' when not.
-reusePositions :: SolveEnv -> LayoutCache -> PositionLog -> NodeIdx -> Rect -> IO Bool
-reusePositions SolveEnv {seArena = na, seArrays = a} lc PositionLog {plOffered, plSpans} idx (Rect x y w h) = do
-  end <- readPrimArray plSpans idx
+-- would ('naArrSpans') and it offered the node @rect@ too. 'False' when not.
+reusePositions :: NodeArenaArrays -> LayoutCache -> NodeIdx -> Rect -> IO Bool
+reusePositions a lc idx (Rect x y w h) = do
+  end <- readPrimArray (naArrSpans a) idx
   let prev = lcOffered lc
       !o = idx * 4
-  same <-
-    if end < 0 || end > lcCount lc
-      then pure False
-      else do
-        px <- readPrimArray prev o
-        py <- readPrimArray prev (o + 1)
-        pw <- readPrimArray prev (o + 2)
-        ph <- readPrimArray prev (o + 3)
-        pure (px == x && py == y && pw == w && ph == h)
+  same <- if end < 0 || end > lcCount lc then pure False else eqRectAt prev o x y w h
   when same $ do
-    copyMutablePrimArray plOffered o prev o ((end - idx) * 4)
+    copyMutablePrimArray (naArrOffered a) o prev o ((end - idx) * 4)
     let copyNode !i = when (i < end) $ do
-          let at k = readPrimArray (lcUnsnapped lc) (i * 4 + k)
-          join (setRect na i <$> at 0 <*> at 1 <*> at 2 <*> at 3)
+          copyMutablePrimArray (naArrGeom a) (i * geomStride) (lcUnsnapped lc) (i * 4) 4
           nt <- readTagEnum a i TagNodeType
           when (isScrollNode nt) (restoreScrollExtents a lc i)
           copyNode (i + 1)
@@ -185,39 +169,27 @@ positionScrollChildren env@SolveEnv {seArena = na} depth idx dir gap pad (Rect p
   si <- getStyleIdx na idx
   contentSize <- getNodeValue na idx
   slot <- scrollBarSlotOf na idx
-  let Rect cx cy innerW innerH = padContentClip px py pw ph pad
+  let is2D = isScrollStyle2D si
       cfg = decodeScrollConfig si
-  if isScrollStyle2D si
-    then do
-      contentW <- getScrollContentW na idx
-      let (gutterW, gutterH) = scrollGutters2D slot cfg pad contentW contentSize innerW innerH
-          viewW = max 0 (innerW - gutterW)
-          viewH = max 0 (innerH - gutterH)
-          -- Keep measured content. Shrinking to the clip wraps table columns.
-          layoutW = max contentW viewW
-          layoutH = max contentSize viewH
-          -- cx/cy and the layout box are already inside the padding.
-          box = Rect cx cy layoutW layoutH
-      -- The children line up along the scroller's direction, as they
-      -- measured, and as in a 1D scroller a grid layout makes no grid.
-      case dir of
-        DirRow -> positionRowFromParent env depth idx gap box
-        DirColumn -> positionColumn env depth idx gap False Nothing cx layoutW box
-      positionLayered env depth idx False box
-    else do
-      let gutterCol = scrollAxisGutter (scrollPolicyY cfg) slot (padR pad) contentSize innerH
-          gutterRow = scrollAxisGutter (scrollPolicyX cfg) slot (padB pad) contentSize innerW
-      box <- case dir of
+  contentW <- if is2D then getScrollContentW na idx else pure 0
+  let vp@(Rect cx cy viewW viewH) =
+        scrollNodeViewport (ScrollNode slot cfg is2D dir pad contentSize contentW) px py pw ph
+  -- cx/cy and the layout box are already inside the padding. For 2D scrollers
+  -- keep measured content so shrinking to the clip does not wrap table columns.
+  box <-
+    if is2D
+      then pure (Rect cx cy (max contentW viewW) (max contentSize viewH))
+      else case dir of
         DirRow -> do
           wTag <- axTag <$> getWidthSizing na idx
-          let rowMain = if wTag == SizingGrow then max contentSize innerW else contentSize
-              b = Rect cx cy rowMain (max 0 (innerH - gutterRow))
-          b <$ positionRowFromParent env depth idx gap b
-        DirColumn -> do
-          let viewW = max 0 (innerW - gutterCol)
-              b = Rect cx cy viewW innerH
-          b <$ positionColumn env depth idx gap False (Just contentSize) cx viewW b
-      positionLayered env depth idx False box
+          pure (Rect cx cy (if wTag == SizingGrow then max contentSize viewW else contentSize) viewH)
+        DirColumn -> pure vp
+  -- Children line up along the scroller's direction, as they measured, and a
+  -- grid layout inside a scroller makes no grid.
+  case dir of
+    DirRow -> positionRowFromParent env depth idx gap box
+    DirColumn -> positionColumn env depth idx gap False (if is2D then Nothing else Just contentSize) cx (rectW box) box
+  positionLayered env depth idx False box
   fc <- getFirstChild na idx
   when (fc >= 0) $ do
     let step (FlowAcc count maxB maxR) ci = do
@@ -263,17 +235,6 @@ columnChildX na pItems ci cx cw = do
       let !offer = percentOr wAx cw cw
           !x = alignX ax cx cw (resolveSize wAx iw offer)
       pure (x, offer)
-
--- | The size a node takes along an axis where @avail@ is offered, from its
--- sizing, its measured size @intrinsic@ and its limits.
-{-# INLINE resolveSize #-}
-resolveSize :: AxisSizing -> Float -> Float -> Float
-resolveSize (AxisSizing tag val lo hi) intrinsic avail =
-  clamp lo hi $ case tag of
-    SizingFixed -> val
-    SizingGrow -> min avail hi
-    SizingPercent -> min avail hi
-    _ -> min intrinsic avail
 
 positionChildren ::
   SolveEnv ->
@@ -332,12 +293,16 @@ withSnapshot na depth n sizes act = do
   act idxSnap sizeSnap
 
 -- | Leading offset and inter-child gap for a single-line container distributing
--- leftover space according to 'Justify'.
-{-# INLINE justifyOffsets #-}
-justifyOffsets :: Justify -> Int -> Float -> Float -> Float -> (Float, Float)
-justifyOffsets j n avail used baseGap =
-  let !free = max 0 (avail - used)
-   in case j of
+-- leftover space according to 'Justify'. Fast-paths 'JustifyStart' without
+-- summing child sizes.
+{-# INLINE resolveJustify #-}
+resolveJustify :: Justify -> Int -> Float -> Float -> Float -> IOArr Float -> IO (Float, Float)
+resolveJustify j n avail gapSum baseGap outSnap
+  | j == JustifyStart || n <= 0 = pure (0, baseGap)
+  | otherwise = do
+      used <- foldUpTo n (\t i -> (t +) <$> readPrimArray outSnap i) gapSum
+      let !free = max 0 (avail - used)
+      pure $ case j of
         JustifyStart -> (0, baseGap)
         JustifyCenter -> (free * 0.5, baseGap)
         JustifyEnd -> (free, baseGap)
@@ -358,12 +323,7 @@ positionRowFromParent env@SolveEnv {seArena = na, seArrays = a} depth parent gap
   let baseGaps = gap * fromIntegral (max 0 (n - 1))
   distributeScratch na n cw baseGaps True
   withSnapshot na depth n fsOut $ \idxSnap outSnap -> do
-    (startOff, stepGap) <-
-      if pJustify == JustifyStart || n <= 0
-        then pure (0, gap)
-        else do
-          used <- foldUpTo n (\t i -> (t +) <$> readPrimArray outSnap i) baseGaps
-          pure (justifyOffsets pJustify n cw used gap)
+    (startOff, stepGap) <- resolveJustify pJustify n cw baseGaps gap outSnap
     placeRowLine env depth pItems idxSnap outSnap n stepGap (cx + startOff) cy ch
 
 -- | Place the first @k@ snapshot children left to right from @x0@, each as
@@ -385,16 +345,13 @@ placeRowLine env@SolveEnv {seArena = na, seArrays = a} !depth pItems idxSnap out
             fw <- readPrimArray outSnap i
             crossH <- childCrossH ci fw
             writePrimArray crossHs i crossH
-            ay <- effectiveAlignY a pItems ci
-            hTag <- readTagEnum a ci TagHSizing
-            if ay == AlignBaseline && hTag /= SizingGrow
+            ok <- isBaselineChild a pItems ci
+            if ok
               then do
                 b <- childBaseline env ci crossH
                 writePrimArray baselines i b
                 pure (max acc b)
-              else do
-                writePrimArray baselines i (-1)
-                pure acc
+              else acc <$ writePrimArray baselines i (-1)
       base <- foldUpTo k collect 0
       let goBase !i !x = when (i < k) $ do
             ci <- readPrimArray idxSnap i
@@ -405,18 +362,14 @@ placeRowLine env@SolveEnv {seArena = na, seArrays = a} !depth pItems idxSnap out
               if b >= 0
                 then pure (clamp top (top + max 0 (cross - crossH)) (top + base - b))
                 else (\ay -> alignY ay top cross crossH) <$> effectiveAlignY a pItems ci
-            positionNodeA env (depth + 1) ci (Rect x fy fw crossH)
-            placedW <- readGeom a ci GeomW
-            goBase (i + 1) (x + min fw placedW + gap)
+            placeChild ci x fy fw crossH >>= goBase (i + 1)
       goBase 0 x0
   where
     anyBaseline !i
       | i >= k = pure False
       | otherwise = do
-          ci <- readPrimArray idxSnap i
-          ay <- effectiveAlignY a pItems ci
-          hTag <- readTagEnum a ci TagHSizing
-          if ay == AlignBaseline && hTag /= SizingGrow then pure True else anyBaseline (i + 1)
+          ok <- readPrimArray idxSnap i >>= isBaselineChild a pItems
+          if ok then pure True else anyBaseline (i + 1)
     -- A child is aligned at the height it is laid out at: its height at its
     -- share of the width when that is not the width it measured at.
     childCrossH ci fw = do
@@ -427,18 +380,17 @@ placeRowLine env@SolveEnv {seArena = na, seArrays = a} !depth pItems idxSnap out
     -- error every child (1.667 -> 2.0 -> ...) so a shrink row overruns its
     -- fixed width. Each child's far edge is the next one's raw origin, so
     -- quantizeResultsA, which snaps edges, puts both on the same pixel.
+    {-# INLINE placeChild #-}
+    placeChild !ci !x !fy !fw !crossH = do
+      positionNodeA env (depth + 1) ci (Rect x fy fw crossH)
+      placedW <- readGeom a ci GeomW
+      pure (x + min fw placedW + gap)
     goPlain !i !x = when (i < k) $ do
       ci <- readPrimArray idxSnap i
       fw <- readPrimArray outSnap i
       crossH <- childCrossH ci fw
       ay <- effectiveAlignY a pItems ci
-      positionNodeA env (depth + 1) ci (Rect x (alignY ay top cross crossH) fw crossH)
-      -- The next child starts at this one's far edge, or at its share's
-      -- when it came out wider (a minimum width past its share), so
-      -- the row keeps its length. A max width already caps its share
-      -- ('distributeScratch').
-      placedW <- readGeom a ci GeomW
-      goPlain (i + 1) (x + min fw placedW + gap)
+      placeChild ci x (alignY ay top cross crossH) fw crossH >>= goPlain (i + 1)
 
 positionGrid ::
   SolveEnv ->
@@ -451,7 +403,7 @@ positionGrid ::
   IO ()
 positionGrid env@SolveEnv {seArena = na, seArrays = a} depth parent gCols minColW gap (Rect cx cy cw ch) = do
   let cols = gridColumnCount gCols minColW cw gap
-      colW = max 0 ((cw - gap * fromIntegral (cols - 1)) / fromIntegral cols)
+      colW = gridColWidth cw cols gap
   pItems <- readItemsAlign a parent
   -- Refit at the column width before freezing row heights. The enclosing
   -- column's height query uses the same per-node, per-width memo.
@@ -595,12 +547,8 @@ positionColumn env@SolveEnv {seArena = na, seArrays = a} !depth !parent !gap chr
     if chrome then columnGapSumScratch na n gap else pure (gap * fromIntegral (max 0 (n - 1)))
   distributeScratch na n (fromMaybe ch scrollContent) gapSum False
   withSnapshot na depth n fsOut $ \idxSnap outSnap -> do
-    (startOff, stepGap) <-
-      if pJustify == JustifyStart || isJust scrollContent || n <= 0
-        then pure (0, gap)
-        else do
-          used <- foldUpTo n (\t i -> (t +) <$> readPrimArray outSnap i) gapSum
-          pure (justifyOffsets pJustify n ch used gap)
+    let effJustify = if isJust scrollContent then JustifyStart else pJustify
+    (startOff, stepGap) <- resolveJustify effJustify n ch gapSum gap outSnap
     let box' = if startOff == 0 then box else Rect cx (cy + startOff) cw (max 0 (ch - startOff))
     placeColumnLine env depth pItems idxSnap outSnap n stepGap chrome scrollContent px pw box'
 
@@ -719,12 +667,6 @@ recordPlaced SolveEnv {seArena = na, seMs = ms} idx rect =
       anyMeasured <- foldUpTo n (\acc i -> if acc then pure True else measured (idx + i)) False
       if anyMeasured then pure Nothing else Just <$> snapshotPlaced na idx n rect
 
--- | Lay out window @idx@ at size @w0 h0@ ('windowRect').
-placeWindowNode :: NodeArena -> Measurers -> Float -> Float -> NodeIdx -> Float -> Float -> (Float -> (Float, Float)) -> IO ()
-placeWindowNode na ms winW winH idx w0 h0 originFor = do
-  env <- solveEnv na ms Nothing
-  positionFloating env idx =<< windowRect na winW winH idx w0 h0 originFor
-
 -- | Window @idx@'s rect at size @w0 h0@, clamped to its min and max size and
 -- the screen, with its origin, given that size, clamped on screen. The
 -- caller picks @w0 h0@: 'placeFloatingNodes' passes the saved size, or else
@@ -775,21 +717,17 @@ computePopupPosition winW winH margin iw ih anchor placement offset =
           , clampY (onAxis py ih winH (placement == PlacementAbove) (placement == PlacementBelow))
           )
     AnchorRect (Rect rx ry rw rh) ->
-      case placement of
-        PlacementBelow -> (clampPopupX margin winW iw rx, clampY (after ry rh winH ih))
-        PlacementAbove -> (clampPopupX margin winW iw rx, clampY (before ry rh winH ih))
-        PlacementRight -> (clampPopupX margin winW iw (after rx rw winW iw), clampY ry)
-        PlacementLeft -> (clampPopupX margin winW iw (before rx rw winW iw), clampY ry)
-        PlacementAuto ->
-          let spaceBelow = winH - margin - (ry + rh + offset)
-              spaceAbove = ry - offset - margin
-              y = if spaceBelow >= ih || spaceBelow >= spaceAbove
-                    then ry + rh + offset
-                    else ry - ih - offset
-              x = clampPopupX margin winW iw rx
-           in (x, clampY y)
-        PlacementAtCursor ->
-          (clampPopupX margin winW iw rx, clampY (ry + rh + offset))
+      let (rawX, rawY) = case placement of
+            PlacementBelow -> (rx, after ry rh winH ih)
+            PlacementAbove -> (rx, before ry rh winH ih)
+            PlacementRight -> (after rx rw winW iw, ry)
+            PlacementLeft -> (before rx rw winW iw, ry)
+            PlacementAuto ->
+              let spaceBelow = winH - margin - (ry + rh + offset)
+                  spaceAbove = ry - offset - margin
+               in (rx, if spaceBelow >= ih || spaceBelow >= spaceAbove then ry + rh + offset else ry - ih - offset)
+            PlacementAtCursor -> (rx, ry + rh + offset)
+       in (clampPopupX margin winW iw rawX, clampY rawY)
   where
     -- Keep the popup's top edge within the window margins.
     clampY y = clamp margin (winH - ih - margin) y

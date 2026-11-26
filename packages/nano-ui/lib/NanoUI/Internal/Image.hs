@@ -2,7 +2,7 @@
 
 -- | Pure image geometry: fit, alignment, crop, zoom, opacity and rotation.
 -- Covers the user options ('ImageConfig'), the per-node paint data
--- ('ImageLook', 'lookDraw') and the canvas image record ('ImageDraw').
+-- ('ImageLook', 'withLookDraw') and the canvas image record ('ImageDraw').
 module NanoUI.Internal.Image
   ( ContentFit (..)
   , Rotation (..)
@@ -15,9 +15,7 @@ module NanoUI.Internal.Image
   , imageLook
   , plainLook
   , lookSize
-  , lookTurned
-  , lookDraw
-  , lookQuad
+  , withLookDraw
   , ImageDraw (..)
   , imageDraw
   , imageDrawOp
@@ -170,7 +168,7 @@ cropRegion crop (iw, ih) = case crop of
     h = fromIntegral ih
 
 -- | Paint settings for an image node: its 'ImageConfig' fields plus tint.
--- Paint draws it with 'lookDraw'; damage repaints a node when its look
+-- Paint draws it with 'withLookDraw'; damage repaints a node when its look
 -- changes.
 data ImageLook = ImageLook
   { lookFit :: !ContentFit
@@ -225,39 +223,30 @@ lookSize :: ImageLook -> (Int, Int) -> (Float, Float)
 lookSize look size =
   let Rect _ _ w h = cropRegion (lookCrop look) size in turnedSize (lookRotation look) (w, h)
 
--- | Draw record for image @iid@ (@iw@ by @ih@ pixels) in @box@, with
--- opacity scaled by @fade@ (below 1 when disabled). An unrotated image is
--- cut to the box by adjusting its UVs; a rotated one can extend past the
--- box and the caller must clip it. 'Nothing' when nothing is visible.
-lookDraw :: ImageLook -> (Int, Int) -> ImageId -> Float -> Rect -> Maybe ImageDraw
-lookDraw look size iid fade box
-  | lookOpacity look * fade <= 0 || colorA (lookTint look) == 0 = Nothing
-  | lookTurned look = Just (draw dest uv (rotationAngle (lookRotation look)))
-  | otherwise = (\(r, uvr) -> draw r uvr 0) <$> cropToBox dest uv box
-  where
-    (dest, uv) = lookPlacement look size box
-    draw r uvr angle = ImageDraw r iid uvr angle (lookTint look) (lookOpacity look * fade)
-
--- | 'lookDraw' then 'imageDrawOp' for a look that is not 'lookTurned': the
--- op's rect, UVs within the image and tint go to @k@, and nothing is built.
--- Nothing is called when nothing is visible.
-{-# INLINE lookQuad #-}
-lookQuad :: ImageLook -> (Int, Int) -> Float -> Rect -> (Rect -> Float -> Float -> Float -> Float -> Color -> IO ()) -> IO ()
-lookQuad look size fade box k
+-- | Resolve an image node's draw geometry in @box@ with opacity scaled by
+-- @fade@, passing @(turned, rect, angle, u0, v0, u1, v1, tint)@ to @k@ when
+-- visible. Unrotated images crop UVs to @box@; rotated ones keep their full
+-- quad so the caller can clip to @box@.
+{-# INLINE withLookDraw #-}
+withLookDraw ::
+  ImageLook ->
+  (Int, Int) ->
+  Float ->
+  Rect ->
+  (Bool -> Rect -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()) ->
+  IO ()
+withLookDraw look size fade box k
   | opacity <= 0 || colorA tint == 0 = pure ()
+  | turned = let Rect u v uw vh = uv in k True dest (if finite angle then angle else 0) u v (u + uw) (v + vh) tint
   | otherwise = case cropToBox dest uv box of
-      Just (r, Rect u v uw vh) -> k r u v (u + uw) (v + vh) tint
+      Just (r, Rect u v uw vh) -> k False r 0 u v (u + uw) (v + vh) tint
       Nothing -> pure ()
   where
     opacity = lookOpacity look * fade
     tint = fadeBy (unitOpacity opacity) (lookTint look)
     (dest, uv) = lookPlacement look size box
-
--- | Whether a look turns its image: its angle is not a whole turn.
-lookTurned :: ImageLook -> Bool
-lookTurned look = not (angle == 0 || abs (sin angle) < 1.0e-6 && cos angle > 0)
-  where
     angle = rotationAngle (lookRotation look)
+    turned = not (angle == 0 || abs (sin angle) < 1.0e-6 && cos angle > 0)
 
 -- | The unrotated rect an @iw@ by @ih@ image is drawn in over @box@
 -- (fitted, aligned and zoomed), and the UV rect of its crop.

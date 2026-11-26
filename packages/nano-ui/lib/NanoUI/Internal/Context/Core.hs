@@ -516,12 +516,14 @@ isDisabled ctx wid = do
   ts <- readIORef (ctxThemeScopes ctx)
   if tsDisabled ts then scopeDisabled ctx wid else pure False
 
+{-# INLINE widgetScope #-}
+widgetScope :: Context -> WidgetId -> IO Int
+widgetScope Context {ctxNodeArena = na} wid =
+  lookupNodeByWidgetId na wid >>= maybe (getArenaScope na) (getNodeScope na)
+
 {-# NOINLINE scopeDisabled #-}
 scopeDisabled :: Context -> WidgetId -> IO Bool
-scopeDisabled Context {ctxNodeArena = na} wid = do
-  mIdx <- lookupNodeByWidgetId na wid
-  scope <- maybe (getArenaScope na) (getNodeScope na) mIdx
-  pure (scope .&. 1 /= 0)
+scopeDisabled ctx wid = (/= 0) . (.&. 1) <$> widgetScope ctx wid
 
 -- =============================================================================
 -- Theme scopes
@@ -531,9 +533,7 @@ scopeDisabled Context {ctxNodeArena = na} wid = do
 -- widget is added, inspect the open scope instead of its not-yet-built node.
 {-# INLINE isInert #-}
 isInert :: Context -> WidgetId -> IO Bool
-isInert Context {ctxNodeArena = na} wid = do
-  scope <- lookupNodeByWidgetId na wid >>= maybe (getArenaScope na) (getNodeScope na)
-  pure (scope .&. 2 /= 0)
+isInert ctx wid = (/= 0) . (.&. 2) <$> widgetScope ctx wid
 
 -- | Allocate empty current/previous scope arrays. Only entries below their
 -- recorded counts are initialised and may be read.
@@ -653,4 +653,4 @@ widgetTheme ctx wid = do
   ts <- readIORef (ctxThemeScopes ctx)
   if tsCount ts == 0
     then readIORef (ctxTheme ctx)
-    else lookupNodeByWidgetId (ctxNodeArena ctx) wid >>= maybe (currentTheme ctx) (nodeTheme ctx)
+    else widgetScope ctx wid >>= scopeTheme ctx

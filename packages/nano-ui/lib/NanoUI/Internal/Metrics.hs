@@ -63,7 +63,7 @@ buttonPadding fm = (fmAdvance fm ' ' * 2.0, controlPadY fm)
 -- | Total horizontal/vertical padding inside a select button.
 {-# INLINE selectPadding #-}
 selectPadding :: FontMetrics -> (Float, Float)
-selectPadding fm = (fmAdvance fm ' ' * 2.0, controlPadY fm)
+selectPadding = buttonPadding
 
 -- | Blank border between the menu panel edge and its rows.
 menuOuterPad :: Float

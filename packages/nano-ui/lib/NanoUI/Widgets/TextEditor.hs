@@ -112,17 +112,14 @@ groupBytes g = foldl' (\acc e -> acc + editBytes e) 0 (groupEdits g)
 trimUndoGroups :: [EditGroup] -> ([EditGroup], Int)
 trimUndoGroups [] = ([], 0)
 trimUndoGroups (newest : rest) =
-  let (keptRest, countRest) = go (groupBytes newest) 1 rest
+  let (keptRest, n) = go (groupBytes newest) 1 rest
       kept = newest : keptRest
-   in length kept `seq` (kept, countRest)
+   in length kept `seq` (kept, n)
   where
     go !_ !n [] = ([], n)
     go !bytes !n (g : gs)
-      | n >= maxHistoryDepth = ([], n)
-      | bytes + gb > maxHistoryBytes = ([], n)
-      | otherwise =
-          let (tailGs, totalN) = go (bytes + gb) (n + 1) gs
-           in (g : tailGs, totalN)
+      | n >= maxHistoryDepth || bytes + gb > maxHistoryBytes = ([], n)
+      | otherwise = let (tailGs, totalN) = go (bytes + gb) (n + 1) gs in (g : tailGs, totalN)
       where
         gb = groupBytes g
 
@@ -249,18 +246,13 @@ runCommandIO ctx mode cmd ed =
   case cmd of
     Copy -> ed <$ copySelection
     Cut
-      | modeEditable mode && modeCopyable mode -> do
-          if hasSelection ed || not (modeMultiLine mode)
-            then do
-              copySelection
-              pure (runCommand mode (Delete CharRight) (if hasSelection ed then ed else runCommand mode SelectAll ed))
-            else pure ed
-      | otherwise -> pure ed
+      | modeEditable mode && modeCopyable mode
+      , hasSelection ed || not (modeMultiLine mode) -> do
+          copySelection
+          pure (runCommand mode (Delete CharRight) (if hasSelection ed then ed else runCommand mode SelectAll ed))
     Paste
-      | modeEditable mode -> do
-          clip <- ctxClipboardGet ctx
-          pure (maybe ed (\txt -> runCommand mode (InsertText txt) ed) clip)
-      | otherwise -> pure ed
+      | modeEditable mode ->
+          maybe ed (\txt -> runCommand mode (InsertText txt) ed) <$> ctxClipboardGet ctx
     _ -> pure (runCommand mode cmd ed)
   where
     -- Copy without a selection takes the whole field.

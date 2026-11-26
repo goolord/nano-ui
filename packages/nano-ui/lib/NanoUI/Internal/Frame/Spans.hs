@@ -4,14 +4,12 @@ module NanoUI.Internal.Frame.Spans
   , collectOverlayTextSpans
   , collectRasterSpans
   , widgetNodeCount
-  , plainFieldPen
-  , textInputFg
   , forWidgetTextPlacements_
   , selectableTextGeometry
   , textNodeSpanEntry
   ) where
 
-import Control.Monad (forM, forM_, unless, when)
+import Control.Monad (forM, forM_, join, unless, when)
 import Data.IORef (readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
 import Data.Maybe (fromMaybe)
@@ -19,7 +17,7 @@ import qualified Data.Text as T
 import Data.Word (Word64)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Damage (floatingPanelRects)
-import NanoUI.Internal.Draw (DrawArena (..))
+import NanoUI.Internal.Draw (DrawArena (..), DrawFrameExtra (..))
 import NanoUI.Internal.Font
 import NanoUI.Internal.Frame.Chrome (displayText, textInputFocused, textInputValue, widgetVisualStyle)
 import NanoUI.Internal.Frame.Node (childPaintClip, nodeAdornmentInsets, readScrollNode, resolveFontFor)
@@ -27,12 +25,12 @@ import NanoUI.Internal.Layout.ScrollGeometry (padContentClip, padTextClipRect, s
 import NanoUI.Internal.Frame.Select (collectDropdownSpans)
 import NanoUI.Internal.Frame.SpanArena (SpanArena, pushSpans, resetSpanArena, spanArenaToList)
 import NanoUI.Internal.Frame.TextArea (textAreaTextPlacements)
-import NanoUI.Internal.Frame.TextInput (fieldEditLine, fieldTextColor, nodeTextColor, nodeTextFieldGeom, syncTextInputScroll)
+import NanoUI.Internal.Frame.TextInput (TextInputFrame (..), nodeTextColor, nodeTextFieldGeom, resolveTextInputFrame, textInputFg)
 import NanoUI.Internal.Input (Input)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (findAncestorMaxW, textWrapCap)
 import NanoUI.Internal.Style (AlignX (..), Style (..), Theme (..), resolveFontSize, textToneColor)
-import NanoUI.Internal.Types (Color (..), Rect (..), clamp, lerpColor, onGrid, rectIntersect, isBounded)
+import NanoUI.Internal.Types (Color (..), Rect (..), clamp, isBounded, onGrid, rectIntersect)
 import NanoUI.Internal.Widgets.ColorPicker (ColorPickerPart (..), colorPickerPartOf, colorPickerPartRect, colorPickerPreviewGeom)
 import NanoUI.Internal.WidgetText
 
@@ -66,7 +64,7 @@ collectRasterSpans :: Context -> Input -> IO ([(Rect, T.Text, Color, Color, Rect
 collectRasterSpans ctx inp = do
   base <- collectTextSpans ctx
   overlay <- collectOverlayTextSpans ctx inp
-  (drawnBase, drawnOverlay) <- readIORef (daTextSpans (ctxDrawArena ctx))
+  (drawnBase, drawnOverlay) <- dfeTextSpans <$> readIORef (daExtra (ctxDrawArena ctx))
   -- Without drawing spans the node lists are returned as they are, uncopied.
   -- Strict, so the pair holds no thunks.
   let withDrawn xs ys = if null ys then xs else xs ++ reverse ys
@@ -312,21 +310,13 @@ placedTextSpans ctx nt idx placements = do
   let bg = styleBg style
   case nt of
     NodeTextInput -> do
-      fg <- textInputFg ctx style idx =<< textInputFocused ctx idx
+      fg <- join (textInputFg ctx idx (styleFg style) bg <$> textInputValue ctx idx <*> textInputFocused ctx idx)
       pure [(Rect px py tw th, txt, fg, bg) | (txt, px, py, tw, th) <- placements]
     -- Only a text field fades its text while empty; every other widget's
     -- text takes its node's colour.
     _ -> do
       fg <- nodeTextColor ctx nt idx (styleFg style)
       pure [(Rect px py tw th, txt, fg, bg) | (txt, px, py, tw, th) <- placements, not (T.null txt)]
-
--- | The colour of a text input's text ('fieldTextColor'), faded toward the
--- background while the field is empty and unfocused.
-textInputFg :: Context -> Style -> NodeIdx -> Bool -> IO Color
-textInputFg ctx style idx focus = do
-  fg <- fieldTextColor ctx idx (styleFg style)
-  value <- textInputValue ctx idx
-  pure (if T.null value && not focus then lerpColor fg (styleBg style) 0.40 else fg)
 
 -- | Runtime consumer API. The Bool marks the last placement (for table sort
 -- arrows); cached labels are translated directly into the consumer.
@@ -451,22 +441,6 @@ selectableTextGeometry fm x y h =
   let lineH = fmLineHeight fm
    in (x, centeredTextY fm y h lineH, lineH)
 
--- | A non-selectable field's drawn text, its pen position with the scroll
--- applied, and the clip its text is confined to. The pen starts at the clip's
--- left edge ('nodeTextFieldGeom'), where the caret, selection and
--- hit-testing start too. Paint needs exactly this; only the span path also
--- needs the measured width, so the host measurement stays there.
-plainFieldPen ::
-  Context -> NodeIdx -> Word64 -> FontMetrics -> Float -> Float -> Float -> Float -> IO (T.Text, Float, Float, Rect)
-plainFieldPen ctx idx si fm x y w h = do
-  ph <- if hasFlag textInputFlagNumeric si then pure "" else getText (ctxNodeArena ctx) idx
-  -- The value, including any input method composition in progress.
-  (value, _, _, _) <- fieldEditLine ctx idx
-  focus <- textInputFocused ctx idx
-  (Rect _ boxY _ boxH, clip@(Rect clipX _ _ _)) <- nodeTextFieldGeom ctx idx x y w h
-  scrollX <- syncTextInputScroll ctx idx x y w h
-  pure (textInputFieldText ph value focus, clipX - scrollX, centeredTextY fm boxY boxH (fmLineHeight fm), clip)
-
 computeWidgetTextPlacements ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(T.Text, Float, Float, Float, Float)]
 computeWidgetTextPlacements ctx nt idx x y w h = do
@@ -490,7 +464,11 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
           (fw, _) <- measureTxt value
           pure [(value, penX, ty, fw, selLineH)]
       | otherwise -> do
-          (fieldTxt, penX, penY, _) <- plainFieldPen ctx idx si fm x y w h
+          (box, clip) <- nodeTextFieldGeom ctx idx x y w h
+          focus <- textInputFocused ctx idx
+          ph <- if hasFlag textInputFlagNumeric si then pure "" else getText (ctxNodeArena ctx) idx
+          TextInputFrame _ _ _ shown penX penY _ <- resolveTextInputFrame ctx idx si focus box clip
+          let fieldTxt = textInputFieldText ph shown focus
           (fw, _) <- measureTxt fieldTxt
           pure [(fieldTxt, penX, penY, fw, lineH)]
     -- Text areas place their rows with their clip

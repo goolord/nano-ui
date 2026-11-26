@@ -46,7 +46,6 @@ module NanoUI.Internal.Layout.Arena.Types
   , writeTree
   , newNodeArenaArrays
   , newFlexScratch
-  , newWidthMemo
   , arenaCount
   , floatingNodeCount
   , layeredNodeCount
@@ -69,6 +68,7 @@ module NanoUI.Internal.Layout.Arena.Types
   , getDirection
   , getWidthSizing
   , getHeightSizing
+  , readPadding
   , getPadding
   , getScrollContentW
   , setScrollContentW
@@ -140,7 +140,7 @@ import NanoUI.Internal.Style
   )
 import NanoUI.Internal.StyleBits (BitField (..))
 import qualified NanoUI.Internal.StyleBits as SB
-import NanoUI.Internal.Types (Color (..), Rect (..), newZeroedPrimArray, rectNonEmpty)
+import NanoUI.Internal.Types (Color (..), Rect (..), newZeroedPrimArray, readRectAt, rectNonEmpty, writeRectAt)
 
 -- | A node's position in the arena's arrays. It is valid from the 'addNode'
 -- that returned it until the next 'resetNodeArena'. Where an index names an
@@ -416,6 +416,31 @@ data NodeArenaArrays = NodeArenaArrays
   -- theme). See 'NanoUI.Internal.Context.Types.ThemeScopes'.
   , naArrImageId :: !(IOArr Int)
   -- ^ Each image node's image id ('setImageId'). Only image nodes set it.
+  , naArrTextHash :: !(IOArr Word64)
+  -- ^ Per node, the hash of the text the last 'setNodeText' stored.
+  , naArrOptionsHash :: !(IOArr Word64)
+  -- ^ Per node, the hash of the option list the last 'setOptions' stored.
+  , naArrOwnHash :: !(IOArr Word64)
+  -- ^ Per node, the hash of the node's own creation inputs, its index and its
+  -- parent's, plus every later input ('mixNodeInput').
+  , naArrPaintHash :: !(IOArr Word64)
+  -- ^ Per node, a hash of everything the view gave the node that paint reads.
+  , naArrSubHash :: !(IOArr Word64)
+  -- ^ Per node, the key the solve restores its measurement by.
+  , naArrMeasured :: !(IOArr Float)
+  -- ^ Per node, the width and height the measure pass took for it (two floats).
+  , naArrOffered :: !(IOArr Float)
+  -- ^ Per node, the rect the position pass first offered it (four floats).
+  , naArrUnsnapped :: !(IOArr Float)
+  -- ^ Per node, its rect as the position pass left it, before quantizing (four floats).
+  , naArrSpans :: !(IOArr Int)
+  -- ^ Per node, one past the last node of its reusable subtree, or -1.
+  , naArrClassNodes :: !(IOArr Int)
+  -- ^ The node lists of 'NodeClass', each @capacity@ elements long.
+  , naArrWrapMemo :: !WidthMemo
+  -- ^ For a text node and a wrap width, the width and height of the wrapped text.
+  , naArrFitMemo :: !WidthMemo
+  -- ^ For a node and the width it is assigned, the height its content needs.
   }
 
 -- | The arena: the node arrays, the number of nodes in use, and the solver's
@@ -436,16 +461,8 @@ data NodeArena = NodeArena
   -- 'naScratch', so a container copies its child list here, at its own depth,
   -- before it recurses into its children.
   , naFrameTag :: IORef Word32
-  -- ^ The tag that marks the live entries of 'naWrapMemo' and 'naFitMemo'.
-  -- 'resetNodeArena' changes it, which expires every entry at once. That is
-  -- enough because a node's text and style do not change between resets. It
-  -- is never 0.
-  , naWrapMemo :: IORef WidthMemo
-  -- ^ For a text node and a wrap width, the width and height of the wrapped
-  -- text.
-  , naFitMemo :: IORef WidthMemo
-  -- ^ For a node and the width it is assigned, the height its content needs.
-  -- Only the second value of an entry is used.
+  -- ^ The tag that marks the live entries of 'naArrWrapMemo' and 'naArrFitMemo'.
+  -- 'resetNodeArena' changes it, which expires every entry at once. It is never 0.
   , naEpoch :: IORef Word32
   -- ^ The tag that marks the live entries of 'naIndex'. 'resetNodeArena'
   -- increments it. It is never 0.
@@ -460,58 +477,11 @@ data NodeArena = NodeArena
   -- ^ Hash of the paint state the input signature leaves out, mixed as it is
   -- written ('getPaintSignature'). One unboxed slot, like 'naInputSig'.
   , naInputSig :: IOArr Word64
-  -- ^ The frame's input signature, which 'layoutSigMatches' compares. An
-  -- unboxed slot, so mixing into it allocates nothing.
-  , naTextHash :: IORef (IOArr Word64)
-  -- ^ Per node, the hash of the text the last 'setNodeText' stored.
-  , naOptionsHash :: IORef (IOArr Word64)
-  -- ^ Per node, the hash of the option list the last 'setOptions' stored.
-  , naOwnHash :: IORef (IOArr Word64)
-  -- ^ Per node, the hash of the node's own creation inputs, its index and its
-  -- parent's, as 'addNode' wrote it, with every later input
-  -- ('mixNodeInput'). 'computeSubtreeHashes' folds these into 'naSubHash'.
-  , naPaintHash :: IORef (IOArr Word64)
-  -- ^ Per node, a hash of everything the view gave the node that paint
-  -- reads: its creation inputs, scope and font colour, then every later input
-  -- ('mixNodeInput') and paint state ('mixPaintSig'). It leaves out the
-  -- node's index and parent, so a node keeps its hash when nodes before it
-  -- come and go. 'NanoUI.Internal.Damage.updatePrevRects' records it by
-  -- widget key and damages a key whose hash changed.
-  , naSubHash :: IORef (IOArr Word64)
-  -- ^ Per node, the key the solve restores its measurement by: a hash of its
-  -- own inputs, its ancestors' (text wraps at an ancestor's width, a scroll
-  -- bar sits by its panel) and, through the children's keys, every
-  -- descendant's. A mismatch against the layout cache marks the node dirty
-  -- and propagates to every ancestor, since each ancestor's key covers its
-  -- descendants. Written by 'computeSubtreeHashes'.
-  , naMeasured :: IORef (IOArr Float)
-  -- ^ Per node, the width and height the measure pass took for it (two
-  -- floats). 'captureLayoutCache' snapshots it, and a reused solve restores
-  -- clean subtrees' measurements from the snapshot instead of measuring
-  -- again.
-  , naOffered :: IORef (IOArr Float)
-  -- ^ Per node, the rect the position pass first offered it (four floats):
-  -- NaN until then, and a NaN width once it is offered one again.
-  -- 'captureLayoutCache' snapshots it.
-  , naUnsnapped :: IORef (IOArr Float)
-  -- ^ Per node, its rect as the position pass left it, before quantizing
-  -- (four floats). 'captureLayoutCache' snapshots it: a parent sizes itself
-  -- from its children's unsnapped extents, so a subtree the solve puts back
-  -- must be put back as that.
-  , naSpans :: IORef (IOArr Int)
-  -- ^ Per node, one past the last node of its subtree when the captured
-  -- solve placed that subtree as this solve would at the same rect, and -1
-  -- otherwise. The measure pass writes it when there is a cache.
-  , naClassNodes :: IORef (IOArr Int)
-  -- ^ The node lists of 'NodeClass', one after another: class @c@ keeps its
-  -- @i@th node at element @fromEnum c * capacity + i@. A list never holds
-  -- more nodes than the arena, so each has room for 'naCapacity' of them.
+  -- ^ The frame's input signature, which 'layoutSigMatches' compares.
   , naClassCounts :: IOArr Int
-  -- ^ Nodes in each list of 'naClassNodes', by 'fromEnum' of the class.
+  -- ^ Nodes in each list of 'naArrClassNodes', by 'fromEnum' of the class.
   , naImages :: IORef (MutableArray RealWorld ImageNode)
-  -- ^ Looks of the image nodes that are not plain (fitted, faded, rotated
-  -- and so on), in 'setImageNode' order. The first 'naImageCount' belong to
-  -- this frame. Grows on demand.
+  -- ^ Looks of the image nodes that are not plain, in 'setImageNode' order.
   , naImageCount :: IOArr Int
   -- ^ Entries of 'naImages' used this frame, in one slot.
   , naHighWater :: IORef Int
@@ -562,16 +532,9 @@ data WidthMemo = WidthMemo
   -- ^ Per node, @memoStride@ floats: the width, then the two results.
   }
 
--- | A container's copy of its child list, taken at the container's nesting
--- depth before the position pass recurses into the children and overwrites
--- 'FlexScratch'. Both arrays are indexed by the child's position.
-data AxisSnapshot = AxisSnapshot
-  { asIdx :: !(IOArr Int)
-  -- ^ Node index of each flow child, in the order the view declared them.
-  , asOut :: !(IOArr Float)
-  -- ^ For a row or column, the size each child gets along the main axis. For
-  -- a grid, each child's measured height.
-  }
+-- | A container's copy of its child indices and main-axis (or grid-row) sizes,
+-- taken at the container's nesting depth before recursing into children.
+data AxisSnapshot = AxisSnapshot !(IOArr Int) !(IOArr Float)
 
 -- | Nodes a new arena has room for. 'ensureCapacity' doubles the capacity when
 -- the view adds more.
@@ -759,6 +722,18 @@ newNodeArenaArrays cap = do
   naArrFontColor <- newPrimArray cap
   naArrScope <- newPrimArray cap
   naArrImageId <- newPrimArray cap
+  naArrTextHash <- newZeroedPrimArray cap
+  naArrOptionsHash <- newZeroedPrimArray cap
+  naArrOwnHash <- newPrimArray cap
+  naArrPaintHash <- newPrimArray cap
+  naArrSubHash <- newPrimArray cap
+  naArrMeasured <- newPrimArray (cap * 2)
+  naArrOffered <- newPrimArray (cap * 4)
+  naArrUnsnapped <- newPrimArray (cap * 4)
+  naArrSpans <- newPrimArray cap
+  naArrClassNodes <- newPrimArray (cap * nodeClassCount)
+  naArrWrapMemo <- newWidthMemo cap
+  naArrFitMemo <- newWidthMemo cap
   pure NodeArenaArrays {..}
 
 -- | Uninitialised solver buffers with room for @fsCap@ children.
@@ -818,24 +793,25 @@ mixPaintSig na idx tag v = do
 {-# INLINE mixNodeInput #-}
 mixNodeInput :: NodeArena -> NodeIdx -> Word64 -> Word64 -> IO ()
 mixNodeInput na idx tag v = do
-  own <- readIORef (naOwnHash na)
-  o <- readPrimArray own idx
-  writePrimArray own idx (mixTagged o tag v)
-  mixNodePaint na idx tag v
+  a <- arenaArrays na
+  o <- readPrimArray (naArrOwnHash a) idx
+  writePrimArray (naArrOwnHash a) idx (mixTagged o tag v)
+  p <- readPrimArray (naArrPaintHash a) idx
+  writePrimArray (naArrPaintHash a) idx (mixTagged p tag v)
   mixInputSig na tag v
 
--- | Fold @v@ under @tag@ into node @idx@'s 'naPaintHash'.
+-- | Fold @v@ under @tag@ into node @idx@'s 'naArrPaintHash'.
 {-# INLINE mixNodePaint #-}
 mixNodePaint :: NodeArena -> NodeIdx -> Word64 -> Word64 -> IO ()
 mixNodePaint na idx tag v = do
-  ph <- readIORef (naPaintHash na)
+  ph <- naArrPaintHash <$> arenaArrays na
   p <- readPrimArray ph idx
   writePrimArray ph idx (mixTagged p tag v)
 
--- | Node @idx@'s 'naPaintHash'.
+-- | Node @idx@'s 'naArrPaintHash'.
 {-# INLINE getNodePaintHash #-}
 getNodePaintHash :: NodeArena -> NodeIdx -> IO Word64
-getNodePaintHash na idx = readIORef (naPaintHash na) >>= \ph -> readPrimArray ph idx
+getNodePaintHash na idx = arenaArrays na >>= \a -> readPrimArray (naArrPaintHash a) idx
 
 -- | Number of modal, window, and popup nodes added since the last reset.
 {-# INLINE floatingNodeCount #-}
@@ -947,12 +923,16 @@ getWidthSizing na idx = arenaArrays na >>= \a -> readAxisSizing a idx True
 getHeightSizing :: NodeArena -> NodeIdx -> IO AxisSizing
 getHeightSizing na idx = arenaArrays na >>= \a -> readAxisSizing a idx False
 
+-- | Read padding insets from already-fetched arena arrays.
+{-# INLINE readPadding #-}
+readPadding :: NodeArenaArrays -> NodeIdx -> IO Padding
+readPadding a idx =
+  Padding <$> readStyle a idx StylePadL <*> readStyle a idx StylePadR <*> readStyle a idx StylePadT <*> readStyle a idx StylePadB
+
 -- | Insets in logical pixels, ordered left, right, top, bottom.
 {-# INLINE getPadding #-}
 getPadding :: NodeArena -> NodeIdx -> IO Padding
-getPadding na idx = do
-  a <- arenaArrays na
-  Padding <$> readStyle a idx StylePadL <*> readStyle a idx StylePadR <*> readStyle a idx StylePadT <*> readStyle a idx StylePadB
+getPadding na idx = arenaArrays na >>= \a -> readPadding a idx
 
 -- | Solved horizontal content extent of a two-axis scroller, in logical pixels.
 {-# INLINE getScrollContentW #-}
@@ -971,19 +951,23 @@ parentIsRow na idx = do
   p <- getParent na idx
   if p < 0 then pure False else (== DirRow) <$> getDirection na p
 
+{-# INLINE readRawAlign #-}
+readRawAlign :: NodeArenaArrays -> NodeIdx -> TagCol -> IO Word8
+readRawAlign a idx col = readPrimArray (naArrTags a) (idx * tagStride + fromEnum col)
+
+{-# INLINE decodeAlign #-}
+decodeAlign :: Enum e => Word8 -> e
+decodeAlign raw = toEnum (fromIntegral (raw .&. 0x7F))
+
 -- | Read a node's own horizontal alignment, masking off the explicit bit.
 {-# INLINE readAlignX #-}
 readAlignX :: NodeArenaArrays -> NodeIdx -> IO AlignX
-readAlignX a idx = do
-  raw <- readPrimArray (naArrTags a) (idx * tagStride + fromEnum TagAlignX)
-  pure $! toEnum (fromIntegral (raw .&. 0x7F))
+readAlignX a idx = decodeAlign <$> readRawAlign a idx TagAlignX
 
 -- | Read a node's own vertical alignment, masking off the explicit bit.
 {-# INLINE readAlignY #-}
 readAlignY :: NodeArenaArrays -> NodeIdx -> IO AlignY
-readAlignY a idx = do
-  raw <- readPrimArray (naArrTags a) (idx * tagStride + fromEnum TagAlignY)
-  pure $! toEnum (fromIntegral (raw .&. 0x7F))
+readAlignY a idx = decodeAlign <$> readRawAlign a idx TagAlignY
 
 -- | Horizontal alignment requested by the node.
 {-# INLINE getAlignX #-}
@@ -1001,10 +985,10 @@ readItemsAlign a idx = readTagEnum a idx TagItemsAlign
 {-# INLINE effectiveAlignX #-}
 effectiveAlignX :: NodeArenaArrays -> ItemsAlign -> NodeIdx -> IO AlignX
 effectiveAlignX a pItems idx = do
-  raw <- readPrimArray (naArrTags a) (idx * tagStride + fromEnum TagAlignX)
-  if pItems == ItemsStart || raw /= 0
-    then pure $! toEnum (fromIntegral (raw .&. 0x7F))
-    else pure $! case pItems of
+  raw <- readRawAlign a idx TagAlignX
+  pure $! if pItems == ItemsStart || raw /= 0
+    then decodeAlign raw
+    else case pItems of
       ItemsCenter -> AlignCenter
       ItemsEnd -> AlignEnd
       _ -> AlignStart
@@ -1015,10 +999,10 @@ effectiveAlignX a pItems idx = do
 {-# INLINE effectiveAlignY #-}
 effectiveAlignY :: NodeArenaArrays -> ItemsAlign -> NodeIdx -> IO AlignY
 effectiveAlignY a pItems idx = do
-  raw <- readPrimArray (naArrTags a) (idx * tagStride + fromEnum TagAlignY)
-  if pItems == ItemsStart || raw /= 0
-    then pure $! toEnum (fromIntegral (raw .&. 0x7F))
-    else pure $! case pItems of
+  raw <- readRawAlign a idx TagAlignY
+  pure $! if pItems == ItemsStart || raw /= 0
+    then decodeAlign raw
+    else case pItems of
       ItemsCenter -> AlignMiddle
       ItemsEnd -> AlignBottom
       ItemsBaseline -> AlignBaseline
@@ -1058,19 +1042,12 @@ getPointerMode na idx = arenaArrays na >>= \a -> readTagEnum a idx TagPointer
 -- applied, the origin is in window coordinates; before layout it is unset.
 {-# INLINE getNodeRect #-}
 getNodeRect :: NodeArena -> NodeIdx -> IO Rect
-getNodeRect na idx = do
-  a <- arenaArrays na
-  Rect <$> readGeom a idx GeomX <*> readGeom a idx GeomY <*> readGeom a idx GeomW <*> readGeom a idx GeomH
+getNodeRect na idx = arenaArrays na >>= \a -> readRectAt (naArrGeom a) (idx * geomStride)
 
 -- | Write x, y, width and height. The clip ('setClipRect') is left alone.
 {-# INLINE setRect #-}
 setRect :: NodeArena -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()
-setRect na idx x y w h = do
-  a <- arenaArrays na
-  writeGeom a idx GeomX x
-  writeGeom a idx GeomY y
-  writeGeom a idx GeomW w
-  writeGeom a idx GeomH h
+setRect na idx x y w h = arenaArrays na >>= \a -> writeRectAt (naArrGeom a) (idx * geomStride) x y w h
 
 -- | Positive-area clip in logical window coordinates. 'Nothing' means the
 -- stored clip is empty or unset; 'getClipBounds' tells them apart.
@@ -1086,10 +1063,7 @@ setClipRect :: NodeArena -> NodeIdx -> Rect -> IO ()
 setClipRect na idx (Rect x y w h) = do
   a <- arenaArrays na
   let empty = not (w > 0 && h > 0)
-  writeGeom a idx GeomClipX x
-  writeGeom a idx GeomClipY y
-  writeGeom a idx GeomClipW (if empty then -1 else w)
-  writeGeom a idx GeomClipH (if empty then -1 else h)
+  writeRectAt (naArrGeom a) (idx * geomStride + fromEnum GeomClipX) x y (if empty then -1 else w) (if empty then -1 else h)
 
 -- | The stored clip in logical window coordinates. An empty clip reads as a
 -- zero-size rect. 'Nothing' means unset, as before
@@ -1098,10 +1072,7 @@ setClipRect na idx (Rect x y w h) = do
 getClipBounds :: NodeArena -> NodeIdx -> IO (Maybe Rect)
 getClipBounds na idx = do
   a <- arenaArrays na
-  x <- readGeom a idx GeomClipX
-  y <- readGeom a idx GeomClipY
-  w <- readGeom a idx GeomClipW
-  h <- readGeom a idx GeomClipH
+  Rect x y w h <- readRectAt (naArrGeom a) (idx * geomStride + fromEnum GeomClipX)
   pure $
     if w > 0 && h > 0
       then Just (Rect x y w h)
