@@ -215,8 +215,8 @@ keyEvent down ke = maybe (EvModifiers mods) (\k -> EvKey k down mods) (sdlKey co
 -- on a non-Latin layout), which becomes the 'KeyChar'.
 sdlKey :: CUInt -> SDL_Keymod -> Maybe Key
 sdlKey code km
-  | Just named <- lookup code namedKeys = Just named
-  | Just typed <- lookup code keypadKeys = keypadKey (word32 km .&. word32 K.sDL_KMOD_NUM /= 0) typed
+  | Just named <- namedKey code = Just named
+  | Just typed <- keypadChar code = keypadKey (word32 km .&. word32 K.sDL_KMOD_NUM /= 0) typed
   | code >= K.sDLK_F1 && code <= K.sDLK_F12 = Just (KeyF (fromIntegral (code - K.sDLK_F1) + 1))
   | code >= K.sDLK_F13 && code <= K.sDLK_F24 = Just (KeyF (fromIntegral (code - K.sDLK_F13) + 13))
   | code .&. K.sDLK_SCANCODE_MASK == 0 && code <= 0x10FFFF, isPrint c = Just (KeyChar (toLower c))
@@ -224,54 +224,54 @@ sdlKey code km
   where
     c = chr (fromIntegral code)
 
-namedKeys :: [(CUInt, Key)]
-namedKeys =
-  [ (K.sDLK_ESCAPE, KeyEscape)
-  , (K.sDLK_RETURN, KeyEnter)
-  , (K.sDLK_TAB, KeyTab)
-  , (K.sDLK_BACKSPACE, KeyBackspace)
-  , (K.sDLK_DELETE, KeyDelete)
-  , (K.sDLK_LEFT, KeyLeft)
-  , (K.sDLK_RIGHT, KeyRight)
-  , (K.sDLK_UP, KeyUp)
-  , (K.sDLK_DOWN, KeyDown)
-  , (K.sDLK_HOME, KeyHome)
-  , (K.sDLK_END, KeyEnd)
-  , (K.sDLK_PAGEUP, KeyPageUp)
-  , (K.sDLK_PAGEDOWN, KeyPageDown)
-  , (K.sDLK_INSERT, KeyInsert)
-  , (K.sDLK_SPACE, KeySpace)
-  , (K.sDLK_PRINTSCREEN, KeyPrintScreen)
-  , (K.sDLK_PAUSE, KeyPause)
-  , (K.sDLK_CAPSLOCK, KeyCapsLock)
-  , (K.sDLK_NUMLOCKCLEAR, KeyNumLock)
-  , (K.sDLK_SCROLLLOCK, KeyScrollLock)
-  , (K.sDLK_APPLICATION, KeyMenu)
-  , (K.sDLK_MENU, KeyMenu)
-  , (K.sDLK_KP_ENTER, KeyEnter)
-  , (K.sDLK_KP_DIVIDE, KeyChar '/')
-  , (K.sDLK_KP_MULTIPLY, KeyChar '*')
-  , (K.sDLK_KP_MINUS, KeyChar '-')
-  , (K.sDLK_KP_PLUS, KeyChar '+')
-  , (K.sDLK_KP_EQUALS, KeyChar '=')
-  ]
+namedKey :: CUInt -> Maybe Key
+namedKey code
+  | code == K.sDLK_ESCAPE = Just KeyEscape
+  | code == K.sDLK_RETURN = Just KeyEnter
+  | code == K.sDLK_TAB = Just KeyTab
+  | code == K.sDLK_BACKSPACE = Just KeyBackspace
+  | code == K.sDLK_DELETE = Just KeyDelete
+  | code == K.sDLK_LEFT = Just KeyLeft
+  | code == K.sDLK_RIGHT = Just KeyRight
+  | code == K.sDLK_UP = Just KeyUp
+  | code == K.sDLK_DOWN = Just KeyDown
+  | code == K.sDLK_HOME = Just KeyHome
+  | code == K.sDLK_END = Just KeyEnd
+  | code == K.sDLK_PAGEUP = Just KeyPageUp
+  | code == K.sDLK_PAGEDOWN = Just KeyPageDown
+  | code == K.sDLK_INSERT = Just KeyInsert
+  | code == K.sDLK_SPACE = Just KeySpace
+  | code == K.sDLK_PRINTSCREEN = Just KeyPrintScreen
+  | code == K.sDLK_PAUSE = Just KeyPause
+  | code == K.sDLK_CAPSLOCK = Just KeyCapsLock
+  | code == K.sDLK_NUMLOCKCLEAR = Just KeyNumLock
+  | code == K.sDLK_SCROLLLOCK = Just KeyScrollLock
+  | code == K.sDLK_APPLICATION = Just KeyMenu
+  | code == K.sDLK_MENU = Just KeyMenu
+  | code == K.sDLK_KP_ENTER = Just KeyEnter
+  | code == K.sDLK_KP_DIVIDE = Just (KeyChar '/')
+  | code == K.sDLK_KP_MULTIPLY = Just (KeyChar '*')
+  | code == K.sDLK_KP_MINUS = Just (KeyChar '-')
+  | code == K.sDLK_KP_PLUS = Just (KeyChar '+')
+  | code == K.sDLK_KP_EQUALS = Just (KeyChar '=')
+  | otherwise = Nothing
 
 -- | Keypad digits and decimal point, with the character each types
 -- ('keypadKey').
-keypadKeys :: [(CUInt, Char)]
-keypadKeys =
-  [ (K.sDLK_KP_0, '0')
-  , (K.sDLK_KP_1, '1')
-  , (K.sDLK_KP_2, '2')
-  , (K.sDLK_KP_3, '3')
-  , (K.sDLK_KP_4, '4')
-  , (K.sDLK_KP_5, '5')
-  , (K.sDLK_KP_6, '6')
-  , (K.sDLK_KP_7, '7')
-  , (K.sDLK_KP_8, '8')
-  , (K.sDLK_KP_9, '9')
-  , (K.sDLK_KP_PERIOD, '.')
-  ]
+keypadChar :: CUInt -> Maybe Char
+keypadChar code
+  | code == K.sDLK_KP_0 = Just '0'
+  | code == K.sDLK_KP_1 = Just '1'
+  | code == K.sDLK_KP_2 = Just '2'
+  | code == K.sDLK_KP_3 = Just '3'
+  | code == K.sDLK_KP_4 = Just '4'
+  | code == K.sDLK_KP_5 = Just '5'
+  | code == K.sDLK_KP_6 = Just '6'
+  | code == K.sDLK_KP_7 = Just '7'
+  | code == K.sDLK_KP_8 = Just '8'
+  | code == K.sDLK_KP_9 = Just '9'
+  | code == K.sDLK_KP_PERIOD = Just '.'
+  | otherwise = Nothing
 
 textInput :: Ptr SDL_Event -> IO (Maybe SdlEvent)
 textInput p = do

@@ -4,6 +4,7 @@ module NanoUI.Internal.Frame.Chrome
   , displayText
   , widgetVisualStyle
   , widgetVisualStyleWith
+  , widgetVisualStyleWithTheme
   , textInputValue
   , maskPassword
   , textInputFocused
@@ -34,7 +35,7 @@ import Data.Word (Word64)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Draw (DrawArena, pushRect, pushRoundedRect, pushRoundedStroke, withClip)
 import NanoUI.Internal.Layout.ScrollGeometry (ScrollBarLayout (..), ScrollConfig (..), ScrollPolicy (..), scroll2DConfig)
-import NanoUI.Internal.Id (WidgetId, hashWidgetId)
+import NanoUI.Internal.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Store (fieldInt, fieldText, findSlot)
 import NanoUI.Internal.Style
@@ -279,10 +280,18 @@ widgetVisualStyle ctx nt idx = do
 -- walk does not re-read 'ctxHotId', 'ctxActiveId' and 'ctxFocusId' per node.
 widgetVisualStyleWith :: Context -> WidgetId -> WidgetId -> WidgetId -> NodeType -> NodeIdx -> IO Style
 widgetVisualStyleWith ctx hot active focus nt idx = do
-  wid <- getWidgetId (ctxNodeArena ctx) idx
-  val <- getNodeValue (ctxNodeArena ctx) idx
+  theme <- nodeTheme ctx idx
+  widgetVisualStyleWithTheme ctx theme hot active focus nt idx
+
+-- | 'widgetVisualStyleWith' using the caller's already-resolved scoped 'Theme'
+-- so the paint pass avoids re-reading the node's scope and theme table.
+widgetVisualStyleWithTheme :: Context -> Theme -> WidgetId -> WidgetId -> WidgetId -> NodeType -> NodeIdx -> IO Style
+widgetVisualStyleWithTheme ctx theme hot active focus nt idx = do
+  a <- arenaArrays (ctxNodeArena ctx)
+  wid <- WidgetId . fromIntegral <$> readTree a idx TreeWidgetId
+  val <- readStyle a idx StyleNodeValue
   animT <- getAnimationValue ctx wid
-  styleIdx <- if nt == NodeButton then getStyleIdx (ctxNodeArena ctx) idx else pure 0
+  styleIdx <- if nt == NodeButton then readStyleIdx a idx else pure 0
   let !bkind = if nt == NodeButton then buttonKindOf styleIdx else ButtonPlain
       !isChoice = bkind == ButtonChoice
       !isRow = bkind == ButtonRow
@@ -290,13 +299,13 @@ widgetVisualStyleWith ctx hot active focus nt idx = do
       !isMenu = bkind == ButtonMenu || bkind == ButtonMenuBar
       -- Only these consult the floating ancestor; skip the parent walk for
       -- the common panel/text/button path.
-      modalAware = isChoice || isRow || nt == NodeSlider
+      !modalAware = isChoice || isRow || nt == NodeSlider
   mFloat <- if modalAware then floatingAncestor ctx idx else pure Nothing
-  theme <- nodeTheme ctx idx
-  let isFocus = focus == wid
-      isHot = wid == hot
+  let !isFocus = focus == wid
+      !isHot = wid == hot
+      !hotT = if isHot && not (animT > 0) then 1 else animT
       focusBorder s = if isFocus then s {styleBorder = themeAccent theme} else s
-      base =
+      !base =
         case nt of
           NodeTextInput -> focusBorder (themeInput theme)
           NodeTextArea -> focusBorder (themeInput theme)
@@ -352,19 +361,18 @@ widgetVisualStyleWith ctx hot active focus nt idx = do
           NodeBox -> themeButton theme
           NodePopup -> themeButton theme
           NodeShader -> themeButton theme
-      widgetBase =
+      !widgetBase =
         case mFloat of
           -- Rows keep their selection and stripes, on the modal's surface.
           Just NodeModal | modalAware && not isRow -> overlayMenuStyle theme
           _ -> base
-      bg
+      !bg
         | isFocus, nt == NodeTextInput || nt == NodeTextArea = styleActiveBg widgetBase
         | hashWidgetId wid == hashWidgetId active = styleActiveBg widgetBase
         | isChoice || isClose || nt == NodeSlider = styleBg widgetBase
         | isMenu = if isHot then styleHoverBg widgetBase else styleBg widgetBase
-        | styleBg widgetBase == styleHoverBg widgetBase = styleBg widgetBase
+        | hotT <= 0 || styleBg widgetBase == styleHoverBg widgetBase = styleBg widgetBase
         | otherwise = lerpColor (styleBg widgetBase) (styleHoverBg widgetBase) hotT
-      hotT = if isHot && not (animT > 0) then 1 else animT
   -- Idle widgets (no hover/active tint change) reuse the base style record
   -- rather than allocating a fresh Style through a record update.
   pure $! if bg == styleBg widgetBase then widgetBase else widgetBase {styleBg = bg}

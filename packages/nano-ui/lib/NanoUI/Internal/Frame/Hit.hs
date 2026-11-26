@@ -32,6 +32,7 @@ import Control.Applicative ((<|>))
 import Control.Monad ((<=<))
 import Control.Monad.Trans.Maybe (MaybeT (..))
 import Data.Maybe (isJust)
+import Data.Primitive.PrimArray (readPrimArray)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Id (WidgetId)
 import NanoUI.Internal.Layout.Arena
@@ -156,13 +157,25 @@ widgetInModal ctx top wid = maybe (pure True) (\modal -> widgetIdInSubtree ctx m
 -- 'NanoUI.Internal.Frame.Scroll.applyScrollOffsets' has run.
 {-# INLINE nodePointVisible #-}
 nodePointVisible :: Context -> NodeIdx -> V2 -> IO Bool
-nodePointVisible ctx idx mouse = do
-  vis <- getNodeRect (ctxNodeArena ctx) idx
-  if not (rectContains vis mouse)
+nodePointVisible ctx idx (V2 mx my) = do
+  a <- arenaArrays (ctxNodeArena ctx)
+  let !geom = naArrGeom a
+      !gOff = idx * geomStride
+  !vx <- readPrimArray geom gOff
+  !vy <- readPrimArray geom (gOff + 1)
+  !vw <- readPrimArray geom (gOff + 2)
+  !vh <- readPrimArray geom (gOff + 3)
+  if not (vw > 0 && vh > 0 && mx >= vx && mx <= vx + vw && my >= vy && my <= vy + vh)
     then pure False
     else do
-      mClip <- getClipBounds (ctxNodeArena ctx) idx
-      pure (maybe True (`rectContains` mouse) mClip)
+      !cx <- readPrimArray geom (gOff + 4)
+      !cy <- readPrimArray geom (gOff + 5)
+      !cw <- readPrimArray geom (gOff + 6)
+      !ch <- readPrimArray geom (gOff + 7)
+      pure $!
+        if cw > 0 && ch > 0
+          then mx >= cx && mx <= cx + cw && my >= cy && my <= cy + ch
+          else not (cw < 0)
 
 -- | 'nodePointVisible' with the rect supplied by the caller, for a widget
 -- whose hit rect differs from its node's rect. A node whose clip is unset, as

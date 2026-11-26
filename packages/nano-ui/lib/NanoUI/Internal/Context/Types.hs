@@ -69,6 +69,14 @@ module NanoUI.Internal.Context.Types
   , CustomDrawContext (..)
   , CustomDrawBuild
   , ThemeScopes (..)
+  , ContainerStack
+  , newContainerStack
+  , resetContainerStack
+  , pushContainer
+  , popContainer
+  , peekContainer
+  , readContainerStack
+  , writeContainerStack
   , intKey
   , ChildWindow (..)
   ) where
@@ -90,9 +98,17 @@ import Data.IntMap.Strict qualified as IM
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
 import Data.Map.Strict (Map)
+import Control.Monad (when)
 import Data.Primitive.Array (MutableArray, newArray)
-import Data.Primitive.PrimArray (MutablePrimArray)
-import Data.Primitive.PrimVar (PrimVar, newPrimVar)
+import Data.Primitive.PrimArray
+  ( MutablePrimArray
+  , getSizeofMutablePrimArray
+  , newPrimArray
+  , readPrimArray
+  , resizeMutablePrimArray
+  , writePrimArray
+  )
+import Data.Primitive.PrimVar (PrimVar, newPrimVar, readPrimVar, writePrimVar)
 import Data.Primitive.SmallArray (SmallArray, SmallMutableArray)
 import Data.Word (Word32, Word64)
 import Data.Text (Text)
@@ -115,6 +131,83 @@ import NanoUI.Internal.Style (Appearance, Direction, Flow, FontStyle, FontVarian
 import NanoUI.Widgets.TextBuffer (Cursor)
 import NanoUI.Widgets.TextCommand (TextCommand)
 import NanoUI.Internal.Types
+
+-- | Growable unboxed stack of open container node indices. Pushing and
+-- popping allocate nothing in steady state.
+data ContainerStack
+  = ContainerStack
+      !(IORef (MutablePrimArray RealWorld Int))
+      {-# UNPACK #-} !(PrimVar RealWorld Int)
+
+-- | Create an empty container stack with initial room for 32 nested levels.
+newContainerStack :: IO ContainerStack
+newContainerStack = ContainerStack <$> (newPrimArray 32 >>= newIORef) <*> newPrimVar 0
+
+-- | Empty the container stack without releasing its backing buffer.
+{-# INLINE resetContainerStack #-}
+resetContainerStack :: ContainerStack -> IO ()
+resetContainerStack (ContainerStack _ dep) = writePrimVar dep 0
+
+{-# NOINLINE growContainerStack #-}
+growContainerStack :: IORef (MutablePrimArray RealWorld Int) -> Int -> IO (MutablePrimArray RealWorld Int)
+growContainerStack ref needed = do
+  arr <- readIORef ref
+  cap <- getSizeofMutablePrimArray arr
+  let !newCap = max needed (cap * 2)
+  grown <- resizeMutablePrimArray arr newCap
+  writeIORef ref grown
+  pure grown
+
+-- | Push a container node index onto the stack.
+{-# INLINE pushContainer #-}
+pushContainer :: ContainerStack -> Int -> IO ()
+pushContainer (ContainerStack bufRef depVar) !idx = do
+  d <- readPrimVar depVar
+  arr0 <- readIORef bufRef
+  cap <- getSizeofMutablePrimArray arr0
+  arr <- if d < cap then pure arr0 else growContainerStack bufRef (d + 1)
+  writePrimArray arr d idx
+  writePrimVar depVar (d + 1)
+
+-- | Pop the innermost container node index.
+{-# INLINE popContainer #-}
+popContainer :: ContainerStack -> IO ()
+popContainer (ContainerStack _ depVar) = do
+  d <- readPrimVar depVar
+  when (d > 0) $ writePrimVar depVar (d - 1)
+
+-- | Innermost open container node index, or @-1@ when the stack is empty.
+{-# INLINE peekContainer #-}
+peekContainer :: ContainerStack -> IO Int
+peekContainer (ContainerStack bufRef depVar) = do
+  d <- readPrimVar depVar
+  if d <= 0
+    then pure (-1)
+    else readIORef bufRef >>= \arr -> readPrimArray arr (d - 1)
+
+-- | Snapshot the stack as a list, innermost first.
+readContainerStack :: ContainerStack -> IO [Int]
+readContainerStack (ContainerStack bufRef depVar) = do
+  d <- readPrimVar depVar
+  arr <- readIORef bufRef
+  let go !i !acc
+        | i >= d = pure acc
+        | otherwise = do
+            x <- readPrimArray arr i
+            go (i + 1) (x : acc)
+  go 0 []
+
+-- | Replace the stack contents from a list ordered innermost first.
+writeContainerStack :: ContainerStack -> [Int] -> IO ()
+writeContainerStack (ContainerStack bufRef depVar) xs = do
+  let rev = reverse xs
+      !n = length rev
+  arr0 <- readIORef bufRef
+  cap <- getSizeofMutablePrimArray arr0
+  arr <- if n <= cap then pure arr0 else growContainerStack bufRef n
+  let fill !i [] = writePrimVar depVar i
+      fill !i (x : rest) = writePrimArray arr i x >> fill (i + 1) rest
+  fill 0 rev
 
 -- | Themes the view's @styled@ scopes pushed this frame, and last frame's, to
 -- tell whether a frame changed only how its scopes look. A node's scope holds
@@ -1082,7 +1175,7 @@ data Context = Context
   -- ^ Base theme per system appearance when following the system
   -- ('NanoUI.Internal.Context.followSystemTheme'); 'Nothing' for a fixed
   -- base theme.
-  , ctxContainerStack :: IORef [Int]
+  , ctxContainerStack :: !ContainerStack
   -- ^ Node indices of the containers open at this point of the view,
   -- innermost first; a widget's parent is the head. Reset by
   -- @resetUiBuild@.

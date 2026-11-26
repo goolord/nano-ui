@@ -39,7 +39,7 @@ where
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Data.Functor.Identity (Identity (..))
-import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
+import Data.Primitive.SmallArray (SmallArray)
 import Data.Word (Word32, Word8)
 import Data.Vector.Unboxed qualified as U
 import Data.Vector.Unboxed.Mutable qualified as UM
@@ -67,8 +67,8 @@ import NanoUI
   , everyStyle
   )
 import NanoUI.Widgets.Custom (runCanvasFor)
-import NanoUI.Backend (Input, inputInteracted)
-import NanoUI.Testing (DrawCmd (..), DrawOp (..), Layer (..))
+import NanoUI.Backend (Input, fmSnapScale, inputInteracted)
+import NanoUI.Testing (DrawCmd (..), DrawOp, Layer (..))
 
 main :: IO ()
 main = putStrLn "inspection invariants hold"
@@ -203,16 +203,20 @@ inspect $ 'commandReadProbe `doesNotUse` 'U.fromURepr
 inspect $ 'commandWriteProbe `doesNotUse` 'U.toURepr
 
 -- A block with no curves and no draw-context use must build neither the
--- curve tolerance nor the context.
+-- curve tolerance nor the context, and must not allocate an intermediate list.
 canvasProbe :: CustomDrawContext -> Float -> Color -> SmallArray DrawOp
 canvasProbe cdc x color = runCanvasFor cdc $ do
   drawRect (Rect x 2 3 4) color
   drawCircle (V2 5 x) 6 color
 
 canvasByHand :: CustomDrawContext -> Float -> Color -> SmallArray DrawOp
-canvasByHand _ !x color = smallArrayFromList [FillRect (Rect x 2 3 4) color, FillCircle 5 x 6 color]
+canvasByHand _ x color = runCanvasFor (error "unused cdc") $ do
+  drawRect (Rect x 2 3 4) color
+  drawCircle (V2 5 x) 6 color
 
 inspect $ 'canvasProbe === 'canvasByHand
+inspect $ 'canvasProbe `doesNotUse` 'fmSnapScale
+inspect $ 'canvasProbe `hasNoType` ''[]
 
 -- Var field focus: the Generic path search must leave no generic
 -- representation or class dictionary behind, so reading and replacing a

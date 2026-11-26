@@ -81,27 +81,40 @@ useDrag1D ::
 useDrag1D axis owner lo hi current track = do
   (wid, ctx) <- freshWidget
   inp <- askInput
-  let key = intKey wid
-      (origin, trackLen, mouse) = case axis of
-        DragAxisX -> (rectX track, rectW track, v2X (inputMousePos inp))
-        DragAxisY -> (rectY track, rectH track, v2Y (inputMousePos inp))
+  let !key = intKey wid
   -- The drag keeps the point of the press that started it in a quiet slot
   -- (0 for none), and lasts only under that press: one released while this
   -- hook did not run does not come back with a later press.
   store <- liftIO (getStore ctx)
-  let held = findSpec slotDragPress 0 key store
-  active0 <- liftIO (dragPressLive ctx key store)
-  -- Hit-test against the clipped node so a track scrolled out of its
-  -- viewport does not respond at its stale rect.
-  let onTrack = findNodeByWidgetId ctx owner >>= maybe (pure (rectContains track (inputMousePos inp))) (\i -> nodeInteractionHit ctx i track (inputMousePos inp))
-  started <- pure (pressedIn MouseLeft inp) <&&> liftIO onTrack <&&> (not <$> liftIO (trackCovered ctx owner (inputMousePos inp)))
-  let active = heldIn MouseLeft inp && (active0 || started)
-      frac = if trackLen <= 0 then 0 else clamp01 ((mouse - origin) / trackLen)
-  when (if active then not active0 else held /= 0) . liftIO $
-    if active
-      then recordDragPress ctx key
-      else modifyStore ctx (deleteSpec slotDragPress key)
-  pure (if active then lo + frac * (hi - lo) else current, active, active0)
+  let !held = findSpec slotDragPress 0 key store
+      !leftHeld = heldIn MouseLeft inp
+      !leftPressed = pressedIn MouseLeft inp
+  if not leftHeld && not leftPressed && held == 0
+    then pure (current, False, False)
+    else do
+      active0 <- liftIO (dragPressLive ctx key store)
+      -- Hit-test against the clipped node so a track scrolled out of its
+      -- viewport does not respond at its stale rect.
+      started <-
+        if not leftPressed
+          then pure False
+          else liftIO $ do
+            let mousePos = inputMousePos inp
+            onT <- findNodeByWidgetId ctx owner >>= maybe (pure (rectContains track mousePos)) (\i -> nodeInteractionHit ctx i track mousePos)
+            if not onT then pure False else not <$> trackCovered ctx owner mousePos
+      let !active = leftHeld && (active0 || started)
+      when (if active then not active0 else held /= 0) . liftIO $
+        if active
+          then recordDragPress ctx key
+          else modifyStore ctx (deleteSpec slotDragPress key)
+      if active
+        then do
+          let (origin, trackLen, mouse) = case axis of
+                DragAxisX -> (rectX track, rectW track, v2X (inputMousePos inp))
+                DragAxisY -> (rectY track, rectH track, v2Y (inputMousePos inp))
+              !frac = if trackLen <= 0 then 0 else clamp01 ((mouse - origin) / trackLen)
+          pure (lo + frac * (hi - lo), True, active0)
+        else pure (current, False, active0)
 
 -- | The left button's press point as one nonzero Int, exact in both
 -- coordinates; 0 while it is up. A drag that keeps the one it started under
@@ -255,12 +268,20 @@ keyboardFocused :: WidgetId -> NanoUI Bool
 keyboardFocused wid
   | hashWidgetId wid == 0 = pure False
   | otherwise = do
-      ctx <- askContext
       focus <- focusedWidget
-      pure (focus == wid)
-        <&&> liftIO (not <$> isDisabled ctx wid)
-        <&&> liftIO (not <$> isInert ctx wid)
-        <&&> liftIO (not <$> pointerBlockedByModal ctx)
+      if focus /= wid
+        then pure False
+        else do
+          ctx <- askContext
+          liftIO $ do
+            dis <- isDisabled ctx wid
+            if dis
+              then pure False
+              else do
+                ine <- isInert ctx wid
+                if ine
+                  then pure False
+                  else not <$> pointerBlockedByModal ctx
 
 -- | Request input method (IME) text for widget @wid@, like iced's
 -- @request_input_method@. Call it every frame the widget accepts text,

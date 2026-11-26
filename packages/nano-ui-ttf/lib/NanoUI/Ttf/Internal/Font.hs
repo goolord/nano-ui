@@ -88,7 +88,7 @@ import Data.Unique (hashUnique, newUnique)
 import Foreign.C.String (CString)
 import Foreign.C.Types (CBool (..), CFloat (..), CInt (..), CSize (..), CUInt (..))
 import Foreign.Marshal.Alloc (allocaBytes)
-import Foreign.Marshal.Array (advancePtr, allocaArray, peekArray)
+import Foreign.Marshal.Array (advancePtr, allocaArray)
 import Foreign.Marshal.Utils (fillBytes, with)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
 import Foreign.Storable (peek, peekElemOff)
@@ -311,7 +311,10 @@ placeGlyphImage ga font gi = do
       if placed == 0
         then Nothing <$ writeIORef (gaFull ga) True
         else do
-          [u0, v0, u1, v1] <- map realToFrac <$> peekArray 4 uv
+          u0 <- realToFrac <$> peekElemOff uv 0
+          v0 <- realToFrac <$> peekElemOff uv 1
+          u1 <- realToFrac <$> peekElemOff uv 2
+          v1 <- realToFrac <$> peekElemOff uv 3
           pure (Just (GlyphSlot u0 v0 u1 v1))
 
 -- | Width and height of the glyph atlas texture: NANO_UI_GLYPH_ATLAS_SIZE.
@@ -905,7 +908,7 @@ getOrLoadCachedFont cache sz var bold
       (entries, order) <- readIORef (sfcDynamicCache cache)
       case IM.lookup key entries of
         Just entry -> do
-          unless (key `elem` take 8 order) $ do
+          unless (key `elem` take 24 order) $ do
             let order' = key : delete key order
             length order' `seq` writeIORef (sfcDynamicCache cache) (entries, order')
           pure entry

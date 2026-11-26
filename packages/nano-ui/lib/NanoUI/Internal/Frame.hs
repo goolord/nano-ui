@@ -15,6 +15,7 @@ import Data.Primitive.PrimVar (writePrimVar)
 import Effectful (Eff, IOE, runEff, type (:>))
 import NanoUI.Internal.Atlas (atlasToken)
 import NanoUI.Internal.Context
+import NanoUI.Internal.Context.Types (resetContainerStack)
 import NanoUI.Internal.Damage (captureFrameSnapshot, pruneUnmountedCaches, updatePrevRects, writeDamage)
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Frame.Input
@@ -27,8 +28,8 @@ import NanoUI.Internal.Frame.TextArea (finalizeTextFieldMouse)
 import NanoUI.Internal.Frame.TextEdit
 import NanoUI.Internal.Frame.TextInput (claimComposition, settleInputMethod)
 import NanoUI.Internal.Frame.Window
-import NanoUI.Internal.Id (WidgetId (..), initialIdContext)
-import NanoUI.Internal.Id.Cursor (writeIdCursor)
+import NanoUI.Internal.Id (WidgetId (..))
+import NanoUI.Internal.Id.Cursor (resetIdCursor)
 import NanoUI.Internal.Input (Input (..), Key (..), MouseButton (..), Pressable (..), inputKeysNull, stripInteractionInput, withoutPointer)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (measuredHeightAt, placeFloatingNodesWith, runCustomMeasure, solveLayout)
@@ -371,8 +372,8 @@ resetUiBuild :: Context -> Bool -> IO ()
 resetUiBuild ctx newFrame = do
   beginThemeScopes ctx newFrame
   resetNodeArena (ctxNodeArena ctx)
-  writeIORef (ctxContainerStack ctx) []
-  writeIdCursor (ctxIdCursor ctx) initialIdContext
+  resetContainerStack (ctxContainerStack ctx)
+  resetIdCursor (ctxIdCursor ctx)
   writePrimVar (ctxFocusablesCount ctx) 0
   -- The view re-requests the input method each run while a widget takes text.
   readIORef (ctxInputMethod ctx) >>= mapM_ (\_ -> writeIORef (ctxInputMethod ctx) Nothing)

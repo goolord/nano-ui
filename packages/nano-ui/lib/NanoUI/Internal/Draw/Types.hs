@@ -70,9 +70,9 @@ data Layer = LayerBackground | LayerContent | LayerOverlay | LayerChrome
 -- strokes paths, clips, and draws through transforms. Constructors after
 -- 'DrawTextStyled' are the canvas's building blocks and may change.
 data DrawOp
-  = FillRect !Rect !Color
+  = FillRect {-# UNPACK #-} !Rect {-# UNPACK #-} !Color
   -- ^ Solid rectangle.
-  | FillRoundedRect !Rect {-# UNPACK #-} !Float !Color
+  | FillRoundedRect {-# UNPACK #-} !Rect {-# UNPACK #-} !Float {-# UNPACK #-} !Color
   -- ^ Rectangle, corner radius, and fill colour.
   | FillTriangle
       {-# UNPACK #-} !Float
@@ -81,7 +81,7 @@ data DrawOp
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
-      !Color
+      {-# UNPACK #-} !Color
   -- ^ Three x/y pairs followed by the fill colour. The edges are
   -- anti-aliased, so a shape tessellated into triangles shows faint seams
   -- along the shared edges; fill a path on a canvas instead.
@@ -89,7 +89,7 @@ data DrawOp
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
-      !Color
+      {-# UNPACK #-} !Color
   -- ^ Centre x/y, radius, and fill colour.
   | Stroke
       {-# UNPACK #-} !Float
@@ -97,10 +97,10 @@ data DrawOp
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
-      !Color
+      {-# UNPACK #-} !Color
   -- ^ Endpoint x0/y0/x1/y1, width, and colour. Not anti-aliased; see
   -- 'StrokeLineAA'.
-  | StrokeRoundedRect !Rect {-# UNPACK #-} !Float {-# UNPACK #-} !Float !Color
+  | StrokeRoundedRect {-# UNPACK #-} !Rect {-# UNPACK #-} !Float {-# UNPACK #-} !Float {-# UNPACK #-} !Color
   -- ^ Rectangle, corner radius, border width, and colour. The border lies
   -- inside the rectangle.
   | StrokeCircle
@@ -108,7 +108,7 @@ data DrawOp
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
-      !Color
+      {-# UNPACK #-} !Color
   -- ^ Centre x/y, radius, border width, and colour. The border lies inside
   -- the circle.
   | StrokeLineAA
@@ -117,19 +117,19 @@ data DrawOp
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
-      !Color
+      {-# UNPACK #-} !Color
   -- ^ Anti-aliased line: endpoint x0/y0/x1/y1, width, and colour.
-  | FillQuadGradient !Rect !Color !Color !Color !Color
+  | FillQuadGradient {-# UNPACK #-} !Rect {-# UNPACK #-} !Color {-# UNPACK #-} !Color {-# UNPACK #-} !Color {-# UNPACK #-} !Color
   -- ^ Rectangle with colours at top-left, top-right, bottom-right, bottom-left.
   | DrawImage
-      !Rect
+      {-# UNPACK #-} !Rect
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Int
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
-      !Color
+      {-# UNPACK #-} !Color
   -- ^ Destination rectangle, rotation about its centre in radians
   -- (clockwise on screen), texture id, u0/v0/u1/v1, and tint colour. In a
   -- drawing the texture id may be a registered 'NanoUI.ImageId', with UVs
@@ -141,7 +141,7 @@ data DrawOp
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       !T.Text
-      !Color
+      {-# UNPACK #-} !Color
   -- ^ Pen at (x, y) is the alignment point. ax 0..1 is left..right. ay 0..1 is
   -- bottom..top. ay < 0 means baseline (x is left, y is the baseline). Glyph size
   -- is the host font (`drawTextBox`).
@@ -150,7 +150,7 @@ data DrawOp
       {-# UNPACK #-} !Float
       !TextFont
       !T.Text
-      !Color
+      {-# UNPACK #-} !Color
   -- ^ Text in a font of its own, its line box's top left corner at (x, y).
   | FillPolygon !(PrimArray Float) !(PrimArray Int) !(PrimArray Int) !Shade
   -- ^ A polygon with holes, anti-aliased along its rings (outline and
@@ -179,11 +179,11 @@ data DrawOp
       {-# UNPACK #-} !Float
       !TextFont
       !T.Text
-      !Color
+      {-# UNPACK #-} !Color
   -- ^ Text in its own font, anchored at (x, y) by ax/ay as in 'DrawText',
   -- with the font size scaled. Fields: x, y, ax, ay, scale, font, text,
   -- colour.
-  | PushClip !Rect
+  | PushClip {-# UNPACK #-} !Rect
   -- ^ Clip ops up to the matching 'PopClip' to this rectangle, intersected
   -- with the current clip.
   | PopClip

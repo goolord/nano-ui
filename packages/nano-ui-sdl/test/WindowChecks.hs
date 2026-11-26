@@ -63,6 +63,7 @@ windowChecks drivers gpu = do
   openingQuitChildCheck
   fakeVsyncCheck
   resizeFailureCheck
+  resizeChecks
   uiScaleNaNCheck
   dialogStateChecks
   putStrLn ("SDL window options, screenshots and transparency (" ++ drivers ++ "): ok")
@@ -310,6 +311,25 @@ resizeFailureCheck = do
       when (n >= 3) quit
     require "the resize frame's exception leaves the session" $
       either (\(e :: IOException) -> "too narrow" `isInfixOf` show e) (const False) outcome
+
+-- | Resizing a retained window renders 1:1 pixels at the new dimensions
+-- without clipping or stretching, and toggling 'DecorationsFrame' preserves
+-- window sizing under the Win32 subclass.
+resizeChecks :: IO ()
+resizeChecks =
+  session options (colorRGBA 12 34 56 255) $ \ctx env -> do
+    let bar = rowWith (tight . fillW) (flex >> solidBox red)
+    frame ctx env True bar
+    void (SDL.setWindowSizeSafe (sdlWindow env) 300 140)
+    void (SDL.syncWindowSafe (sdlWindow env))
+    (ctx', inp) <- syncDisplay ctx env emptyInput
+    void (sdlDrawFrame ctx' bar env inp True)
+    img <- captureScreenshot env >>= maybe (fail "resizeChecks: screenshot missing") pure
+    requireEq "resized screenshot dimensions" (300, 140) (rgbaWidth (screenshotPixels img), rgbaHeight (screenshotPixels img))
+    requireEq "right-aligned box after resize" [200, 30, 60, 255] (pixelAt img 280 10)
+    requireEq "backdrop left of box after resize" [12, 34, 56, 255] (pixelAt img 10 10)
+    setWindowDecorations env DecorationsFrame
+    setWindowDecorations env DecorationsFull
 
 -- | A UI scale that is not a number follows the display, as zero does, and
 -- asking for it again asks for no frame.

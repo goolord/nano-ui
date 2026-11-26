@@ -2,6 +2,7 @@
 module Cases.WidgetIdIndex (tests) where
 
 import Spec
+import Data.Primitive.PrimVar (readPrimVar, writePrimVar)
 import Data.Text qualified as T
 import NanoUI.Internal.Context (Context (..), DamageState (..), PrevFrame (..), getsDamage)
 import NanoUI.Internal.Layout.Arena (NodeArena (..), getWidgetId, lookupNodeByWidgetId)
@@ -53,12 +54,12 @@ runWidgetIdIndexLookupsTest ctx failed = do
 runWidgetIdIndexEpochWrapTest :: Context -> IORef Int -> IO ()
 runWidgetIdIndexEpochWrapTest ctx failed = do
   let na = ctxNodeArena ctx
-  writeIORef (naEpoch na) maxBound
+  writePrimVar (naEpoch na) maxBound
   gone <- evalUi ctx inp (withKey (1 :: Int) (button' "gone"))
   assert failed . not . null =<< lookupNodeByWidgetId na (respId gone)
-  writeIORef (naEpoch na) maxBound
+  writePrimVar (naEpoch na) maxBound
   _ <- runFrame ctx inp (withKey (2 :: Int) (label "other"))
-  assertEq failed 1 =<< readIORef (naEpoch na)
+  assertEq failed 1 =<< readPrimVar (naEpoch na)
   assertEq failed Nothing =<< lookupNodeByWidgetId na (respId gone)
 
 -- | A wrapping frame tag does not revive width memo entries from the
@@ -66,7 +67,7 @@ runWidgetIdIndexEpochWrapTest ctx failed = do
 runWidthMemoFrameTagWrapTest :: Context -> IORef Int -> IO ()
 runWidthMemoFrameTagWrapTest ctx failed = do
   let ui = columnWith tight . labelWith (\l -> l {layoutWidth = Fixed 100})
-      lapFrame txt = writeIORef (naFrameTag (ctxNodeArena ctx)) maxBound >> runFrame ctx inp (ui txt) >> arenaRects ctx
+      lapFrame txt = writePrimVar (naFrameTag (ctxNodeArena ctx)) maxBound >> runFrame ctx inp (ui txt) >> arenaRects ctx
   _ <- lapFrame "a long label that wraps onto several lines"
   lapped <- lapFrame "a\nb"
   fresh <- newContext

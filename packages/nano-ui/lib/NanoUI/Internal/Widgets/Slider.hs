@@ -20,7 +20,7 @@ import NanoUI.Internal.Var (Binding (..), bindVarBy)
 import NanoUI.Internal.Var.Types (Var)
 import NanoUI.Internal.Widgets.Behavior (DragAxis (..), holdActiveWhile, navStep, useDrag1D, useKeyNav)
 import NanoUI.Internal.Widgets.Combinators (finishInput, widgetBaseLayout)
-import NanoUI.Internal.Widgets.Node (Response, addWidget, setWidgetValue)
+import NanoUI.Internal.Widgets.Node (Response, addWidget, respRect, setWidgetValue)
 
 -- | Slider over @[minV, maxV]@ that fills the available width, bound to
 -- mutable state ('Var'): a drag or the arrow keys update it in place.
@@ -47,6 +47,9 @@ sliderWith f minV maxV v = void (sliderWith' f minV maxV v)
 sliderWith' :: (Layout -> Layout) -> Float -> Float -> Var Float -> NanoUI Response
 sliderWith' f minV maxV v = bindVarBy sameFloat RenderFinal v (sliderCore f minV maxV)
 
+sliderBaseLayout :: Layout
+sliderBaseLayout = fillW defaultLayout
+
 -- | 'sliderWith' on a plain value: the response and the value after this
 -- frame's drag or arrow keys.
 sliderCore ::
@@ -62,22 +65,20 @@ sliderCore f minV maxV value = do
   liftIO $ registerFocusable ctx wid
   -- Adopt the value the slider can show, so one outside the range (or NaN)
   -- is not adopted afresh, and written back clamped, on every frame.
-  let given = if isNaN value then minV else clamp minV maxV value
+  let !given = if isNaN value then minV else clamp minV maxV value
   current <- liftIO $ adoptSlot fieldFloat ctx wid given
-  let range = maxV - minV
+  let !range = maxV - minV
       fracOf x = if range > 0 then (x - minV) / range else 0
-  lay <- widgetBaseLayout (fillW defaultLayout) f
+  lay <- widgetBaseLayout sliderBaseLayout f
   resp <- addWidget wid NodeSlider "" (fracOf current) lay
-  mrect <- liftIO (getPrevRect ctx wid)
-  let
-    track = maybe (Rect 0 0 0 0) (\(Rect x y w h) -> sliderHitBounds x y w h) mrect
+  let Rect rx ry rw rh = respRect resp
+      track = if rw > 0 && rh > 0 then sliderHitBounds rx ry rw rh else Rect 0 0 0 0
   -- Scope the drag to this slider's position so sibling sliders keep separate drag state.
   (dragged, dragging, _) <- scope (useDrag1D DragAxisX wid minV maxV current track)
   holdActiveWhile wid dragging
   nav <- useKeyNav wid
-  let
-    step = if range > 0 then range / 100 else 0
-    finalVal = clamp minV maxV (dragged + fromIntegral (navStep nav) * step)
+  let !step = if range > 0 then range / 100 else 0
+      !finalVal = clamp minV maxV (dragged + fromIntegral (navStep nav) * step)
   -- The node was added before the drag was read: show where it ended, so
   -- this pass draws the value it returns.
   when (finalVal /= current) . liftIO $ setWidgetValue ctx wid (fracOf finalVal)

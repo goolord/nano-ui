@@ -262,16 +262,24 @@ bindWith eq mode result value (VarRef cell@(Cell ref _) l) widget = do
     pure (root0, a0, before)
   x <- widget a0
   let a1 = value x
-  liftIO $ do
-    root1 <- readIORef ref
-    -- While the root is the one the widget was given, the part it shows is
-    -- still a0. A write elsewhere in the cell (a sibling field, from a tab's
-    -- body say) leaves that part alone, so only a write to the part itself
-    -- wins over the widget's edit.
-    untouched <- if ptrEq root1 root0 then pure True else eq a0 <$> peekLens l root1
-    when (untouched && not (eq a1 a0)) $
-      mapM_ (noteBound ctx cell mode sig before) =<< modifyRoot cell l (const a1) eq
+  unless (eq a1 a0) $
+    liftIO (commitBoundWrite ctx cell l eq mode sig root0 a0 a1 before)
   pure (result x)
+
+-- | Write back a bound widget's changed value if the cell's part was not
+-- concurrently overwritten during the widget's execution. Kept out of line so
+-- unchanged bindings never allocate a write-back closure.
+{-# NOINLINE commitBoundWrite #-}
+commitBoundWrite :: Context -> Cell s -> Lens s a -> (a -> a -> Bool) -> Binding -> Sig -> s -> a -> a -> Bool -> IO ()
+commitBoundWrite ctx cell@(Cell ref _) l eq mode !sig root0 a0 a1 !before = do
+  root1 <- readIORef ref
+  -- While the root is the one the widget was given, the part it shows is
+  -- still a0. A write elsewhere in the cell (a sibling field, from a tab's
+  -- body say) leaves that part alone, so only a write to the part itself
+  -- wins over the widget's edit.
+  untouched <- if ptrEq root1 root0 then pure True else eq a0 <$> peekLens l root1
+  when untouched $
+    mapM_ (noteBound ctx cell mode sig before) =<< modifyRoot cell l (const a1) eq
 
 -- | Stamp the part @sig@ of a bound cell observed, returning whether
 -- something observed it earlier in this pass.

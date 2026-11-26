@@ -46,6 +46,8 @@ module NanoUI.Internal.Layout.Arena
   , topModalNode
   , floatingNodeCount
   , layeredNodeCount
+  , scrollableNodeCount
+  , textFieldNodeCount
   , arenaArrays
   , GeomCol (..)
   , StyleCol (..)
@@ -90,12 +92,14 @@ module NanoUI.Internal.Layout.Arena
   , getFlow
   , hasPinnedBelow
   , hasScrollerBelow
+  , hasBaselineChild
   , getPointerMode
   , getNodeRect
   , setRect
   , getClipRect
   , getClipBounds
   , setClipRect
+  , writeClipRectRaw
   , getText
   , getOptions
   , setOptions
@@ -180,6 +184,7 @@ import Data.Primitive.PrimArray
   , setPrimArray
   , writePrimArray
   )
+import Data.Primitive.PrimVar (newPrimVar, readPrimVar, writePrimVar)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Word (Word8, Word32, Word64)
@@ -190,7 +195,7 @@ import NanoUI.Internal.Layout.Arena.Cache
 import NanoUI.Internal.Layout.Arena.Query
 import NanoUI.Internal.Layout.Arena.Types
 import NanoUI.Internal.Store (ptrEq)
-import NanoUI.Internal.Style (Direction (..), Flow (..), ItemsAlign (..), Layout (..), Padding (..), PointerMode (..))
+import NanoUI.Internal.Style (AlignY (..), Direction (..), Flow (..), ItemsAlign (..), Layout (..), Padding (..), PointerMode (..))
 import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), forUpTo_, newZeroedPrimArray)
 
 -- | An empty arena. It starts with room for 256 nodes (@initialCapacity@), 64
@@ -199,22 +204,22 @@ import NanoUI.Internal.Types (Color (..), Rect (..), V2 (..), forUpTo_, newZeroe
 newNodeArena :: IO NodeArena
 newNodeArena = do
   let cap = initialCapacity
-  naCount <- newIORef 0
-  naCapacity <- newIORef cap
+  naCount <- newPrimVar 0
+  naCapacity <- newPrimVar cap
   naArrays <- newIORef =<< newNodeArenaArrays cap
   naScratch <- newIORef =<< newFlexScratch 64
   naSnapLevels <- newIORef =<< newArray 256 =<< newAxisSnapshot 0
-  naFrameTag <- newIORef 1
-  naEpoch <- newIORef 1
+  naFrameTag <- newPrimVar 1
+  naEpoch <- newPrimVar 1
   naIndex <- newIORef =<< newIdIndex 1024
-  naScope <- newIORef 0
-  naScopeSig <- newIORef 0
+  naScope <- newPrimVar 0
+  naScopeSig <- newPrimVar 0
   naInputSig <- newZeroedPrimArray 1
   naPaintSig <- newZeroedPrimArray 1
   naClassCounts <- newZeroedPrimArray nodeClassCount
   naImages <- newIORef =<< newArray 0 noImageNode
   naImageCount <- newZeroedPrimArray 1
-  naHighWater <- newIORef 0
+  naHighWater <- newPrimVar 0
   pure NodeArena {..}
 
 -- | Begin an empty frame while retaining array capacity. Invalidates node
@@ -222,8 +227,8 @@ newNodeArena = do
 -- floating-panel state. 'addNode' initialises each reused slot.
 resetNodeArena :: NodeArena -> IO ()
 resetNodeArena na = do
-  prevCount <- readIORef (naCount na)
-  highWater <- readIORef (naHighWater na)
+  prevCount <- readPrimVar (naCount na)
+  highWater <- readPrimVar (naHighWater na)
   -- Release boxed references in slots beyond the frame that just finished,
   -- while keeping live slots [0 .. prevCount - 1] intact so 'setNodeText' and
   -- 'setOptions' keep their pointer-equality hash reuse across steady frames.
@@ -238,15 +243,15 @@ resetNodeArena na = do
       clearAt prevCount
       setPrimArray (naArrTextHash a) prevCount (highWater - prevCount) 0
       setPrimArray (naArrOptionsHash a) prevCount (highWater - prevCount) 0
-      writeIORef (naHighWater na) prevCount
-    else when (prevCount > highWater) (writeIORef (naHighWater na) prevCount)
+      writePrimVar (naHighWater na) prevCount
+    else when (prevCount > highWater) (writePrimVar (naHighWater na) prevCount)
   prevImages <- readPrimArray (naImageCount na) 0
   when (prevImages > 0) $ do
     imgs <- readIORef (naImages na)
     forUpTo_ prevImages (\i -> writeArray imgs i noImageNode)
-  writeIORef (naCount na) 0
-  writeIORef (naScope na) 0
-  writeIORef (naScopeSig na) 0
+  writePrimVar (naCount na) 0
+  writePrimVar (naScope na) 0
+  writePrimVar (naScopeSig na) 0
   writePrimArray (naInputSig na) 0 0
   writePrimArray (naPaintSig na) 0 0
   setPrimArray (naClassCounts na) 0 nodeClassCount 0
@@ -254,31 +259,31 @@ resetNodeArena na = do
   -- 0 marks a memo entry that was never written, so the tag wraps to 1. On
   -- wrap-around, entries from the previous use of tag 1 would read as live,
   -- so untag them all.
-  !ft <- readIORef (naFrameTag na)
-  writeIORef (naFrameTag na) (if ft == maxBound then 1 else ft + 1)
+  !ft <- readPrimVar (naFrameTag na)
+  writePrimVar (naFrameTag na) (if ft == maxBound then 1 else ft + 1)
   when (ft == maxBound) $ do
     a <- readIORef (naArrays na)
     forM_ [naArrWrapMemo a, naArrFitMemo a] $ \(WidthMemo tags _) ->
       getSizeofMutablePrimArray tags >>= \c -> setPrimArray tags 0 c 0
   -- Bumping the epoch empties the id index. On wrap-around, stale entries
   -- from the previous use of that epoch would read as live, so clear it.
-  !ep <- readIORef (naEpoch na)
+  !ep <- readPrimVar (naEpoch na)
   let !ep' = ep + 1
   IdIndex slots mask live <- readIORef (naIndex na)
   writePrimArray live 0 0
   if ep' == 0
-    then writeIORef (naEpoch na) 1 >> setPrimArray slots 0 (2 * (mask + 1)) 0
-    else writeIORef (naEpoch na) ep'
+    then writePrimVar (naEpoch na) 1 >> setPrimArray slots 0 (2 * (mask + 1)) 0
+    else writePrimVar (naEpoch na) ep'
 
 {-# NOINLINE ensureCapacity #-}
 ensureCapacity :: NodeArena -> Int -> IO ()
 ensureCapacity na needed = do
-  cap <- readIORef (naCapacity na)
+  cap <- readPrimVar (naCapacity na)
   when (needed >= cap) $ do
     let newCap = cap * 2
     newA <- readIORef (naArrays na) >>= growNodeArenaArrays (naClassCounts na) cap newCap
     writeIORef (naArrays na) newA
-    writeIORef (naCapacity na) newCap
+    writePrimVar (naCapacity na) newCap
 
 -- | Copy of @a@ with room for @newCap@ nodes; new slots are zero or empty.
 growNodeArenaArrays :: IOArr Int -> Int -> Int -> NodeArenaArrays -> IO NodeArenaArrays
@@ -330,8 +335,9 @@ rootAttachParent na parent
 {-# INLINE addNode #-}
 addNode :: NodeArena -> NodeType -> Int -> Layout -> IO NodeIdx
 addNode na nt parent Layout {..} = do
-  idx <- readIORef (naCount na)
-  ensureCapacity na (idx + 1)
+  idx <- readPrimVar (naCount na)
+  cap <- readPrimVar (naCapacity na)
+  when (idx + 1 >= cap) $ ensureCapacity na (idx + 1)
   let (wTag0, wVal0) = sizingTag layoutWidth
       (hTag0, hVal0) = sizingTag layoutHeight
       pad = layoutPadding
@@ -354,31 +360,30 @@ addNode na nt parent Layout {..} = do
   a <- arenaArrays na
   -- 'ItemsStretch' promotes an unaligned fit-sized flow child to grow along
   -- its parent's cross axis (width in a column, height in a row or grid row).
-  ((!wTag, !wVal), (!hTag, !hVal)) <-
-    if parent >= 0 && not pinned && not (isFloatingNode nt)
+  -- Return a plain unboxed Int tag (0 none, 1 stretch W, 2 stretch H) so the
+  -- common unstretched path allocates no tuples or boxed Floats.
+  !stretch <-
+    if parent >= 0
+      && not pinned
+      && not (isFloatingNode nt)
+      && ((wTag0 == SizingFit && axByte == 0) || (hTag0 == SizingFit && ayByte == 0))
       then do
         pItems <- readTagEnum a parent TagItemsAlign
-        if pItems /= ItemsStretch
-          then pure ((wTag0, wVal0), (hTag0, hVal0))
-          else do
-            pFlow <- readTagEnum a parent TagFlow
-            if pFlow == Layered
-              then pure ((wTag0, wVal0), (hTag0, hVal0))
-              else do
-                pDir <- readTagEnum a parent TagDirection
-                pGridCols <- readTree a parent TreeGridCols
-                pMinColW <- readStyle a parent StyleGridMinColW
-                let pIsGrid = pGridCols > 0 || pMinColW > 0
-                    stretchY = pIsGrid || pDir == DirRow
-                    wPair = if not stretchY && wTag0 == SizingFit && axByte == 0 then (SizingGrow, 1) else (wTag0, wVal0)
-                    hPair = if stretchY && hTag0 == SizingFit && ayByte == 0 then (SizingGrow, 1) else (hTag0, hVal0)
-                pure (wPair, hPair)
-      else pure ((wTag0, wVal0), (hTag0, hVal0))
+        if pItems == ItemsStretch
+          then stretchAxis a parent wTag0 axByte hTag0 ayByte
+          else pure 0
+      else pure 0
+  let !wTag = if stretch == 1 then SizingGrow else wTag0
+      !wVal = if stretch == 1 then 1 else wVal0
+      !hTag = if stretch == 2 then SizingGrow else hTag0
+      !hVal = if stretch == 2 then 1 else hVal0
   -- 'PointerPass' is inherited by all descendants.
   !pointerMode <-
     if parent < 0 || layoutPointer == PointerPass
       then pure layoutPointer
-      else (\p -> if p == PointerPass then p else layoutPointer) <$> readTagEnum a parent TagPointer
+      else do
+        p <- readTagEnum a parent TagPointer
+        pure $! if p == PointerPass then p else layoutPointer
 
   setPrimArray (naArrGeom a) (idx * geomStride) geomStride 0
 
@@ -393,8 +398,8 @@ addNode na nt parent Layout {..} = do
   writeStyle a idx StyleMinH layoutMinH
   writeStyle a idx StyleMaxW layoutMaxW
   writeStyle a idx StyleMaxH layoutMaxH
-  let !valuesOff = fromEnum StyleScrollContentW
-  setPrimArray (naArrStyle a) (idx * styleStride + valuesOff) (styleStride - valuesOff) 0
+  writeStyle a idx StyleScrollContentW 0
+  writeStyle a idx StyleNodeValue 0
   writeStyle a idx StyleGridMinColW layoutGridMinColW
   writeStyle a idx StyleFontSize layoutFontSize
   writeStyle a idx StyleLineGap lineGap
@@ -402,27 +407,34 @@ addNode na nt parent Layout {..} = do
   writeStyle a idx StylePinY pinY
   writeStyle a idx StyleAspect layoutAspect
 
-  setPrimArray (naArrTags a) (idx * tagStride) tagStride 0
   writeTagEnum a idx TagNodeType nt
   writeTagEnum a idx TagDirection $ case layoutDirection of
     Row | flow /= Layered -> DirRow
     _ -> DirColumn
   writeTagEnum a idx TagWSizing wTag
   writeTagEnum a idx TagHSizing hTag
+  writePrimArray (naArrTags a) (idx * tagStride + fromEnum TagScrollBarSlot) 0
   writePrimArray (naArrTags a) (idx * tagStride + fromEnum TagAlignX) axByte
   writePrimArray (naArrTags a) (idx * tagStride + fromEnum TagAlignY) ayByte
-  writeTagEnum a idx TagItemsAlign layoutItemsAlign
-  writeTagEnum a idx TagJustify layoutJustify
+  writePrimArray (naArrTags a) (idx * tagStride + fromEnum TagIdSuperseded) 0
   writeTagEnum a idx TagFlow flow
   writeTagEnum a idx TagPinned pinned
+  writePrimArray (naArrTags a) (idx * tagStride + fromEnum TagPinnedBelow) 0
   writeTagEnum a idx TagPointer pointerMode
   writeTagEnum a idx TagLineAlign layoutLineAlign
+  writePrimArray (naArrTags a) (idx * tagStride + fromEnum TagScrollerBelow) 0
+  writePrimArray (naArrTags a) (idx * tagStride + fromEnum TagSteadyHeight) 0
+  writeTagEnum a idx TagItemsAlign layoutItemsAlign
+  writeTagEnum a idx TagJustify layoutJustify
+  writePrimArray (naArrTags a) (idx * tagStride + fromEnum TagHasOptions) 0
+  writePrimArray (naArrTags a) (idx * tagStride + fromEnum TagBaselineChild) 0
 
-  setPrimArray (naArrTree a) (idx * treeStride) treeStride 0
   writePrimArray (naArrStyleIdx a) idx 0
   writeTree a idx TreeParent parent
   writeTree a idx TreeFirstChild (-1)
   writeTree a idx TreeNextSibling (-1)
+  writeTree a idx TreeChildCount 0
+  writeTree a idx TreeWidgetId 0
   writeTree a idx TreeTextIdx (-1)
   writeTree a idx TreeGridCols layoutGridCols
 
@@ -459,7 +471,7 @@ addNode na nt parent Layout {..} = do
       !nodeSig = mixTagged (mixTagged content 0x4958 (fromIntegral idx)) 0x5041 (fromIntegral (parent + 1))
   mixInputSig na 0x4e4f nodeSig
   writePrimArray (naArrOwnHash a) idx nodeSig
-  scope <- readIORef (naScope na)
+  scope <- readPrimVar (naScope na)
   writePrimArray (naArrScope a) idx scope
   -- Bit 1 marks inert (input-only) scopes, which have no visual effect and
   -- must not trigger paint-scope invalidation.
@@ -473,9 +485,8 @@ addNode na nt parent Layout {..} = do
       writePrimArray (naArrFontColor a) idx (0x100000000 .|. fromIntegral w)
       mixPaintSig na idx 0x4643 (fromIntegral w)
   when (paintScope /= 0) $ do
-    sig <- readIORef (naScopeSig na)
-    writeIORef (naScopeSig na) $! (sig * 0x100000001b3) `xor` (fromIntegral idx `shiftL` 32 .|. fromIntegral paintScope)
-  writeArray (naArrOptionsStore a) idx []
+    sig <- readPrimVar (naScopeSig na)
+    writePrimVar (naScopeSig na) $! (sig * 0x100000001b3) `xor` (fromIntegral idx `shiftL` 32 .|. fromIntegral paintScope)
 
   when (parent >= 0) $ do
     fc <- readTree a parent TreeFirstChild
@@ -484,6 +495,8 @@ addNode na nt parent Layout {..} = do
     cc <- readTree a parent TreeChildCount
     writeTree a parent TreeChildCount (cc + 1)
     when pinned $ markAncestorTag a TagPinnedBelow parent
+    when (not pinned && not (isFloatingNode nt) && layoutAlignY == AlignBaseline) $
+      writeTagEnum a parent TagBaselineChild True
   when (isFloatingNode nt) $ pushClassNode na a FloatingNodes idx
   when (nt == NodePanel || nt == NodeScrollContainer) $ pushClassNode na a BackdropNodes idx
   when (flow == Layered || pinned) $ pushClassNode na a LayeredNodes idx
@@ -491,9 +504,31 @@ addNode na nt parent Layout {..} = do
     pushClassNode na a PointerNodes idx
     when (isScrollNode nt || nt == NodeTextArea || pointerMode == PointerBlock) $
       markAncestorTag a TagScrollerBelow idx
+  when (isScrollNode nt || nt == NodeTextArea) $ pushClassNode na a ScrollableNodes idx
+  when (nt == NodeTextInput || nt == NodeTextArea) $ pushClassNode na a TextFieldNodes idx
   when (nt == NodeDrawing) $ pushClassNode na a DrawingNodes idx
-  writeIORef (naCount na) (idx + 1)
+  writePrimVar (naCount na) (idx + 1)
   pure idx
+
+-- | Cross-axis stretch promotion for a flow child whose parent has
+-- 'ItemsStretch': 0 for none, 1 to promote width, 2 to promote height.
+{-# NOINLINE stretchAxis #-}
+stretchAxis :: NodeArenaArrays -> NodeIdx -> SizingTag -> Word8 -> SizingTag -> Word8 -> IO Int
+stretchAxis a parent wTag0 axByte hTag0 ayByte = do
+  pFlow <- readTagEnum a parent TagFlow
+  if pFlow == Layered
+    then pure 0
+    else do
+      pDir <- readTagEnum a parent TagDirection
+      pGridCols <- readTree a parent TreeGridCols
+      pMinColW <- readStyle a parent StyleGridMinColW
+      let !stretchY = pGridCols > 0 || pMinColW > 0 || pDir == DirRow
+      pure $!
+        if not stretchY && wTag0 == SizingFit && axByte == 0
+          then 1
+          else if stretchY && hTag0 == SizingFit && ayByte == 0
+            then 2
+            else 0
 
 -- | Mark a node and its ancestors with @tag@, stopping at the first one
 -- already marked. Top-level so 'addNode' allocates no closure when the
@@ -511,7 +546,7 @@ pushClassNode :: NodeArena -> NodeArenaArrays -> NodeClass -> NodeIdx -> IO ()
 pushClassNode na a c idx = do
   let ci = fromEnum c
   k <- readPrimArray (naClassCounts na) ci
-  cap <- readIORef (naCapacity na)
+  cap <- readPrimVar (naCapacity na)
   writePrimArray (naArrClassNodes a) (ci * cap + k) idx
   writePrimArray (naClassCounts na) ci (k + 1)
 
@@ -527,8 +562,9 @@ setNodeText :: NodeArena -> NodeIdx -> Text -> IO ()
 setNodeText na idx txt = do
   a <- arenaArrays na
   old <- readArray (naArrTextStore a) idx
-  h <- cachedHash (naArrTextHash a) idx (old `ptrEq` txt) 0x54455854 txt
-  writeArray (naArrTextStore a) idx txt
+  let !same = old `ptrEq` txt
+  h <- cachedHash (naArrTextHash a) idx same 0x54455854 txt
+  unless same $ writeArray (naArrTextStore a) idx txt
   writeTree a idx TreeTextIdx idx
   mixNodeInput na idx 0x5458 h
 
@@ -597,9 +633,12 @@ setOptions na idx opts = do
   -- cleared: against that, every list would rehash and an empty one would
   -- take an old list's hash.
   old <- readArray (naArrOptionsLast a) idx
-  h <- cachedHash (naArrOptionsHash a) idx (old `ptrEq` opts) 0x4f505453 opts
-  writeArray (naArrOptionsStore a) idx opts
-  writeArray (naArrOptionsLast a) idx opts
+  let !same = old `ptrEq` opts
+  h <- cachedHash (naArrOptionsHash a) idx same 0x4f505453 opts
+  writeTagEnum a idx TagHasOptions True
+  unless same $ do
+    writeArray (naArrOptionsStore a) idx opts
+    writeArray (naArrOptionsLast a) idx opts
   mixNodeInput na idx 0x4f50 h
 
 -- | The node's value hash from @arr@ when @same@ says the value is the
@@ -626,7 +665,7 @@ setWidgetId na idx wid = do
   writeTree a idx TreeWidgetId (fromIntegral w)
   mixNodeInput na idx 0x5749 w
   when (hashWidgetId wid /= 0) $ do
-    !ep <- readIORef (naEpoch na)
+    !ep <- readPrimVar (naEpoch na)
     prev <- indexWidgetId na ep w idx
     when (prev >= 0 && prev /= idx) $ writeTagEnum a prev TagIdSuperseded True
 
@@ -637,7 +676,7 @@ lookupNodeByWidgetId :: NodeArena -> WidgetId -> IO (Maybe NodeIdx)
 lookupNodeByWidgetId na (WidgetId key)
   | key == 0 = pure Nothing
   | otherwise = do
-      !ep <- readIORef (naEpoch na)
+      !ep <- readPrimVar (naEpoch na)
       IdIndex slots mask _ <- readIORef (naIndex na)
       probeSlot slots mask ep key (\_ -> pure Nothing) (\_ v -> pure (Just (slotNode v)))
 
@@ -804,7 +843,7 @@ newAxisSnapshot cap = AxisSnapshot <$> newPrimArray cap <*> newPrimArray cap
 {-# INLINE memoizeWidth #-}
 memoizeWidth :: NodeArena -> WidthMemo -> NodeIdx -> Float -> IO (Float, Float) -> IO (Float, Float)
 memoizeWidth na (WidthMemo tags slots) idx key compute = do
-  ft <- readIORef (naFrameTag na)
+  ft <- readPrimVar (naFrameTag na)
   tag <- readPrimArray tags idx
   let !base = idx * memoStride
   hit <-

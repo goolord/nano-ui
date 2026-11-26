@@ -2,12 +2,14 @@
 
 -- | Paragraph values and typed layout cache, independent of view execution.
 module NanoUI.Internal.RichText.Types
-  ( Inline (..)
+  ( InlineStyle (..)
+  , Inline (..)
   , inlineText
   , Run (..)
   , TokenKind (..)
   , Token (..)
   , Line (..)
+  , InteractivePiece (..)
   , Paragraph (..)
   , Inputs (..)
   , RichSelection (..)
@@ -29,9 +31,19 @@ import NanoUI.Internal.Style (Layout, Theme)
 import NanoUI.Internal.Types (Color)
 import NanoUI.Widgets.TextBuffer (Cursor, TextBuffer)
 
+-- | How an 'Inline' piece modifies the paragraph's base layout. Common presets
+-- carry no function or 'Layout' copy so steady-frame cache checks allocate
+-- nothing.
+data InlineStyle
+  = InlinePlain
+  | InlineBold
+  | InlineItalic
+  | InlineMono
+  | InlineCustom !(Layout -> Layout)
+
 -- | Text with a layout-style modifier, optional link target, background,
 -- and hover tooltip.
-data Inline = Inline !Text (Layout -> Layout) !(Maybe Text) !(Maybe Color) !(Maybe Text)
+data Inline = Inline !Text !InlineStyle !(Maybe Text) !(Maybe Color) !(Maybe Text)
 
 instance IsString Inline where
   fromString = inlineText . T.pack
@@ -39,7 +51,7 @@ instance IsString Inline where
 -- | Plain text in the paragraph's style. A string literal is the same piece
 -- ('IsString').
 inlineText :: Text -> Inline
-inlineText txt = Inline txt id Nothing Nothing Nothing
+inlineText txt = Inline txt InlinePlain Nothing Nothing Nothing
 
 -- | The style of one 'Inline' piece, resolved once when the paragraph is
 -- measured.
@@ -101,6 +113,16 @@ data Line = Line
   -- ^ Tokens with their x offset from the line's left edge.
   }
 
+-- | Interactive span (link or tooltipped run) relative to the paragraph's
+-- top-left corner, cached alongside 'paraLines' when the width settles.
+data InteractivePiece = InteractivePiece
+  { ipRun :: {-# UNPACK #-} !Int
+  , ipX :: {-# UNPACK #-} !Float
+  , ipY :: {-# UNPACK #-} !Float
+  , ipW :: {-# UNPACK #-} !Float
+  , ipH :: {-# UNPACK #-} !Float
+  }
+
 -- | Disposable text/measurement data. Selection belongs to the widget store,
 -- so changing presentation or evicting this cache cannot clear it.
 data Paragraph = Paragraph
@@ -112,6 +134,14 @@ data Paragraph = Paragraph
   , paraNatural :: (Float, Float)
   , paraWidth :: !Float
   , paraLines :: [Line]
+  , paraInteractive :: ![InteractivePiece]
+  -- ^ Link and tooltip spans in paragraph-local coordinates for 'paraLines'.
+  , paraTooltipRuns :: ![(Int, Text)]
+  -- ^ Runs carrying a hover tooltip, precomputed once per paragraph.
+  , paraHasInteractive :: !Bool
+  -- ^ Whether any run is a link or has a hover tooltip.
+  , paraHasGlyphs :: !Bool
+  -- ^ Whether any piece uses 'BreakAnywhere' (has 'Glyph' or 'GlyphSpace' tokens).
   , paraMeasured :: !(IORef Measured)
   , paraText :: !Text
   , paraBuffer :: TextBuffer

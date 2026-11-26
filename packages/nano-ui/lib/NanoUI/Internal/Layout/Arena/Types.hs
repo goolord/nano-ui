@@ -49,6 +49,8 @@ module NanoUI.Internal.Layout.Arena.Types
   , arenaCount
   , floatingNodeCount
   , layeredNodeCount
+  , scrollableNodeCount
+  , textFieldNodeCount
   , arenaArrays
   , mixTagged
   , mixInputSig
@@ -83,12 +85,14 @@ module NanoUI.Internal.Layout.Arena.Types
   , isPinnedNode
   , hasPinnedBelow
   , hasScrollerBelow
+  , hasBaselineChild
   , getPointerMode
   , getNodeRect
   , setRect
   , getClipRect
   , getClipBounds
   , setClipRect
+  , writeClipRectRaw
   , getText
   , ImageNode (..)
   , noImageNode
@@ -112,7 +116,7 @@ module NanoUI.Internal.Layout.Arena.Types
 
 import Control.Monad (mfilter)
 import Data.Bits (shiftL, shiftR, xor, (.&.))
-import Data.IORef (IORef, readIORef, writeIORef)
+import Data.IORef (IORef, readIORef)
 import Data.Primitive.Array (MutableArray, copyMutableArray, newArray, readArray)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
@@ -122,6 +126,7 @@ import Data.Primitive.PrimArray
   , setPrimArray
   , writePrimArray
   )
+import Data.Primitive.PrimVar (PrimVar, readPrimVar, writePrimVar)
 import Data.Primitive.Types (Prim)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -356,6 +361,12 @@ data NodeClass
   -- ^ Layered containers and pinned nodes. Only here does paint draw a node
   -- over an earlier sibling ('forChildrenInPaintOrder_'), so only here can
   -- the later of two overlapping widgets get the pointer ('layeredNodeCount').
+  | ScrollableNodes
+  -- ^ Scroll containers and text areas ('isScrollNode' or 'NodeTextArea'),
+  -- so scrollbar hover, wheel ownership, and scroll focus skip other pointer nodes.
+  | TextFieldNodes
+  -- ^ Single-line text inputs and text areas, so text-field hit tests can
+  -- short-circuit when a view contains none.
   deriving (Eq, Enum, Bounded)
 
 -- | The constructor of a 'Sizing' without its number, as the arena stores it
@@ -447,44 +458,44 @@ data NodeArenaArrays = NodeArenaArrays
 -- working memory. 'newNodeArena' makes one for a context, and
 -- 'resetNodeArena' empties it for each run of the view.
 data NodeArena = NodeArena
-  { naCount :: IORef Int
+  { naCount :: {-# UNPACK #-} !(PrimVar RealWorld Int)
   -- ^ Nodes in use. The next node gets this index.
-  , naCapacity :: IORef Int
+  , naCapacity :: {-# UNPACK #-} !(PrimVar RealWorld Int)
   -- ^ Nodes the arrays have room for.
-  , naArrays :: IORef NodeArenaArrays
+  , naArrays :: !(IORef NodeArenaArrays)
   -- ^ The current arrays. Read them through 'arenaArrays'.
-  , naScratch :: IORef FlexScratch
+  , naScratch :: !(IORef FlexScratch)
   -- ^ The solver's buffers for the container it is working on.
-  , naSnapLevels :: IORef (MutableArray RealWorld AxisSnapshot)
+  , naSnapLevels :: !(IORef (MutableArray RealWorld AxisSnapshot))
   -- ^ One 'AxisSnapshot' per nesting depth of the position pass, empty
   -- until the pass first reaches that depth. Laying out a child overwrites
   -- 'naScratch', so a container copies its child list here, at its own depth,
   -- before it recurses into its children.
-  , naFrameTag :: IORef Word32
+  , naFrameTag :: {-# UNPACK #-} !(PrimVar RealWorld Word32)
   -- ^ The tag that marks the live entries of 'naArrWrapMemo' and 'naArrFitMemo'.
   -- 'resetNodeArena' changes it, which expires every entry at once. It is never 0.
-  , naEpoch :: IORef Word32
+  , naEpoch :: {-# UNPACK #-} !(PrimVar RealWorld Word32)
   -- ^ The tag that marks the live entries of 'naIndex'. 'resetNodeArena'
   -- increments it. It is never 0.
-  , naIndex :: IORef IdIndex
+  , naIndex :: !(IORef IdIndex)
   -- ^ Node index by widget id, for 'lookupNodeByWidgetId'.
-  , naScope :: IORef Int
+  , naScope :: {-# UNPACK #-} !(PrimVar RealWorld Int)
   -- ^ The paint scope 'addNode' gives new nodes, encoded as in 'naArrScope'.
-  , naScopeSig :: IORef Word64
+  , naScopeSig :: {-# UNPACK #-} !(PrimVar RealWorld Word64)
   -- ^ A hash over the index and scope of every node added under a scope other
   -- than 0 since the reset. See 'getScopeSignature'.
-  , naPaintSig :: IOArr Word64
+  , naPaintSig :: !(IOArr Word64)
   -- ^ Hash of the paint state the input signature leaves out, mixed as it is
   -- written ('getPaintSignature'). One unboxed slot, like 'naInputSig'.
-  , naInputSig :: IOArr Word64
+  , naInputSig :: !(IOArr Word64)
   -- ^ The frame's input signature, which 'layoutSigMatches' compares.
-  , naClassCounts :: IOArr Int
+  , naClassCounts :: !(IOArr Int)
   -- ^ Nodes in each list of 'naArrClassNodes', by 'fromEnum' of the class.
-  , naImages :: IORef (MutableArray RealWorld ImageNode)
+  , naImages :: !(IORef (MutableArray RealWorld ImageNode))
   -- ^ Looks of the image nodes that are not plain, in 'setImageNode' order.
-  , naImageCount :: IOArr Int
+  , naImageCount :: !(IOArr Int)
   -- ^ Entries of 'naImages' used this frame, in one slot.
-  , naHighWater :: IORef Int
+  , naHighWater :: {-# UNPACK #-} !(PrimVar RealWorld Int)
   -- ^ High-water node count whose boxed text/option slots have not been cleared.
   }
 
@@ -547,7 +558,7 @@ initialCapacity = 256
 geomStride, styleStride, tagStride, treeStride :: Int
 geomStride = 9
 styleStride = 20
-tagStride = 17
+tagStride = 19
 treeStride = 7
 
 -- | Columns of 'naArrGeom', in logical pixels and window coordinates.
@@ -635,11 +646,18 @@ data StyleCol
 --   it can be laid out at, as a 'Bool'. The solver's measure pass writes it
 --   ('NanoUI.Internal.Layout.Solve.Measure.markSteadyHeight'); 'False' until
 --   then, which only costs a refit.
+-- * 'TagHasOptions': whether 'setOptions' populated 'naArrOptionsStore' for
+--   this node in the current frame, avoiding an unconditional write barrier on
+--   every 'addNode'.
+-- * 'TagBaselineChild': whether any direct flow child explicitly requested
+--   'AlignBaseline', allowing row measure and positioning to skip baseline
+--   scans when 'ItemsAlign' is not 'ItemsBaseline' and no child asks for it.
 data TagCol
   = TagNodeType | TagDirection | TagWSizing | TagHSizing
   | TagScrollBarSlot | TagAlignX | TagAlignY | TagIdSuperseded
   | TagFlow | TagPinned | TagPinnedBelow | TagPointer | TagLineAlign
   | TagScrollerBelow | TagSteadyHeight | TagItemsAlign | TagJustify
+  | TagHasOptions | TagBaselineChild
   deriving (Enum, Bounded)
 
 -- | Columns of 'naArrTree'. A link that leads nowhere is -1.
@@ -825,10 +843,20 @@ floatingNodeCount na = readPrimArray (naClassCounts na) (fromEnum FloatingNodes)
 layeredNodeCount :: NodeArena -> IO Int
 layeredNodeCount na = readPrimArray (naClassCounts na) (fromEnum LayeredNodes)
 
+-- | Number of scroll containers and text areas added since the last reset.
+{-# INLINE scrollableNodeCount #-}
+scrollableNodeCount :: NodeArena -> IO Int
+scrollableNodeCount na = readPrimArray (naClassCounts na) (fromEnum ScrollableNodes)
+
+-- | Number of single-line text inputs and text areas added since the last reset.
+{-# INLINE textFieldNodeCount #-}
+textFieldNodeCount :: NodeArena -> IO Int
+textFieldNodeCount na = readPrimArray (naClassCounts na) (fromEnum TextFieldNodes)
+
 -- | Live node count. Valid indices are 0 through count minus one.
 {-# INLINE arenaCount #-}
 arenaCount :: NodeArena -> IO Int
-arenaCount na = readIORef (naCount na)
+arenaCount na = readPrimVar (naCount na)
 
 -- | Current backing arrays. Do not retain them across arena growth or reset.
 {-# INLINE arenaArrays #-}
@@ -1032,6 +1060,11 @@ hasPinnedBelow na idx = arenaArrays na >>= \a -> readTagEnum a idx TagPinnedBelo
 hasScrollerBelow :: NodeArena -> NodeIdx -> IO Bool
 hasScrollerBelow na idx = arenaArrays na >>= \a -> readTagEnum a idx TagScrollerBelow
 
+-- | Whether any direct flow child of @idx@ requested 'AlignBaseline'.
+{-# INLINE hasBaselineChild #-}
+hasBaselineChild :: NodeArenaArrays -> NodeIdx -> IO Bool
+hasBaselineChild a idx = readTagEnum a idx TagBaselineChild
+
 -- | The node's own 'PointerMode', or 'PointerPass' when an ancestor passes
 -- the pointer.
 {-# INLINE getPointerMode #-}
@@ -1055,15 +1088,21 @@ setRect na idx x y w h = arenaArrays na >>= \a -> writeRectAt (naArrGeom a) (idx
 getClipRect :: NodeArena -> NodeIdx -> IO (Maybe Rect)
 getClipRect na idx = mfilter rectNonEmpty <$> getClipBounds na idx
 
+-- | Store a clip in logical window coordinates into already-fetched arrays
+-- without boxing a 'Rect'.
+{-# INLINE writeClipRectRaw #-}
+writeClipRectRaw :: NodeArenaArrays -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()
+writeClipRectRaw a idx x y w h = do
+  let !empty = not (w > 0 && h > 0)
+  writeRectAt (naArrGeom a) (idx * geomStride + fromEnum GeomClipX) x y (if empty then -1 else w) (if empty then -1 else h)
+
 -- | Store a clip in logical window coordinates. A clip without area is
 -- stored as empty, which differs from the unset clip 'addNode' leaves.
 -- 'getClipRect' reads both as 'Nothing'; 'getClipBounds' does not.
 {-# INLINE setClipRect #-}
 setClipRect :: NodeArena -> NodeIdx -> Rect -> IO ()
-setClipRect na idx (Rect x y w h) = do
-  a <- arenaArrays na
-  let empty = not (w > 0 && h > 0)
-  writeRectAt (naArrGeom a) (idx * geomStride + fromEnum GeomClipX) x y (if empty then -1 else w) (if empty then -1 else h)
+setClipRect na idx (Rect x y w h) =
+  arenaArrays na >>= \a -> writeClipRectRaw a idx x y w h
 
 -- | The stored clip in logical window coordinates. An empty clip reads as a
 -- zero-size rect. 'Nothing' means unset, as before
@@ -1110,7 +1149,10 @@ noImageNode = ImageNode (imageLook defaultImageConfig (Color 0xFFFFFFFF)) 0 0
 -- | Choices stored on a select node, or an empty list when none were assigned.
 {-# INLINE getOptions #-}
 getOptions :: NodeArena -> NodeIdx -> IO [Text]
-getOptions na idx = arenaArrays na >>= \a -> readArray (naArrOptionsStore a) idx
+getOptions na idx = do
+  a <- arenaArrays na
+  has <- readTagEnum a idx TagHasOptions
+  if has then readArray (naArrOptionsStore a) idx else pure []
 
 -- | Identity assigned to the node, or @WidgetId 0@ for an untagged node.
 {-# INLINE getWidgetId #-}
@@ -1197,18 +1239,18 @@ getNodeScope na idx = arenaArrays na >>= \a -> readPrimArray (naArrScope a) idx
 -- | Packed paint scope that newly added nodes inherit.
 {-# INLINE getArenaScope #-}
 getArenaScope :: NodeArena -> IO Int
-getArenaScope na = readIORef (naScope na)
+getArenaScope na = readPrimVar (naScope na)
 
 -- | Select the packed paint scope for subsequent nodes. Existing nodes keep theirs.
 {-# INLINE setArenaScope #-}
 setArenaScope :: NodeArena -> Int -> IO ()
-setArenaScope na = writeIORef (naScope na)
+setArenaScope na = writePrimVar (naScope na)
 
 -- | Hash of non-default node scopes recorded during insertion this frame.
 -- Used to detect changes in scoped painting; zero is the reset value.
 {-# INLINE getScopeSignature #-}
 getScopeSignature :: NodeArena -> IO Word64
-getScopeSignature na = readIORef (naScopeSig na)
+getScopeSignature na = readPrimVar (naScopeSig na)
 
 -- | Hash over every layout input written since the reset: each node's
 -- layout and tree links as 'addNode' wrote them, plus every later change

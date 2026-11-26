@@ -17,6 +17,7 @@ module NanoUI.Svg
   ) where
 
 import Control.Monad (forM_, when)
+import Control.Monad.Primitive (PrimMonad, PrimState)
 import Control.Monad.ST (ST, runST)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
@@ -25,7 +26,8 @@ import Data.Maybe (fromMaybe)
 import Data.Foldable (toList)
 import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, indexPrimArray, newPrimArray, readPrimArray, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
 import Data.Primitive.SmallArray (SmallArray)
-import Data.Word (Word8)
+import Data.Word (Word16, Word8)
+import Foreign.Marshal.Utils (fillBytes)
 import Foreign.Storable (pokeByteOff)
 import Graphics.NanoSvg
   ( Box (..)
@@ -227,59 +229,130 @@ rasterizeView width height view current svg
   | width <= 0 || height <= 0 = BS.empty
   -- A degenerate viewBox or rect makes a view of infinities or NaNs.
   | not (P.transformFinite view) = BS.replicate (width * height * 4) 0
-  | otherwise = BSI.unsafeCreate (width * height * 4) $ \out ->
-      forM_ [0 .. width * height - 1] $ \i -> do
-        let al = indexPrimArray image (i * 4 + 3)
-            byte x = fromIntegral (clamp 0 255 (round (x * 255) :: Int)) :: Word8
-            unpremul k = pokeByteOff out (i * 4 + k) (if al <= 0 then 0 else byte (indexPrimArray image (i * 4 + k) / al))
-        mapM_ unpremul [0, 1, 2]
-        pokeByteOff out (i * 4 + 3) (byte al)
+  | otherwise =
+      case collectPaints of
+        [] -> BS.replicate (width * height * 4) 0
+        [(rule, rings, col, alpha)] ->
+          -- Single-paint SVG (most UI icons): write straight to the output
+          -- buffer row by row with no full-frame accumulator or coverage array.
+          BSI.unsafeCreate (width * height * 4) $ \out -> do
+            fillBytes out 0 (width * height * 4)
+            cov <- newZeroedPrimArray width
+            let !rByte = colorR col
+                !gByte = colorG col
+                !bByte = colorB col
+                !aScale = alpha * fromIntegral (colorA col) / 255
+                writeRow !row = go 0
+                  where
+                    !rowBase = row * width * 4
+                    go !x
+                      | x >= width = pure ()
+                      | otherwise = do
+                          c <- readPrimArray cov x
+                          when (c > 0) $ do
+                            writePrimArray cov x 0
+                            let !sa = min 1 c * aScale
+                                !aByte = toByte sa
+                            when (aByte > 0) $ do
+                              let !off = rowBase + x * 4
+                              pokeByteOff out off rByte
+                              pokeByteOff out (off + 1) gByte
+                              pokeByteOff out (off + 2) bByte
+                              pokeByteOff out (off + 3) aByte
+                          go (x + 1)
+            coverPolygons width height cov rule rings writeRow
+        paints ->
+          let !image = rasterizeMulti paints
+           in BSI.unsafeCreate (width * height * 4) $ \out ->
+                let !n = width * height
+                    go !i
+                      | i >= n = pure ()
+                      | otherwise = do
+                          let !off = i * 4
+                              !al16 = indexPrimArray image (off + 3)
+                          if al16 == 0
+                            then do
+                              pokeByteOff out off (0 :: Word8)
+                              pokeByteOff out (off + 1) (0 :: Word8)
+                              pokeByteOff out (off + 2) (0 :: Word8)
+                              pokeByteOff out (off + 3) (0 :: Word8)
+                            else if al16 == 65535
+                              then do
+                                pokeByteOff out off (toByte16 (indexPrimArray image off))
+                                pokeByteOff out (off + 1) (toByte16 (indexPrimArray image (off + 1)))
+                                pokeByteOff out (off + 2) (toByte16 (indexPrimArray image (off + 2)))
+                                pokeByteOff out (off + 3) (255 :: Word8)
+                              else do
+                                let !invA = 255.0 / fromIntegral al16 :: Float
+                                pokeByteOff out off (clampByte (fromIntegral (indexPrimArray image off) * invA))
+                                pokeByteOff out (off + 1) (clampByte (fromIntegral (indexPrimArray image (off + 1)) * invA))
+                                pokeByteOff out (off + 2) (clampByte (fromIntegral (indexPrimArray image (off + 2)) * invA))
+                                pokeByteOff out (off + 3) (toByte16 al16)
+                          go (i + 1)
+                 in go 0
   where
-    image = runST $ do
-      -- Premultiplied RGBA in [0, 1].
+    {-# INLINE toByte #-}
+    toByte :: Float -> Word8
+    toByte x
+      | x <= 0 = 0
+      | x >= 1 = 255
+      | otherwise = fromIntegral (round (x * 255) :: Int)
+
+    {-# INLINE toByte16 #-}
+    toByte16 :: Word16 -> Word8
+    toByte16 w = fromIntegral ((fromIntegral w * (255 :: Int) + 32767) `quot` 65535)
+
+    {-# INLINE clampByte #-}
+    clampByte :: Float -> Word8
+    clampByte x
+      | x <= 0 = 0
+      | x >= 255 = 255
+      | otherwise = fromIntegral (round x :: Int)
+
+    paintColor p = case p of
+      PaintNone -> Nothing
+      PaintCurrent -> Just current
+      PaintColor col -> Just (Color (rgbaToWord32 col))
+
+    collectPaints = concatMap shapePaints (toList (documentShapes svg))
+      where
+        shapePaints (Shape segs m style) =
+          let full = view <> toTransform m
+              contours = flatten full segs
+              scaleOf = P.averageStretch full
+              opacity = styleOpacity style
+              fill = fromMaybe (if documentMonochrome svg then PaintCurrent else PaintColor black) (styleFill style)
+              fillItem = case paintColor fill of
+                Just col -> [(styleFillRule style, contours, col, opacity * styleFillOpacity style)]
+                Nothing -> []
+              strokeItem = case paintColor (fromMaybe PaintNone (styleStroke style)) of
+                Just col
+                  | styleStrokeWidth style > 0 ->
+                      let wanted = styleStrokeWidth style * scaleOf
+                          w = max 1 wanted
+                          polys = strokePolygons w (styleCap style) (styleJoin style) (styleMiterLimit style) contours
+                       in [(NonZero, polys, col, opacity * styleStrokeOpacity style * min 1 (wanted / w))]
+                _ -> []
+           in fillItem ++ strokeItem
+
+    -- Multi-paint SVG: 16-bit premultiplied RGBA accumulator (half the size
+    -- of Float with 256x 8-bit precision) plus a single scanline coverage row.
+    rasterizeMulti :: [(FillRule, Rings, Color, Float)] -> PrimArray Word16
+    rasterizeMulti paints = runST $ do
       acc <- newZeroedPrimArray (width * height * 4)
-      cov <- newZeroedPrimArray (width * height)
-      forM_ (documentShapes svg) $ \(Shape segs m style) -> do
-        let full = view <> toTransform m
-            contours = flatten full segs
-            scaleOf = P.averageStretch full
-            opacity = styleOpacity style
-            paintColor p = case p of
-              PaintNone -> Nothing
-              PaintCurrent -> Just current
-              PaintColor col -> Just (Color (rgbaToWord32 col))
-            -- An unspecified fill paints black, or the current colour in a
-            -- monochrome document, so an icon without paints tints.
-            fill = fromMaybe (if documentMonochrome svg then PaintCurrent else PaintColor black) (styleFill style)
-        forM_ (paintColor fill) $ \col -> do
-          rows <- coverPolygons width height cov (styleFillRule style) contours
-          composite width acc cov rows col (opacity * styleFillOpacity style)
-        forM_ (paintColor (fromMaybe PaintNone (styleStroke style))) $ \col ->
-          when (styleStrokeWidth style > 0) $ do
-            let wanted = styleStrokeWidth style * scaleOf
-                w = max 1 wanted
-                polys = strokePolygons w (styleCap style) (styleJoin style) (styleMiterLimit style) contours
-            rows <- coverPolygons width height cov NonZero polys
-            -- A hairline thinner than a pixel keeps its weight as opacity.
-            composite width acc cov rows col (opacity * styleStrokeOpacity style * min 1 (wanted / w))
+      cov <- newZeroedPrimArray width
+      forM_ paints $ \(rule, rings, col, alpha) ->
+        coverPolygons width height cov rule rings (compositeRow16 width acc cov col alpha)
       unsafeFreezePrimArray acc
 
--- | Coverage of the rings with at least three points, added to @cov@, which
--- must be zero: five sample rows a pixel, each span's coverage split exactly
--- across the pixels it crosses. Returns the rows covered, as the first and
--- one past the last.
---
--- Edges are counted per pixel row they start in and then written in row
--- order, so the sweep down the rows admits each row's edges as a block,
--- drops an edge past its bottom, and insertion sorts a row's few crossings
--- in a scratch array.
-coverPolygons :: Int -> Int -> MutablePrimArray s Float -> FillRule -> Rings -> ST s (Int, Int)
-coverPolygons width height cov rule rings@(Rings pts starts _) = do
-  let capacity = sizeofPrimArray pts `div` 2
-      -- Each edge that can cover a row: its first row, top, bottom, x at the
-      -- top, slope and winding.
-      {-# INLINE forEdges #-}
-      forEdges :: (Int -> Float -> Float -> Float -> Float -> Int -> ST s ()) -> ST s ()
+-- | Scan-convert @rings@ row by row into the single-row buffer @cov@ (of
+-- length @width@, initially zero), invoking @onRow r@ after each covered row
+-- @r@. @onRow@ must zero every non-zero entry it reads from @cov@.
+{-# SPECIALIZE coverPolygons :: Int -> Int -> MutablePrimArray s Float -> FillRule -> Rings -> (Int -> ST s ()) -> ST s () #-}
+{-# SPECIALIZE coverPolygons :: Int -> Int -> MutablePrimArray (PrimState IO) Float -> FillRule -> Rings -> (Int -> IO ()) -> IO () #-}
+coverPolygons :: PrimMonad m => Int -> Int -> MutablePrimArray (PrimState m) Float -> FillRule -> Rings -> (Int -> m ()) -> m ()
+coverPolygons width height cov rule rings@(Rings pts starts _) onRow = do
+  let {-# INLINE forEdges #-}
       forEdges visit =
         forM_ [0 .. ringCount rings - 1] $ \r -> do
           let from = indexPrimArray starts r
@@ -301,119 +374,134 @@ coverPolygons width height cov rule rings@(Rings pts starts _) = do
               when (ay /= by && y1 > 0 && y0 < fromIntegral height) $
                 visit (if y0 <= 0 then 0 else floor y0) y0 y1 x0 ((x1 - x0) / (y1 - y0)) (if up then 1 else -1)
   (rowStart, cursor) <- bucketOffsets height (\emit -> forEdges (\row _ _ _ _ _ -> emit row))
-  -- Four numbers an edge, in row order: top, bottom, x at the top, slope;
-  -- windings apart.
-  edges <- newPrimArray (capacity * 4)
-  windings <- newPrimArray capacity
-  forEdges $ \row y0 y1 x0 slope dir -> do
-    e <- readPrimArray cursor row
-    writePrimArray cursor row (e + 1)
-    writePrimArray edges (e * 4) y0
-    writePrimArray edges (e * 4 + 1) y1
-    writePrimArray edges (e * 4 + 2) x0
-    writePrimArray edges (e * 4 + 3) slope
-    writePrimArray windings e (dir :: Int)
   totalEdges <- readPrimArray rowStart height
-  -- Above the first row an edge starts in there is nothing to cover.
-  let firstRow !r
-        | r >= height = pure height
-        | otherwise = readPrimArray rowStart (r + 1) >>= \e -> if e > 0 then pure r else firstRow (r + 1)
-  top <- firstRow 0
-  active <- newPrimArray capacity
-  crossX <- newPrimArray capacity
-  crossDir <- newPrimArray capacity
-  let samples = 5 :: Int
-      weight = 1 / fromIntegral samples :: Float
-      inside :: Int -> Bool
-      inside = P.fillsWinding $ case rule of
-        NonZero -> P.NonZero
-        EvenOdd -> P.EvenOdd
-      add i v = readPrimArray cov i >>= \c -> writePrimArray cov i (c + v)
-      spanCover base xa0 xb0 = do
-        let xa = clamp 0 (fromIntegral width) xa0
-            xb = clamp 0 (fromIntegral width) xb0
-        when (xb > xa) $ do
-          let ia = floor xa :: Int
-              ib = min (width - 1) (floor xb)
-          if ia == ib
-            then add (base + ia) ((xb - xa) * weight)
-            else do
-              add (base + ia) ((fromIntegral (ia + 1) - xa) * weight)
-              forM_ [ia + 1 .. ib - 1] $ \i -> add (base + i) weight
-              when (ib < width) $ add (base + ib) ((xb - fromIntegral ib) * weight)
-      admit !e !stop !n
-        | e >= stop = pure n
-        | otherwise = writePrimArray active n e >> admit (e + 1) stop (n + 1)
-      insertCrossing !j !x !d
-        | j > 0 = do
-            xj <- readPrimArray crossX (j - 1)
-            if xj > x
-              then do
-                writePrimArray crossX j xj
-                readPrimArray crossDir (j - 1) >>= writePrimArray crossDir j
-                insertCrossing (j - 1) x d
-              else writePrimArray crossX j x >> writePrimArray crossDir j (d :: Int)
-        | otherwise = writePrimArray crossX 0 x >> writePrimArray crossDir 0 d
-      walk !base !crossings !k !w
-        | k + 1 >= crossings = pure ()
-        | otherwise = do
-            d <- readPrimArray crossDir k
-            let w' = w + d
-            when (inside w') $ do
-              xa <- readPrimArray crossX k
-              xb <- readPrimArray crossX (k + 1)
-              spanCover base xa xb
-            walk base crossings (k + 1) w'
-      -- One sample row: drop edges above it, collect the crossings of the
-      -- rest, then cover the spans inside the fill.
-      sample !r !si !n !a !kept !crossings
-        | a < n = do
-            e <- readPrimArray active a
-            let sy = fromIntegral r + (fromIntegral si + 0.5) * weight
-            y1 <- readPrimArray edges (e * 4 + 1)
-            if y1 <= sy
-              then sample r si n (a + 1) kept crossings
+  when (totalEdges > 0) $ do
+    edges <- newPrimArray (totalEdges * 4)
+    windings <- newPrimArray totalEdges
+    forEdges $ \row y0 y1 x0 slope dir -> do
+      e <- readPrimArray cursor row
+      writePrimArray cursor row (e + 1)
+      writePrimArray edges (e * 4) y0
+      writePrimArray edges (e * 4 + 1) y1
+      writePrimArray edges (e * 4 + 2) x0
+      writePrimArray edges (e * 4 + 3) slope
+      writePrimArray windings e (dir :: Int)
+    let firstRow !r
+          | r >= height = pure height
+          | otherwise = readPrimArray rowStart (r + 1) >>= \e -> if e > 0 then pure r else firstRow (r + 1)
+    top <- firstRow 0
+    active <- newPrimArray totalEdges
+    crossX <- newPrimArray totalEdges
+    crossDir <- newPrimArray totalEdges
+    let samples = 5 :: Int
+        weight = 1 / fromIntegral samples :: Float
+        inside :: Int -> Bool
+        inside = P.fillsWinding $ case rule of
+          NonZero -> P.NonZero
+          EvenOdd -> P.EvenOdd
+        add !i !v = readPrimArray cov i >>= \c -> writePrimArray cov i (c + v)
+        spanCover !xa0 !xb0 = do
+          let !xa = clamp 0 (fromIntegral width) xa0
+              !xb = clamp 0 (fromIntegral width) xb0
+          when (xb > xa) $ do
+            let !ia = floor xa :: Int
+                !ib = min (width - 1) (floor xb)
+            if ia == ib
+              then add ia ((xb - xa) * weight)
               else do
-                writePrimArray active kept e
-                y0 <- readPrimArray edges (e * 4)
-                if sy < y0
-                  then sample r si n (a + 1) (kept + 1) crossings
-                  else do
-                    x0 <- readPrimArray edges (e * 4 + 2)
-                    slope <- readPrimArray edges (e * 4 + 3)
-                    d <- readPrimArray windings e
-                    insertCrossing crossings (x0 + (sy - y0) * slope) d
-                    sample r si n (a + 1) (kept + 1) (crossings + 1)
-        | otherwise = do
-            walk (r * width) crossings 0 0
-            if si + 1 < samples
-              then sample r (si + 1) kept 0 0 0
-              else rows (r + 1) kept
-      rows !r !n
-        | r >= height = pure (top, height)
-        | otherwise = do
-            from <- readPrimArray rowStart r
-            to <- readPrimArray rowStart (r + 1)
-            -- Past the last edge's bottom nothing is left to cover.
-            if n == 0 && from >= totalEdges
-              then pure (top, r)
-              else admit from to n >>= \n' -> sample r 0 n' 0 0 0
-  rows top 0
+                add ia ((fromIntegral (ia + 1) - xa) * weight)
+                let fillSpan !i
+                      | i >= ib = pure ()
+                      | otherwise = add i weight >> fillSpan (i + 1)
+                fillSpan (ia + 1)
+                when (ib < width) $ add ib ((xb - fromIntegral ib) * weight)
+        admit !e !stop !n
+          | e >= stop = pure n
+          | otherwise = writePrimArray active n e >> admit (e + 1) stop (n + 1)
+        insertCrossing !j !x !d
+          | j > 0 = do
+              xj <- readPrimArray crossX (j - 1)
+              if xj > x
+                then do
+                  writePrimArray crossX j xj
+                  readPrimArray crossDir (j - 1) >>= writePrimArray crossDir j
+                  insertCrossing (j - 1) x d
+                else writePrimArray crossX j x >> writePrimArray crossDir j (d :: Int)
+          | otherwise = writePrimArray crossX 0 x >> writePrimArray crossDir 0 d
+        walk !crossings !k !w
+          | k + 1 >= crossings = pure ()
+          | otherwise = do
+              d <- readPrimArray crossDir k
+              let !w' = w + d
+              when (inside w') $ do
+                xa <- readPrimArray crossX k
+                xb <- readPrimArray crossX (k + 1)
+                spanCover xa xb
+              walk crossings (k + 1) w'
+        sample !r !si !n !a !kept !crossings
+          | a < n = do
+              e <- readPrimArray active a
+              let !sy = fromIntegral r + (fromIntegral si + 0.5) * weight
+              y1 <- readPrimArray edges (e * 4 + 1)
+              if y1 <= sy
+                then sample r si n (a + 1) kept crossings
+                else do
+                  writePrimArray active kept e
+                  y0 <- readPrimArray edges (e * 4)
+                  if sy < y0
+                    then sample r si n (a + 1) (kept + 1) crossings
+                    else do
+                      x0 <- readPrimArray edges (e * 4 + 2)
+                      slope <- readPrimArray edges (e * 4 + 3)
+                      d <- readPrimArray windings e
+                      insertCrossing crossings (x0 + (sy - y0) * slope) d
+                      sample r si n (a + 1) (kept + 1) (crossings + 1)
+          | otherwise = do
+              walk crossings 0 0
+              if si + 1 < samples
+                then sample r (si + 1) kept 0 0 0
+                else onRow r >> rows (r + 1) kept
+        rows !r !n
+          | r >= height = pure ()
+          | otherwise = do
+              from <- readPrimArray rowStart r
+              to <- readPrimArray rowStart (r + 1)
+              if n == 0 && from >= totalEdges
+                then pure ()
+                else admit from to n >>= \n' -> sample r 0 n' 0 0 0
+    rows top 0
 
--- | Draw @col@ at @alpha@ through the coverage of rows @top@ to @end@ over
--- the accumulated image, zeroing that coverage for the next shape.
-composite :: Int -> MutablePrimArray s Float -> MutablePrimArray s Float -> (Int, Int) -> Color -> Float -> ST s ()
-composite width acc cov (top, end) col alpha =
-  forM_ [top * width .. end * width - 1] $ \i -> do
-    c <- readPrimArray cov i
-    writePrimArray cov i 0
-    when (c > 0) $ do
-      let sa = min 1 c * alpha * fromIntegral (colorA col) / 255
-          blend k src = do
-            dst <- readPrimArray acc (i * 4 + k)
-            writePrimArray acc (i * 4 + k) (src * sa + dst * (1 - sa))
-      blend 0 (fromIntegral (colorR col) / 255)
-      blend 1 (fromIntegral (colorG col) / 255)
-      blend 2 (fromIntegral (colorB col) / 255)
-      dstA <- readPrimArray acc (i * 4 + 3)
-      writePrimArray acc (i * 4 + 3) (sa + dstA * (1 - sa))
+-- | Composite one row @r@ from the single-row coverage buffer @cov@ into the
+-- 16-bit premultiplied RGBA accumulator @acc@, zeroing @cov@ as it goes.
+compositeRow16 :: Int -> MutablePrimArray s Word16 -> MutablePrimArray s Float -> Color -> Float -> Int -> ST s ()
+compositeRow16 width acc cov col alpha !row = go 0
+  where
+    !rowBase = row * width * 4
+    !sr = fromIntegral (colorR col) * (65535.0 / 255.0) :: Float
+    !sg = fromIntegral (colorG col) * (65535.0 / 255.0) :: Float
+    !sb = fromIntegral (colorB col) * (65535.0 / 255.0) :: Float
+    !aScale = alpha * fromIntegral (colorA col) / 255.0 :: Float
+    {-# INLINE toW16 #-}
+    toW16 :: Float -> Word16
+    toW16 x
+      | x <= 0 = 0
+      | x >= 65535 = 65535
+      | otherwise = fromIntegral (round x :: Int)
+    go !x
+      | x >= width = pure ()
+      | otherwise = do
+          c <- readPrimArray cov x
+          when (c > 0) $ do
+            writePrimArray cov x 0
+            let !sa = min 1 c * aScale
+                !invSa = 1 - sa
+                !off = rowBase + x * 4
+            dr <- readPrimArray acc off
+            dg <- readPrimArray acc (off + 1)
+            db <- readPrimArray acc (off + 2)
+            da <- readPrimArray acc (off + 3)
+            writePrimArray acc off (toW16 (sr * sa + fromIntegral dr * invSa))
+            writePrimArray acc (off + 1) (toW16 (sg * sa + fromIntegral dg * invSa))
+            writePrimArray acc (off + 2) (toW16 (sb * sa + fromIntegral db * invSa))
+            writePrimArray acc (off + 3) (toW16 (65535.0 * sa + fromIntegral da * invSa))
+          go (x + 1)

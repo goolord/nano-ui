@@ -15,6 +15,7 @@ module NanoUI.Internal.Id
   , mix64
   , mixFnv
   , scopeTag
+  , keyedTag
   , enterScope
   , enterKeyed
   )
@@ -76,6 +77,7 @@ idContextWidgetId (IdContext cid sid _) =
 scopeTag :: Word64
 scopeTag = 0x9E3779B185EBCA87
 
+-- | Hash salt distinguishing a keyed child scope from a positional scope.
 keyedTag :: Word64
 keyedTag = 0xC2B2AE3D27D4EB4F
 

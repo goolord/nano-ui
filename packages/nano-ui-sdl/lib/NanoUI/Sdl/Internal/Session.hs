@@ -27,9 +27,9 @@ import NanoUI.Sdl.Internal.Window
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
 import SDL3.Sys.Render (setRenderDrawBlendModeSafe, setRenderVSyncSafe)
 
--- | Draws a frame and answers whether another is needed; its flag forces a
--- full repaint.
-type DrawFn = Context -> SdlEnv -> Input -> Bool -> IO Bool
+-- | Draws a frame and answers whether another is needed; its flags force a
+-- full repaint and request a pre-present settle pass (for live resize).
+type DrawFn = Context -> SdlEnv -> Input -> Bool -> Bool -> IO Bool
 
 -- | What the session's loop driver, its opening frames and its resize watch
 -- share: the window and the state each leaves for the others.
@@ -154,7 +154,7 @@ openingFrames s ctx0 = do
   where
     startupFrame c inp = do
       writeIORef (sWake s) False
-      void (sDraw s c (sEnv s) inp True)
+      void (sDraw s c (sEnv s) inp True False)
     settleScaled c inp = do
       (c', inp') <- settle s c inp
       scale <- readIORef (sdlScaleRef (sEnv s))
@@ -206,8 +206,10 @@ pacedWait s = do
     env = sEnv s
 
 -- | Turn vsync off while the resize watch draws, and on again for the
--- loop's frames. The watch presents with vsync off: Windows' modal size loop
--- cannot take the next drag step while a present waits for vblank.
+-- loop's frames. The watch presents with vsync off so Windows' modal size
+-- loop does not wait for vblank on each drag step (on OpenGL this is a
+-- sub-millisecond swap-interval flip; on Vulkan GPU it avoids blocking
+-- swapchain recreation on FIFO vblank).
 pauseVsync :: Session -> Bool -> IO ()
 pauseVsync s paused =
   when (sdlVsync env) $ whenM ((/= paused) <$> readIORef (sVsyncPaused s)) $ do
@@ -235,9 +237,9 @@ resizeFrame s = do
     writeIORef (sWatchDrawnAt s) now
     -- At most the 50 ms the loop ticks a frame by.
     let dt = if t > 0 then min 0.05 (realToFrac (now - t)) else inputDeltaTime inpSynced
-    _ <- sDraw s ctx' env inpSynced {inputDeltaTime = dt} True
-    -- Its present ran with vsync off on purpose: it says nothing of
-    -- whether the driver honours vsync.
+    _ <- sDraw s ctx' env inpSynced {inputDeltaTime = dt} True True
+    -- Its present ran outside normal frame pacing: it says nothing of whether
+    -- the driver honours vsync during steady animation.
     restartPresentProbe env
     writeIORef (sResizePresented s) (Just (inputWindowSize inpSynced))
   where
@@ -272,10 +274,11 @@ sessionDriver s =
         presented <- readIORef (sResizePresented s)
         writeIORef (sResizePresented s) Nothing
         wakeDue <- readIORef (sWake s)
-        let !(prevInp', inpSynced') = case presented of
+        let keepExpose = sdlHasGpu env
+            !(prevInp', inpSynced') = case presented of
               Just size
                 | size == inputWindowSize inpSynced ->
-                    (prevInp {inputWindowSize = size}, inpSynced {inputWindowRedraw = False})
+                    (prevInp {inputWindowSize = size}, if keepExpose then inpSynced else inpSynced {inputWindowRedraw = False})
               _ -> (prevInp, inpSynced)
         shouldRedrawFrame c prevInp' inpSynced' wasAnim (sdlContinuous env) (refreshDue || wakeDue)
     , sdDraw          = \c inpSynced forceFull -> do
@@ -288,8 +291,8 @@ sessionDriver s =
             then do
               now <- getMonotonicTime
               writeIORef (sWatchDrawnAt s) 0
-              sDraw s c env inpSynced {inputDeltaTime = min (inputDeltaTime inpSynced) (realToFrac (now - t))} forceFull
-            else sDraw s c env inpSynced forceFull
+              sDraw s c env inpSynced {inputDeltaTime = min (inputDeltaTime inpSynced) (realToFrac (now - t))} forceFull False
+            else sDraw s c env inpSynced forceFull False
         -- A frame the lock turned away leaves its wake's event off
         -- the queue: queue it again for the pass after the lock is
         -- free.

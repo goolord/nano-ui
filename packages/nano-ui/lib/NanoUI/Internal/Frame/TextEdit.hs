@@ -151,19 +151,23 @@ textEditMenuKey = "nano-ui text edit menu"
 -- ('reachedWidgetAt'), when it is one. Excludes a field covered there by a
 -- stack or pinned node and one whose inner control has the pointer.
 textFieldWidgetAtMouse :: Context -> V2 -> IO (Maybe WidgetId)
-textFieldWidgetAtMouse ctx@Context {ctxNodeArena = na} mouse =
-  reachedWidgetAt ctx mouse >>= \case
-    Nothing -> pure Nothing
-    Just idx -> do
-      nt <- getNodeType na idx
-      wid <- getWidgetId na idx
-      ifM
-        ( pure (nt == NodeTextInput || nt == NodeTextArea)
-            <&&> (not <$> isDisabled ctx wid)
-            <&&> (if nt == NodeTextArea then not <$> isMouseOnTextAreaScrollBarAt ctx idx mouse else pure True)
-        )
-        (pure (Just wid))
-        (pure Nothing)
+textFieldWidgetAtMouse ctx@Context {ctxNodeArena = na} mouse = do
+  tfCount <- textFieldNodeCount na
+  if tfCount <= 0
+    then pure Nothing
+    else
+      reachedWidgetAt ctx mouse >>= \case
+        Nothing -> pure Nothing
+        Just idx -> do
+          nt <- getNodeType na idx
+          wid <- getWidgetId na idx
+          ifM
+            ( pure (nt == NodeTextInput || nt == NodeTextArea)
+                <&&> (not <$> isDisabled ctx wid)
+                <&&> (if nt == NodeTextArea then not <$> isMouseOnTextAreaScrollBarAt ctx idx mouse else pure True)
+            )
+            (pure (Just wid))
+            (pure Nothing)
 
 -- | A press of any button anywhere but on the menu's popup, where the user
 -- saw it ('textInputMenuRect'), closes it.

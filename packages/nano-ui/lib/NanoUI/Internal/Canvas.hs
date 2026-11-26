@@ -43,11 +43,21 @@ module NanoUI.Internal.Canvas
   ) where
 
 import Control.Monad (when)
-import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.Reader qualified as Reader
-import Control.Monad.Trans.State.Strict qualified as State
+import Control.Monad.ST (ST, runST)
 import Data.Maybe (fromMaybe)
-import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
+import Data.Primitive.PrimVar (PrimVar, newPrimVar, readPrimVar, writePrimVar)
+import Data.Primitive.SmallArray
+  ( SmallArray
+  , SmallMutableArray
+  , copySmallMutableArray
+  , emptySmallArray
+  , getSizeofSmallMutableArray
+  , newSmallArray
+  , shrinkSmallMutableArray
+  , unsafeFreezeSmallArray
+  , writeSmallArray
+  )
+import Data.STRef (STRef, newSTRef, readSTRef, writeSTRef)
 import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Internal.Context.Types (CustomDrawContext (..))
@@ -58,9 +68,37 @@ import NanoUI.Internal.Path (FillRule (..), Paint (..), Path, Stroke, Transform,
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Style (..), TextEllipsis (..), Theme (..), alignXFraction)
 import NanoUI.Internal.Types (Color, ImageId, Rect (..), V2 (..))
 
--- | A drawing block that collects draw ops. Run it with 'runCanvasFor'.
-newtype CanvasM a = CanvasM (Reader.ReaderT CanvasEnv (State.State ([DrawOp] -> [DrawOp])) a)
-  deriving (Functor, Applicative, Monad)
+-- | Growable op buffer written directly during 'runCanvasScaled' without
+-- intermediate lists or difference-list closures.
+data CanvasBuf s
+  = CanvasBuf
+      {-# UNPACK #-} !(STRef s (SmallMutableArray s DrawOp))
+      {-# UNPACK #-} !(PrimVar s Int)
+
+-- | A drawing block that appends draw ops directly into a growable array.
+-- Run it with 'runCanvasFor'.
+newtype CanvasM a = CanvasM (forall s. CanvasEnv -> CanvasBuf s -> ST s a)
+
+instance Functor CanvasM where
+  {-# INLINE fmap #-}
+  fmap f (CanvasM m) = CanvasM $ \env buf -> f <$> m env buf
+
+instance Applicative CanvasM where
+  {-# INLINE pure #-}
+  pure a = CanvasM $ \_ _ -> pure a
+  {-# INLINE (<*>) #-}
+  CanvasM mf <*> CanvasM ma = CanvasM $ \env buf -> mf env buf <*> ma env buf
+  {-# INLINE (*>) #-}
+  CanvasM ma *> CanvasM mb = CanvasM $ \env buf -> ma env buf *> mb env buf
+  {-# INLINE (<*) #-}
+  CanvasM ma <* CanvasM mb = CanvasM $ \env buf -> ma env buf <* mb env buf
+
+instance Monad CanvasM where
+  {-# INLINE (>>=) #-}
+  CanvasM ma >>= f = CanvasM $ \env buf -> do
+    a <- ma env buf
+    case f a of
+      CanvasM mb -> mb env buf
 
 -- | The environment of a canvas block: the current 'withTransform'
 -- transform, the curve flattening tolerance in logical pixels, and the
@@ -85,29 +123,62 @@ runCanvasFor cdc = runCanvasScaled cdc (fmSnapScale (cdcFont cdc))
 -- pixel).
 {-# INLINE runCanvasScaled #-}
 runCanvasScaled :: CustomDrawContext -> Float -> CanvasM a -> SmallArray DrawOp
-runCanvasScaled cdc scale (CanvasM m) =
-  smallArrayFromList (State.execState (Reader.runReaderT m (CanvasEnv Nothing (curveTolerance scale) cdc)) id [])
+runCanvasScaled cdc scale (CanvasM m) = runST $ do
+  arr0 <- newSmallArray 16 PopClip
+  arrRef <- newSTRef arr0
+  lenVar <- newPrimVar 0
+  _ <- m (CanvasEnv Nothing (curveTolerance scale) cdc) (CanvasBuf arrRef lenVar)
+  n <- readPrimVar lenVar
+  if n <= 0
+    then pure emptySmallArray
+    else do
+      arr <- readSTRef arrRef
+      cap <- getSizeofSmallMutableArray arr
+      when (n < cap) (shrinkSmallMutableArray arr n)
+      unsafeFreezeSmallArray arr
+
+{-# NOINLINE growCanvasBuf #-}
+growCanvasBuf :: STRef s (SmallMutableArray s DrawOp) -> Int -> ST s (SmallMutableArray s DrawOp)
+growCanvasBuf ref needed = do
+  arr <- readSTRef ref
+  cap <- getSizeofSmallMutableArray arr
+  let !newCap = max needed (cap * 2)
+  grown <- newSmallArray newCap PopClip
+  copySmallMutableArray grown 0 arr 0 cap
+  writeSTRef ref grown
+  pure grown
+
+{-# INLINE pushRawOp #-}
+pushRawOp :: CanvasBuf s -> DrawOp -> ST s ()
+pushRawOp (CanvasBuf arrRef lenVar) !op = do
+  n <- readPrimVar lenVar
+  arr0 <- readSTRef arrRef
+  cap <- getSizeofSmallMutableArray arr0
+  arr <- if n < cap then pure arr0 else growCanvasBuf arrRef (n + 1)
+  writeSmallArray arr n op
+  writePrimVar lenVar (n + 1)
 
 -- | Emit an op, applying the block's transform.
 {-# INLINE emitOp #-}
 emitOp :: DrawOp -> CanvasM ()
-emitOp op = CanvasM $ do
-  env <- Reader.ask
-  lift $ case ceTransform env of
-    Nothing -> State.modify (. (op :))
-    Just t -> emitOps (transformOp (ceTolerance env) t op)
+emitOp op = CanvasM $ \env buf ->
+  case ceTransform env of
+    Nothing -> pushRawOp buf op
+    Just t -> pushList buf (transformOp (ceTolerance env) t op)
 
-{-# INLINE emitOps #-}
-emitOps :: [DrawOp] -> State.State ([DrawOp] -> [DrawOp]) ()
-emitOps ops = State.modify (. (ops ++))
+{-# INLINE pushList #-}
+pushList :: CanvasBuf s -> [DrawOp] -> ST s ()
+pushList buf = go
+  where
+    go [] = pure ()
+    go (y : ys) = pushRawOp buf y >> go ys
 
 -- | Emit ops built from the block's transform (identity if none) and curve
 -- tolerance.
 {-# INLINE emitWith #-}
 emitWith :: (Transform -> Float -> [DrawOp]) -> CanvasM ()
-emitWith build = CanvasM $ do
-  env <- Reader.ask
-  lift (emitOps (build (fromMaybe mempty (ceTransform env)) (ceTolerance env)))
+emitWith build = CanvasM $ \env buf ->
+  pushList buf (build (fromMaybe mempty (ceTransform env)) (ceTolerance env))
 
 -- | The draw context of the widget being drawn: hover, press and focus
 -- state, theme, and text font.
@@ -117,37 +188,44 @@ emitWith build = CanvasM $ do
 -- >   drawRoundedRect r 6 (if cdcHovered cdc then themeAccent (cdcTheme cdc) else themeMuted (cdcTheme cdc))
 {-# INLINE drawContext #-}
 drawContext :: CanvasM CustomDrawContext
-drawContext = CanvasM (Reader.asks ceContext)
+drawContext = CanvasM $ \env _ -> pure (ceContext env)
 
 -- | Fill a solid rectangle.
+{-# INLINE drawRect #-}
 drawRect :: Rect -> Color -> CanvasM ()
 drawRect r c = emitOp (FillRect r c)
 
 -- | Fill a rounded rectangle with given corner radius.
+{-# INLINE drawRoundedRect #-}
 drawRoundedRect :: Rect -> Float -> Color -> CanvasM ()
 drawRoundedRect r radius c = emitOp (FillRoundedRect r radius c)
 
 -- | Fill a solid circle at center with given radius.
+{-# INLINE drawCircle #-}
 drawCircle :: V2 -> Float -> Color -> CanvasM ()
 drawCircle (V2 cx cy) radius c = emitOp (FillCircle cx cy radius c)
 
 -- | A straight line of the given thickness. It is not anti-aliased, so
 -- slanted lines look jagged; 'drawStrokeAA' draws them smooth.
+{-# INLINE drawStroke #-}
 drawStroke :: V2 -> V2 -> Float -> Color -> CanvasM ()
 drawStroke (V2 x0 y0) (V2 x1 y1) thickness c = emitOp (Stroke x0 y0 x1 y1 thickness c)
 
 -- | Stroke a rounded rectangle's border with the given corner radius and
 -- width. The border lies inside the rectangle, unlike 'drawStrokePath',
 -- which centres the stroke on the path.
+{-# INLINE drawStrokeRoundedRect #-}
 drawStrokeRoundedRect :: Rect -> Float -> Float -> Color -> CanvasM ()
 drawStrokeRoundedRect r radius thickness c = emitOp (StrokeRoundedRect r radius thickness c)
 
 -- | Stroke a circle's outline with the given width. Like
 -- 'drawStrokeRoundedRect', the outline lies inside the circle.
+{-# INLINE drawStrokeCircle #-}
 drawStrokeCircle :: V2 -> Float -> Float -> Color -> CanvasM ()
 drawStrokeCircle (V2 cx cy) radius thickness c = emitOp (StrokeCircle cx cy radius thickness c)
 
 -- | An anti-aliased straight line of the given thickness, with square ends.
+{-# INLINE drawStrokeAA #-}
 drawStrokeAA :: V2 -> V2 -> Float -> Color -> CanvasM ()
 drawStrokeAA (V2 x0 y0) (V2 x1 y1) thickness c = emitOp (StrokeLineAA x0 y0 x1 y1 thickness c)
 
@@ -155,23 +233,28 @@ drawStrokeAA (V2 x0 y0) (V2 x1 y1) thickness c = emitOp (StrokeLineAA x0 y0 x1 y
 -- bottom-left), blended over two triangles split from the top-left corner.
 -- For a gradient along any line or over a path, use 'drawPathWith' with a
 -- 'NanoUI.Path.Linear' paint.
+{-# INLINE drawQuadGradient #-}
 drawQuadGradient :: Rect -> Color -> Color -> Color -> Color -> CanvasM ()
 drawQuadGradient r tl tr br bl = emitOp (FillQuadGradient r tl tr br bl)
 
 -- | Horizontal 2-color linear gradient fill (left to right).
+{-# INLINE drawLinearGradientH #-}
 drawLinearGradientH :: Rect -> Color -> Color -> CanvasM ()
 drawLinearGradientH r leftCol rightCol = emitOp (FillQuadGradient r leftCol rightCol rightCol leftCol)
 
 -- | Vertical 2-color linear gradient fill (top to bottom).
+{-# INLINE drawLinearGradientV #-}
 drawLinearGradientV :: Rect -> Color -> Color -> CanvasM ()
 drawLinearGradientV r topCol botCol = emitOp (FillQuadGradient r topCol topCol botCol botCol)
 
 -- | Draw an image stretched over a rectangle, tinted. See 'drawImageWith'.
+{-# INLINE drawImage #-}
 drawImage :: Rect -> ImageId -> Color -> CanvasM ()
 drawImage r iid c = drawImageWith (imageDraw r iid) {imageTint = c}
 
 -- | Draw the region of an image from UV @(u0, v0)@ to @(u1, v1)@. See
 -- 'drawImageWith'.
+{-# INLINE drawImageUV #-}
 drawImageUV :: Rect -> ImageId -> Float -> Float -> Float -> Float -> Color -> CanvasM ()
 drawImageUV r iid u0 v0 u1 v1 c = drawImageWith (imageDraw r iid) {imageUV = Rect u0 v0 (u1 - u0) (v1 - v0), imageTint = c}
 
@@ -180,12 +263,14 @@ drawImageUV r iid u0 v0 u1 v1 c = drawImageWith (imageDraw r iid) {imageUV = Rec
 -- canvas is clipped, and a fully transparent image draws nothing:
 --
 -- > drawImageWith (imageDraw r photo) {imageAngle = pi / 8, imageOpacity = 0.6}
+{-# INLINE drawImageWith #-}
 drawImageWith :: ImageDraw -> CanvasM ()
 drawImageWith = mapM_ emitOp . imageDrawOp
 
 -- | Draw text in the context's font, anchored to a point by alignment:
 -- 'AlignStart' puts the point at the text's left edge, 'AlignTop' at the
 -- line's top, and 'AlignBaseline' on the baseline.
+{-# INLINE drawText #-}
 drawText :: V2 -> AlignX -> AlignY -> Text -> Color -> CanvasM ()
 drawText (V2 x y) alignX alignY txt col = emitOp (DrawText x y (alignXFraction alignX) (alignYFrac alignY) txt col)
 
@@ -196,6 +281,7 @@ drawText (V2 x y) alignX alignY txt col = emitOp (DrawText x y (alignXFraction a
 --
 -- Under a transform the point moves and the font scales by the square root
 -- of the transform's area scale. Glyphs do not rotate.
+{-# INLINE drawTextWith #-}
 drawTextWith :: TextFont -> V2 -> AlignX -> AlignY -> Text -> Color -> CanvasM ()
 drawTextWith font (V2 x y) alignX alignY txt col = emitOp (DrawTextAligned x y (alignXFraction alignX) (alignYFrac alignY) 1 font txt col)
 
@@ -284,7 +370,7 @@ drawStrokePathWith st path paint = emitWith (\t tol -> strokePathOps tol t st pa
 -- * A clip ('withClip') becomes the bounding box of its transformed rect.
 withTransform :: Transform -> CanvasM a -> CanvasM a
 withTransform t (CanvasM m) =
-  CanvasM (Reader.local (\env -> env {ceTransform = Just (maybe t (<> t) (ceTransform env))}) m)
+  CanvasM $ \env -> m (env {ceTransform = Just (maybe t (<> t) (ceTransform env))})
 
 -- | Draw a block clipped to a rect, intersected with the current clip
 -- (which is at most the widget's rect).

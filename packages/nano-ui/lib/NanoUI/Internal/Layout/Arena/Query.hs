@@ -30,6 +30,7 @@ module NanoUI.Internal.Layout.Arena.Query
 import Control.Monad (when)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Primitive.PrimArray (readPrimArray)
+import Data.Primitive.PrimVar (readPrimVar)
 import NanoUI.Internal.Layout.Arena.Types
 import NanoUI.Internal.Style (AlignX (..), Flow (..))
 
@@ -124,23 +125,47 @@ flowChildEnds na parentIdx = do
 {-# INLINE forChildrenInPaintOrder_ #-}
 forChildrenInPaintOrder_ :: NodeArena -> NodeIdx -> (NodeIdx -> IO ()) -> IO ()
 forChildrenInPaintOrder_ na parentIdx f = do
-  flow <- getFlow na parentIdx
-  pinnedBelow <- hasPinnedBelow na parentIdx
-  fc <- getFirstChild na parentIdx
-  -- Sibling links run last to first, so recursing before visiting yields
-  -- declaration order.
-  let inOrderIf pinned !ci = when (ci >= 0) $ do
-        getNextSibling na ci >>= inOrderIf pinned
-        isPinnedNode na ci >>= \p -> when (p == pinned) (f ci)
-      pinnedLast !ci = when (ci >= 0) $ do
-        ns <- getNextSibling na ci
-        pinned <- isPinnedNode na ci
-        if pinned then pinnedLast ns >> f ci else f ci >> pinnedLast ns
+  a <- arenaArrays na
+  flow <- readTagEnum a parentIdx TagFlow
+  pinnedBelow <- readTagEnum a parentIdx TagPinnedBelow
+  fc <- readTree a parentIdx TreeFirstChild
   case flow of
-    Layered -> inOrderIf False fc >> when pinnedBelow (inOrderIf True fc)
+    Layered -> visitChildrenLayered a pinnedBelow fc f
     _
-      | pinnedBelow -> pinnedLast fc
-      | otherwise -> forChildNodes_ na parentIdx f
+      | pinnedBelow -> visitChildrenPinnedLast a fc f
+      | otherwise ->
+          let go !ci
+                | ci < 0 = pure ()
+                | otherwise = do
+                    f ci
+                    ns <- readTree a ci TreeNextSibling
+                    go ns
+           in go fc
+
+-- | Paint-order visit for a 'Layered' container (declaration order, pinned
+-- children last). Kept out of line so the common non-layered path allocates
+-- no closures for it.
+{-# NOINLINE visitChildrenLayered #-}
+visitChildrenLayered :: NodeArenaArrays -> Bool -> NodeIdx -> (NodeIdx -> IO ()) -> IO ()
+visitChildrenLayered a pinnedBelow fc f = do
+  inOrderIf False fc
+  when pinnedBelow (inOrderIf True fc)
+  where
+    inOrderIf !pinned !ci = when (ci >= 0) $ do
+      readTree a ci TreeNextSibling >>= inOrderIf pinned
+      p <- readTagEnum a ci TagPinned
+      when (p == pinned) (f ci)
+
+-- | Paint-order visit for a non-layered container that has pinned descendants:
+-- flow children last-to-first, pinned children in declaration order on top.
+{-# NOINLINE visitChildrenPinnedLast #-}
+visitChildrenPinnedLast :: NodeArenaArrays -> NodeIdx -> (NodeIdx -> IO ()) -> IO ()
+visitChildrenPinnedLast a fc f = go fc
+  where
+    go !ci = when (ci >= 0) $ do
+      ns <- readTree a ci TreeNextSibling
+      pinned <- readTagEnum a ci TagPinned
+      if pinned then go ns >> f ci else f ci >> go ns
 
 -- | The first 'Just' that @f@ returns over @parentIdx@'s non-floating children
 -- in topmost-first order (the reverse of 'forChildrenInPaintOrder_').
@@ -250,7 +275,7 @@ classNodes :: NodeArena -> NodeClass -> IO (Int, Int -> IO NodeIdx)
 classNodes na c = do
   let ci = fromEnum c
   arr <- naArrClassNodes <$> arenaArrays na
-  cap <- readIORef (naCapacity na)
+  cap <- readPrimVar (naCapacity na)
   k <- readPrimArray (naClassCounts na) ci
   -- Forced here: a lazy offset would be a thunk and a box on every walk.
   let !base = ci * cap

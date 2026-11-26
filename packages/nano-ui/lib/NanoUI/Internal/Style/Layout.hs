@@ -129,6 +129,7 @@ import Data.Proxy (Proxy (..))
 import Data.Word (Word8)
 import GHC.Enum (boundedEnumFrom, boundedEnumFromThen, predError, succError, toEnumError)
 import GHC.TypeLits (KnownNat, Nat, natVal)
+import NanoUI.Internal.Equality (ptrEq)
 import NanoUI.Internal.Types (Color (..), V2 (..), noLimit)
 
 -- | Size along one axis. Fixed sizes use logical pixels; grow/shrink values
@@ -341,22 +342,42 @@ defaultLayout =
     }
 
 -- | Copy typography attributes from @src@ onto @dst@, keeping @dst@'s box
--- geometry (sizing, padding, gap, alignment, flow).
+-- geometry (sizing, padding, gap, alignment, flow). Keeps the common
+-- pointer-equal fast path tiny for inlining and avoids copying @dst@ when
+-- typography already matches.
 {-# INLINE inheritFont #-}
 inheritFont :: Layout -> Layout -> Layout
-inheritFont src dst =
-  dst
-    { layoutFontVariant = layoutFontVariant src
-    , layoutFontSize = layoutFontSize src
-    , layoutFontColor = layoutFontColor src
-    , layoutFontTone = layoutFontTone src
-    , layoutFontWeight = layoutFontWeight src
-    , layoutFontStyle = layoutFontStyle src
-    , layoutTextDecoration = layoutTextDecoration src
-    , layoutFontTabular = layoutFontTabular src
-    , layoutEllipsis = layoutEllipsis src
-    , layoutSingleLine = layoutSingleLine src
-    }
+inheritFont src dst
+  | ptrEq src dst = dst
+  | otherwise = inheritFontSlow src dst
+
+{-# NOINLINE inheritFontSlow #-}
+inheritFontSlow :: Layout -> Layout -> Layout
+inheritFontSlow src dst
+  | layoutFontVariant src == layoutFontVariant dst
+      && layoutFontSize src == layoutFontSize dst
+      && layoutFontColor src == layoutFontColor dst
+      && layoutFontTone src == layoutFontTone dst
+      && layoutFontWeight src == layoutFontWeight dst
+      && layoutFontStyle src == layoutFontStyle dst
+      && layoutTextDecoration src == layoutTextDecoration dst
+      && layoutFontTabular src == layoutFontTabular dst
+      && layoutEllipsis src == layoutEllipsis dst
+      && layoutSingleLine src == layoutSingleLine dst =
+      dst
+  | otherwise =
+      dst
+        { layoutFontVariant = layoutFontVariant src
+        , layoutFontSize = layoutFontSize src
+        , layoutFontColor = layoutFontColor src
+        , layoutFontTone = layoutFontTone src
+        , layoutFontWeight = layoutFontWeight src
+        , layoutFontStyle = layoutFontStyle src
+        , layoutTextDecoration = layoutTextDecoration src
+        , layoutFontTabular = layoutFontTabular src
+        , layoutEllipsis = layoutEllipsis src
+        , layoutSingleLine = layoutSingleLine src
+        }
 
 -- | Set all four padding edges in logical pixels.
 {-# INLINE padAll #-}

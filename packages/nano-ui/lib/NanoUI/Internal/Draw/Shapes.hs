@@ -154,9 +154,10 @@ cornerCosSin q seg =
 
 -- | Poke one coverage-AA strip with unit normal @(nx, ny)@ into a reservation
 -- at vertex offset @vi@ and index offset @ii@ (both relative to @base@/@baseIdx@).
--- Shared by straight strokes and the fused rounded-stroke paths, so a whole
--- border shares one arena reservation.
-{-# INLINE pokeStripAt #-}
+-- Out of line as a top-level worker so 'pushRoundedStrokeRaw' stays small
+-- enough for GHC to keep 'concentricOffsetsSIMD' unboxed with zero heap
+-- allocation.
+{-# NOINLINE pokeStripAt #-}
 pokeStripAt ::
   Ptr Word8 ->
   Ptr Word8 ->
@@ -176,16 +177,15 @@ pokeStripAt ::
   Float ->
   Float ->
   IO ()
-pokeStripAt vp ip base baseIdx vi ii x0 y0 x1 y1 !nx !ny bw r g b a = do
+pokeStripAt !vp !ip !base !baseIdx !vi !ii !x0 !y0 !x1 !y1 !nx !ny !bw !r !g !b !a = do
   let !half = bw * 0.5
       !core = max 0 (half - 0.5)
       !outer = half + 0.5
-      pokeEnd !ev !ex !ey =
-        pokeBandVerts vp ((base + vi + ev) * vertexSize) True r g b a $
-          concentricOffsetsSIMD ex ey nx ny (-outer) (-core) core outer
-  pokeEnd 0 x0 y0
-  pokeEnd 4 x1 y1
-  let !va = fromIntegral (base + vi) :: Word32
+      !va = fromIntegral (base + vi) :: Word32
+  pokeBandVerts vp ((base + vi) * vertexSize) True r g b a $
+    concentricOffsetsSIMD x0 y0 nx ny (-outer) (-core) core outer
+  pokeBandVerts vp ((base + vi + 4) * vertexSize) True r g b a $
+    concentricOffsetsSIMD x1 y1 nx ny (-outer) (-core) core outer
   pokeBandIndices ip ((baseIdx + ii) * indexSize) True va (va + 4)
 
 -- | Poke one cross-section of a coverage-AA band at byte offset @vBase@: four

@@ -28,7 +28,7 @@ import Control.Monad (filterM, forM_, foldM, unless, when)
 import Data.Hashable (hashWithSalt)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
-import Data.List (dropWhileEnd, groupBy)
+import Data.List (groupBy)
 import Data.Map.Strict qualified as M
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Primitive.PrimArray (indexPrimArray, sizeofPrimArray)
@@ -61,23 +61,23 @@ import System.IO.Unsafe (unsafeDupablePerformIO)
 -- | Text styled by font modifiers (@fontBold@, @fontSize 20@,
 -- @fontColor red . fontUnderline@), applied over the paragraph's layout.
 inlineWith :: (Layout -> Layout) -> Text -> Inline
-inlineWith f txt = Inline txt f Nothing Nothing Nothing
+inlineWith f txt = Inline txt (InlineCustom f) Nothing Nothing Nothing
 
 -- | Add font modifiers to a piece, a hyperlink included.
 restyle :: (Layout -> Layout) -> Inline -> Inline
-restyle f (Inline txt style target bg tip) = Inline txt (f . style) target bg tip
+restyle f (Inline txt style target bg tip) = Inline txt (InlineCustom (f . applyInlineStyle style)) target bg tip
 
 -- | Bold text.
 strong :: Text -> Inline
-strong = inlineWith fontBold
+strong txt = Inline txt InlineBold Nothing Nothing Nothing
 
 -- | Italic text.
 emphasis :: Text -> Inline
-emphasis = inlineWith fontItalic
+emphasis txt = Inline txt InlineItalic Nothing Nothing Nothing
 
 -- | Monospaced text.
 inlineCode :: Text -> Inline
-inlineCode = inlineWith fontMono
+inlineCode txt = Inline txt InlineMono Nothing Nothing Nothing
 
 -- | Paint a colour behind a piece, the full line-box height, e.g. a
 -- highlight or an inline code tint. Leading and trailing spaces on each line
@@ -94,7 +94,15 @@ inlineTooltip tip (Inline txt style target bg _) = Inline txt style target bg (J
 -- | @hyperlink target label@: text styled with the theme's link colour and
 -- underlined on hover. Clicking the link returns @Just target@ from 'richText'.
 hyperlink :: Text -> Text -> Inline
-hyperlink target label = Inline label id (Just target) Nothing Nothing
+hyperlink target label = Inline label InlinePlain (Just target) Nothing Nothing
+
+applyInlineStyle :: InlineStyle -> Layout -> Layout
+applyInlineStyle = \case
+  InlinePlain -> id
+  InlineBold -> fontBold
+  InlineItalic -> fontItalic
+  InlineMono -> fontMono
+  InlineCustom f -> f
 
 -- | A paragraph of pieces, wrapped at its width. Returns the target of the
 -- hyperlink clicked this frame.
@@ -140,44 +148,65 @@ richTextWithMode' selectable f pieces = do
   inp <- askInput
   base <- f <$> askDefaultLayout
   theme <- uiTheme
-  let baseSize = ctxFontSize ctx
-      styled = [(piece, pieceFont baseSize l, pieceColor theme l target, layoutTextBreak l) | piece@(Inline _ style target _ _) <- pieces, let l = style base]
-      plainInput = T.concat [txt | (Inline txt _ _ _ _, _, _, _) <- styled]
-      align = layoutAlignX base
+  let !baseSize = ctxFontSize ctx
+      !align = layoutAlignX base
   Paragraphs cacheRef <- liftIO $ Host.hostOrInit (ctxParagraphs ctx) (Paragraphs <$> newIORef (ParagraphCache 0 paragraphBound IM.empty))
   gen <- liftIO (readIORef (ctxMetricGen ctx))
-  let reused = \para -> do
-        Inputs pieces0 base0 theme0 gen0 selectable0 <- readIORef (paraInputs para)
-        pure (ptrEq pieces pieces0 && gen == gen0 && eqByPtr base base0 && eqByPtr theme theme0 && selectable == selectable0)
   cached <- liftIO ((\(ParagraphCache _ _ m) -> IM.lookup (intKey wid) m) <$> readIORef cacheRef)
-  sameInputs <- liftIO (maybe (pure False) reused cached)
-  let hashed =
-        foldl'
-          ( \h (Inline txt _ target bg tip, TextFont size variant weight fstyle deco tabular, Color rgba, brk) ->
-              h `hashWithSalt` txt `hashWithSalt` size `hashWithSalt` fromEnum variant
-                `hashWithSalt` fromEnum weight `hashWithSalt` fromEnum fstyle `hashWithSalt` fromEnum deco
-                `hashWithSalt` tabular `hashWithSalt` rgba `hashWithSalt` target `hashWithSalt` fmap (\(Color c) -> c) bg
-                `hashWithSalt` tip `hashWithSalt` fromEnum brk
-          )
-          (gen `hashWithSalt` fromEnum align `hashWithSalt` selectable)
-          styled
-      key = case cached of
+  sameInputs <- case cached of
+    Nothing -> pure False
+    Just para -> liftIO $ do
+      Inputs pieces0 base0 theme0 gen0 selectable0 <- readIORef (paraInputs para)
+      pure (ptrEq pieces pieces0 && gen == gen0 && eqByPtr base base0 && eqByPtr theme theme0 && selectable == selectable0)
+  let !key = case cached of
         Just para | sameInputs -> paraKey para
-        _ -> hashed
-      inputs = Inputs pieces base theme gen selectable
+        _ -> hashPieces baseSize base theme align gen selectable pieces
   para0 <- case cached of
-    Just para | paraKey para == key -> liftIO (para <$ unless sameInputs (writeIORef (paraInputs para) inputs))
+    Just para | paraKey para == key ->
+      liftIO (para <$ unless sameInputs (writeIORef (paraInputs para) (Inputs pieces base theme gen selectable)))
     _ -> liftIO $ do
-      let starts = scanl (+) 0 [T.length txt | (Inline txt _ _ _ _, _, _, _) <- styled]
+      let styled =
+            [ (piece, pieceFont baseSize l, pieceColor theme l target, layoutTextBreak l)
+            | piece@(Inline _ style target _ _) <- pieces
+            , let l = applyInlineStyle style base
+            ]
+          plainInput = T.concat [txt | Inline txt _ _ _ _ <- pieces]
+          starts = scanl (+) 0 [T.length txt | Inline txt _ _ _ _ <- pieces]
       resolved <- mapM (measurePiece ctx) (zip3 [0 ..] starts styled)
       let runs = smallArrayFromList (map fst resolved)
           tokens = concatMap snd resolved
           emptyLine = case resolved of
             (run, _) : _ -> (runLineHeight run, runAscent run)
             [] -> (fmLineHeight (ctxFontMetrics ctx), fmAscent (ctxFontMetrics ctx))
+          hasGlyphs = any (\(_, _, _, brk) -> brk == BreakAnywhere) styled
+          tooltipRuns =
+            [ (runIdx, tip)
+            | runIdx <- [0 .. sizeofSmallArray runs - 1]
+            , Just tip <- [runTooltip (indexSmallArray runs runIdx)]
+            ]
+          hasInteractive =
+            not (null tooltipRuns)
+              || any (\runIdx -> isJust (runTarget (indexSmallArray runs runIdx))) [0 .. sizeofSmallArray runs - 1]
       measured <- newIORef Unmeasured
-      inputsRef <- newIORef inputs
-      pure (Paragraph key inputsRef runs tokens emptyLine (lineBoxes (layoutLines runs emptyLine AlignStart 1e9 tokens)) (-1) [] measured (if selectable then plainInput else T.empty) (TB.fromText plainInput))
+      inputsRef <- newIORef (Inputs pieces base theme gen selectable)
+      pure
+        ( Paragraph
+            key
+            inputsRef
+            runs
+            tokens
+            emptyLine
+            (lineBoxes (layoutLines runs emptyLine AlignStart 1e9 tokens))
+            (-1)
+            []
+            []
+            tooltipRuns
+            hasInteractive
+            hasGlyphs
+            measured
+            (if selectable then plainInput else T.empty)
+            (TB.fromText plainInput)
+        )
   -- Forced, so selection sync compares this address rather than a selector thunk.
   let !plain = paraText para0
   when (selectable && not (T.null plain)) (liftIO (registerFocusable ctx wid))
@@ -187,7 +216,10 @@ richTextWithMode' selectable f pieces = do
       layoutAt width = layoutLines runs (paraEmptyLine para0) align width (paraTokens para0)
       para
         | paraWidth para0 == rw = para0
-        | otherwise = para0 {paraWidth = rw, paraLines = layoutAt rw}
+        | otherwise =
+            let ls = layoutAt rw
+                inter = if paraHasInteractive para0 then interactivePieces runs ls else []
+             in para0 {paraWidth = rw, paraLines = ls, paraInteractive = inter}
       linesAt width
         | width == paraWidth para = paraLines para
         | otherwise = layoutAt width
@@ -200,22 +232,18 @@ richTextWithMode' selectable f pieces = do
         -- the field loses focus.
         pure (if focused then Just current else Nothing, dragged)
       else pure (Nothing, False)
-  let allInteractivePieces =
-        [ (runIdx, Rect (rx + x1) (ry + lineTop line) (x2 - x1) (lineHeight line))
-        | line <- paraLines para
-        , (run, runIdx, x1, x2) <- pieceSpans runs line
-        , isJust (runTarget run) || isJust (runTooltip run)
-        ]
-      hoveredPieces = if respHovered resp then allInteractivePieces else []
-      linkPieces = [(runIdx, r) | (runIdx, r) <- hoveredPieces, isJust (runTarget (indexSmallArray runs runIdx))]
-      runAt p = listToMaybe [runIdx | (runIdx, r) <- linkPieces, rectContains r p]
-      hoveredRun = runAt (inputMousePos inp)
-      draw = drawParagraph runs theme hoveredRun selection linesAt
+  let mouse = inputMousePos inp
+      interPieces = paraInteractive para
+      hovered = respHovered resp && paraHasInteractive para
+      hoveredRun = if hovered then linkRunAt runs rx ry interPieces mouse else Nothing
+      draw = drawParagraph runs (paraHasGlyphs para) theme hoveredRun selection linesAt
       drawKey = key `hashWithSalt` fromMaybe (-1) hoveredRun `hashWithSalt` fmap (\s -> (selectionStart s, selectionEnd s)) selection
   liftIO $ do
     -- A move onto or off a link or tooltipped run inside the hovered paragraph
     -- changes no hot widget, so each interactive piece registers a hover zone.
-    forM_ hoveredPieces (registerHoverZone ctx False . snd)
+    when hovered $
+      forM_ interPieces $ \(InteractivePiece _ x y w h) ->
+        registerHoverZone ctx False (Rect (rx + x) (ry + y) w h)
     unless (paraWidth para0 == rw && fmap paraKey cached == Just key) $
       cacheParagraph ctx cacheRef wid (isJust cached) para
     registerCustomMeasure ctx wid $ \_ (availW, _) ->
@@ -228,26 +256,24 @@ richTextWithMode' selectable f pieces = do
         0
         False
         (if selectable then KeysReadOnly else KeysNone)
-  let mouse = inputMousePos inp
-      tooltipRuns =
-        [ (runIdx, tip)
-        | runIdx <- [0 .. sizeofSmallArray runs - 1]
-        , Just tip <- [runTooltip (indexSmallArray runs runIdx)]
-        ]
-  forM_ tooltipRuns $ \(runIdx, tip) ->
+  forM_ (paraTooltipRuns para) $ \(runIdx, tip) ->
     withKey ("rt-tip" :: Text, runIdx) $ do
-      let runRects = [r | (ri, r) <- allInteractivePieces, ri == runIdx]
+      let runRects =
+            [ Rect (rx + x) (ry + y) w h
+            | InteractivePiece ri x y w h <- interPieces
+            , ri == runIdx
+            ]
           mTargetRect = listToMaybe [r | r <- runRects, rectContains r mouse] <|> listToMaybe runRects
       forM_ mTargetRect $ \pieceR ->
         tooltip (resp {rawRespRect = pieceR}) tip
   clicked <-
-    if respClicked resp && not dragReleased
+    if respClicked resp && not dragReleased && paraHasInteractive para
       then do
         -- The press must have gone down on the link too; its point stays
         -- recorded through the release frame.
         presses <- liftIO (readIORef (ctxPressPos ctx))
         pure $
-          if maybe True ((== hoveredRun) . runAt . ppPos) (M.lookup MouseLeft presses)
+          if maybe True ((== hoveredRun) . linkRunAt runs rx ry interPieces . ppPos) (M.lookup MouseLeft presses)
             then hoveredRun >>= runTarget . indexSmallArray runs
             else Nothing
       else pure Nothing
@@ -255,10 +281,73 @@ richTextWithMode' selectable f pieces = do
   where
     lineBoxes lines' = (maximum (0 : map lineWidth lines'), sum (map lineHeight lines'))
 
+-- | Hash a paragraph's pieces directly against the base layout and theme
+-- without allocating intermediate 'Layout' or 'TextFont' records on cache hits.
+hashPieces :: Float -> Layout -> Theme -> AlignX -> Int -> Bool -> [Inline] -> Int
+hashPieces !baseSize base theme align !gen !selectable = go h0
+  where
+    !h0 = gen `hashWithSalt` fromEnum align `hashWithSalt` selectable
+    !baseResolvedSize = resolveFontSize baseSize (layoutFontSize base)
+    !baseVariant = fromEnum (layoutFontVariant base)
+    !baseWeight = fromEnum (layoutFontWeight base)
+    !baseStyle = fromEnum (layoutFontStyle base)
+    !baseDeco = fromEnum (layoutTextDecoration base)
+    !baseTab = layoutFontTabular base
+    !baseBrk = fromEnum (layoutTextBreak base)
+    !baseToneCol = textToneColor theme (layoutFontTone base)
+    !baseFontColor = layoutFontColor base
+    !linkCol = themeLink theme
+    go !h [] = h
+    go !h (Inline txt style target bg tip : rest) =
+      let !h' = case style of
+            InlineCustom f ->
+              let l = f base
+                  TextFont size variant weight fstyle deco tabular = pieceFont baseSize l
+                  Color rgba = pieceColor theme l target
+               in hashOne h txt size (fromEnum variant) (fromEnum weight) (fromEnum fstyle) (fromEnum deco) tabular rgba target bg tip (fromEnum (layoutTextBreak l))
+            _ ->
+              let !variant = case style of InlineMono -> fromEnum FontMono; _ -> baseVariant
+                  !weight = case style of InlineBold -> fromEnum WeightBold; _ -> baseWeight
+                  !fstyle = case style of InlineItalic -> fromEnum FontStyleItalic; _ -> baseStyle
+                  Color rgba = case baseFontColor of
+                    Just c -> c
+                    Nothing -> if isJust target then linkCol else baseToneCol
+               in hashOne h txt baseResolvedSize variant weight fstyle baseDeco baseTab rgba target bg tip baseBrk
+       in go h' rest
+    {-# INLINE hashOne #-}
+    hashOne !h txt !size !variant !weight !fstyle !deco !tabular !rgba target bg tip !brk =
+      let !bgHash = case bg of
+            Nothing -> h `hashWithSalt` (0 :: Int)
+            Just (Color c) -> h `hashWithSalt` (1 :: Int) `hashWithSalt` c
+       in bgHash `hashWithSalt` txt `hashWithSalt` size `hashWithSalt` variant
+            `hashWithSalt` weight `hashWithSalt` fstyle `hashWithSalt` deco
+            `hashWithSalt` tabular `hashWithSalt` rgba `hashWithSalt` target
+            `hashWithSalt` tip `hashWithSalt` brk
+
+interactivePieces :: SmallArray Run -> [Line] -> [InteractivePiece]
+interactivePieces runs ls =
+  [ InteractivePiece runIdx x1 (lineTop line) (x2 - x1) (lineHeight line)
+  | line <- ls
+  , (run, runIdx, x1, x2) <- pieceSpans runs line
+  , isJust (runTarget run) || isJust (runTooltip run)
+  ]
+
+linkRunAt :: SmallArray Run -> Float -> Float -> [InteractivePiece] -> V2 -> Maybe Int
+linkRunAt runs !rx !ry pieces (V2 px py) = go pieces
+  where
+    !lx = px - rx
+    !ly = py - ry
+    go [] = Nothing
+    go (InteractivePiece runIdx x y w h : rest)
+      | lx >= x && lx < x + w && ly >= y && ly < y + h && isJust (runTarget (indexSmallArray runs runIdx)) =
+          Just runIdx
+      | otherwise = go rest
+
 -- | Words are drawn separately, so backgrounds and decorations are drawn once
 -- per piece per line, spanning the inner spaces. Backgrounds go underneath.
 drawParagraph ::
   SmallArray Run ->
+  Bool ->
   Theme ->
   Maybe Int ->
   Maybe RichSelection ->
@@ -266,7 +355,7 @@ drawParagraph ::
   CustomDrawContext ->
   Rect ->
   SmallArray DrawOp
-drawParagraph runs theme hoveredRun selection linesAt _cdc (Rect x0 y0 w _) =
+drawParagraph runs hasGlyphs theme hoveredRun selection linesAt _cdc (Rect x0 y0 w _) =
   smallArrayFromList $
     concatMap lineOps (linesAt w)
   where
@@ -274,6 +363,10 @@ drawParagraph runs theme hoveredRun selection linesAt _cdc (Rect x0 y0 w _) =
     lineOps line =
       let spans = pieceSpans runs line
           highlights = maybe [] (\(lo, hi) -> selectionOps x0 y0 line lo hi (themeSelection theme)) selected
+          glyphDraw =
+            if hasGlyphs
+              then [(x, runIdx, T.concat [tokenText tok | (_, tok) <- group]) | group@((x, Token _ runIdx _ _ _ _) : _) <- glyphGroups line]
+              else []
        in [ FillRect (Rect (x0 + x1) (y0 + lineTop line) (x2 - x1) (lineHeight line)) bg
           | (run, _, x1, x2) <- spans
           , Just bg <- [runBackground run]
@@ -282,7 +375,7 @@ drawParagraph runs theme hoveredRun selection linesAt _cdc (Rect x0 y0 w _) =
             ++ [ DrawTextStyled (x0 + x) (lineY line run) ((runFont run) {textFontDecoration = DecorationNone}) txt (runColor run)
                | (x, runIdx, txt) <-
                    [(x, runIdx, txt) | (x, Token txt runIdx Word _ _ _) <- lineTokens line]
-                     ++ [(x, runIdx, T.concat [tokenText tok | (_, tok) <- group]) | group@((x, Token _ runIdx _ _ _ _) : _) <- glyphGroups line]
+                     ++ glyphDraw
                , let run = indexSmallArray runs runIdx
                ]
             ++ [ FillRect (Rect (x0 + x1) (lineY line run + offset) (x2 - x1) thick) (runColor run)
@@ -306,17 +399,22 @@ drawParagraph runs theme hoveredRun selection linesAt _cdc (Rect x0 y0 w _) =
         DecorationNone -> []
 
 -- | Each piece's stretch of a line without the spaces at its ends: its run,
--- the run's index, and its left and right edges.
+-- the run's index, and its left and right edges. Computed in a single scan
+-- without intermediate grouping lists.
 pieceSpans :: SmallArray Run -> Line -> [(Run, Int, Float, Float)]
-pieceSpans runs line =
-  [ (indexSmallArray runs (tokenRun first), tokenRun first, x1, lastX + tokenWidth lastTok)
-  | group <- groupBy joinsGlyphs (lineTokens line)
-  , let trimmed = dropWhileEnd isSpaceToken (dropWhile isSpaceToken group)
-  , (x1, first) : _ <- [trimmed]
-  , let (lastX, lastTok) = last trimmed
-  ]
+pieceSpans runs line = go (lineTokens line)
   where
-    isSpaceToken (_, tok) = tokenKind tok == Space || tokenKind tok == GlyphSpace
+    isSpaceTok tok = tokenKind tok == Space || tokenKind tok == GlyphSpace
+    go [] = []
+    go ((x, tok) : rest) = scanRun (tokenRun tok) (if isSpaceTok tok then (-1) else x) (if isSpaceTok tok then 0 else x + tokenWidth tok) rest
+    scanRun !ri !startX !endX toks = case toks of
+      (x, tok) : rest | tokenRun tok == ri ->
+        if isSpaceTok tok
+          then scanRun ri startX endX rest
+          else scanRun ri (if startX < 0 then x else startX) (x + tokenWidth tok) rest
+      _ ->
+        let tailSpans = go toks
+         in if startX < 0 then tailSpans else (indexSmallArray runs ri, ri, startX, endX) : tailSpans
 
 -- | Whether two placed tokens belong to the same piece.
 joinsGlyphs :: (Float, Token) -> (Float, Token) -> Bool

@@ -24,6 +24,8 @@
 -- a window with less than 'DecorationsFull' is a borderless one.
 module NanoUI.Sdl.Internal.Frame
   ( WindowDecorations (..)
+  , installWin32ResizeHook
+  , windowInSizeMove
   , applyDecorations
   , framedWindow
   , applyWindowShadow
@@ -120,6 +122,16 @@ applyNativeFrame :: Ptr SDL_Window -> Bool -> IO ()
 -- | Put the desktop's shadow under a window, or take it away again.
 applyWindowShadow :: Ptr SDL_Window -> Bool -> IO ()
 
+-- | Install the Win32 subclass that suppresses stale BitBlt copies and
+-- background erasure during resize drags and tracks Win32's modal size/move
+-- loop. No-op on other platforms.
+installWin32ResizeHook :: Ptr SDL_Window -> IO ()
+
+-- | Whether Win32's modal border-drag loop (@WM_ENTERSIZEMOVE@ ..
+-- @WM_EXITSIZEMOVE@) is currently active for the window. Always 'False' on
+-- other platforms.
+windowInSizeMove :: Ptr SDL_Window -> IO Bool
+
 -- | How much larger than its view the desktop's frame makes a window, across
 -- and down, in window coordinates: nothing for a window without the frame,
 -- or one maximized or fullscreen. SDL sizes a borderless window as though
@@ -127,6 +139,10 @@ applyWindowShadow :: Ptr SDL_Window -> Bool -> IO ()
 nativeFrameOutset :: Ptr SDL_Window -> IO (Int, Int)
 
 #if defined(mingw32_HOST_OS)
+installWin32ResizeHook win = withHwnd win () nanoUiInstallWin32ResizeHook
+
+windowInSizeMove win = withHwnd win False (fmap (/= 0) . nanoUiWindowInSizeMove)
+
 applyNativeFrame win on =
   withHwnd win () $ \hwnd -> do
     nanoUiSetNativeFrame hwnd (fromBool on)
@@ -159,6 +175,12 @@ nativeFrameOutset win =
   withHwnd win (0, 0) $ \hwnd -> do
     ((), across, down) <- outPair (nanoUiNativeFrameOutset hwnd)
     pure (fromIntegral across, fromIntegral down)
+
+foreign import ccall safe "nano_ui_install_win32_resize_hook"
+  nanoUiInstallWin32ResizeHook :: Ptr () -> IO ()
+
+foreign import ccall unsafe "nano_ui_window_in_sizemove"
+  nanoUiWindowInSizeMove :: Ptr () -> IO CInt
 
 -- | Safe, not unsafe: this one puts the window procedure on and takes it off
 -- again, and Windows dispatches messages from inside both.
@@ -213,6 +235,8 @@ dwmncrpUseWindowStyle, dwmncrpEnabled :: Word32
 dwmncrpUseWindowStyle = 0
 dwmncrpEnabled = 2
 #else
+installWin32ResizeHook _ = pure ()
+windowInSizeMove _ = pure False
 applyNativeFrame _ _ = pure ()
 applyWindowShadow _ _ = pure ()
 nativeFrameOutset _ = pure (0, 0)

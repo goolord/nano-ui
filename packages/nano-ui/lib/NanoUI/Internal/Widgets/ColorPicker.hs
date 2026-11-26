@@ -27,7 +27,7 @@ import NanoUI.Internal.Font
 import NanoUI.Internal.Id (WidgetId (..), mix64, mkWidgetId)
 import NanoUI.Internal.Input (Input (..), Key (..), Pressable (..), inputModifiers, modShift, shiftAtMost)
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Monad (NanoUI, (<&&>), askContext, askInput, freshWidget, nextId, liftIO, withKey)
+import NanoUI.Internal.Monad (NanoUI, askContext, askInput, freshWidget, nextId, liftIO, withKey)
 import NanoUI.Internal.Store (fieldFloat, fieldInt, fieldPoint, findSlot, insertSlot, insertSpec, lookupSlot, lookupSpec, specKey, specWriteOr)
 import NanoUI.Internal.Store.Slots (slotColorBase, slotSeen)
 import NanoUI.Internal.Style
@@ -416,8 +416,9 @@ colorPickerCanvas (wid, svResp) (hueWid, hueResp) alphaPart initial = do
   hueFocus <- keyboardFocused hueWid
   alphaFocus <- maybe (pure False) (keyboardFocused . fst) alphaPart
   keyMoved <-
-    pure (svFocus || hueFocus || alphaFocus)
-      <&&> liftIO (applyColorPickerKeys ctx wid initial inp (isJust alphaPart) svFocus hueFocus)
+    if svFocus || hueFocus || alphaFocus
+      then liftIO (applyColorPickerKeys ctx wid initial inp (isJust alphaPart) svFocus hueFocus)
+      else pure False
   let releasedDrag = (sHeld || vHeld || hHeld || aHeld) && not dragging
   when (releasedDrag || keyMoved) $
     liftIO $ do
@@ -425,19 +426,31 @@ colorPickerCanvas (wid, svResp) (hueWid, hueResp) alphaPart initial = do
       commitColorPickerCurrent ctx wid (widgetStoreColor st wid initial)
   pure current0
 
+channelLabelLayout :: Layout
+channelLabelLayout = tight (alignMiddle defaultLayout)
+
+channelNumericLayout :: Layout
+channelNumericLayout = minW 60 colorPickerFieldLayout
+
+channelConfig100, channelConfig255, channelConfig360 :: NumericInputConfig
+channelConfig100 = defaultNumericInputConfig {nicMin = 0, nicMax = 100, nicLayout = const channelNumericLayout}
+channelConfig255 = defaultNumericInputConfig {nicMin = 0, nicMax = 255, nicLayout = const channelNumericLayout}
+channelConfig360 = defaultNumericInputConfig {nicMin = 0, nicMax = 360, nicLayout = const channelNumericLayout}
+
 -- | One channel field: an inline label and a numeric box over @0..hi@ that
 -- shows @value@ while unfocused. Returns the value after this frame's edits.
 channelField :: Float -> Text -> Int -> Int -> NanoUI Int
 channelField pct label hi value =
   container NodeContainer (colorPickerFieldGroupLayout pct) $ do
     labelWid <- nextId
-    void (addWidget labelWid NodeText label 0 (tight (alignMiddle defaultLayout)))
+    void (addWidget labelWid NodeText label 0 channelLabelLayout)
     -- Room for three digits beside the stepper.
-    round
-      . snd
-      <$> numericInputCore
-        defaultNumericInputConfig {nicMin = 0, nicMax = fromIntegral hi, nicLayout = const (minW 60 colorPickerFieldLayout)}
-        (fromIntegral value)
+    let !cfg = case hi of
+          255 -> channelConfig255
+          100 -> channelConfig100
+          360 -> channelConfig360
+          _ -> defaultNumericInputConfig {nicMin = 0, nicMax = fromIntegral hi, nicLayout = const channelNumericLayout}
+    round . snd <$> numericInputCore cfg (fromIntegral value)
 
 -- | Adopt the caller's colour as 'adoptSlot' does. A new
 -- colour also resets the hue, S/V, and the "current" swatch.

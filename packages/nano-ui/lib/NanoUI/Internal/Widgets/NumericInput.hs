@@ -15,6 +15,7 @@ import Control.Monad (mfilter, void, when)
 import Data.Bits ((.|.))
 import Data.Char (isDigit, isHexDigit)
 import Data.Maybe (fromMaybe)
+import Data.Primitive.SmallArray (SmallArray, indexSmallArray, smallArrayFromList)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Read qualified as TR
@@ -99,6 +100,14 @@ numericInputConfigured cfg v = void (numericInputConfigured' cfg v)
 numericInputConfigured' :: NumericInputConfig -> Var Double -> NanoUI Response
 numericInputConfigured' cfg v = bindVarBy sameDouble RenderFinal v (numericInputCore cfg)
 
+numericBaseLayout :: Layout
+numericBaseLayout = defaultLayout {layoutWidth = Grow 1, layoutMinW = 80}
+
+-- | Preformatted decimal strings for common small non-negative integers so
+-- idle numeric fields (such as colour-picker channels) allocate nothing.
+smallIntTexts :: SmallArray Text
+smallIntTexts = smallArrayFromList [T.pack (show i) | i <- [0 .. 512 :: Int]]
+
 -- | 'numericInputConfigured' on a plain value: the response and the value
 -- after this frame.
 numericInputCore :: NumericInputConfig -> Double -> NanoUI (Response, Double)
@@ -109,78 +118,87 @@ numericInputCore cfg value = do
   isFocus <- focusAndIme ctx wid True (if nicHex cfg then InputNormal else InputNumeric)
   store <- liftIO (getStore ctx)
   let
-    key = intKey wid
-    given = clampNumber cfg value
+    !key = intKey wid
+    !given = clampNumber cfg value
     stored = lookupSlot fieldText key store
-    -- A value other than the last one the field returned was set by the
-    -- caller, and replaces the text even while the field is focused.
-    adopted = isFocus && maybe False (/= given) (lookupSlot fieldDouble key store)
-    -- Unfocused, the field shows the caller's value; focused, it keeps the
-    -- text being typed.
-    -- Stored text that fails 'acceptsNumberText' (pasted from the context
-    -- menu, which skips the filter) is replaced so subsequent edits are not
-    -- rejected.
-    text0 = if isFocus && not adopted then fromMaybe (formatNumber cfg given) (mfilter (acceptsNumberText cfg) stored) else formatNumber cfg given
-    s0 = loadTextInputState store key text0
-    lastValue = if adopted then given else findSlot fieldDouble given key store
-  mEdited <- if isFocus then liftIO (editTextInput ctx singleLineMode inp store key s0) else pure Nothing
-  lay <- widgetBaseLayout defaultLayout {layoutWidth = Grow 1, layoutMinW = 80} (nicLayout cfg)
+    !held0 = findSpec slotNumericHeld 0 key store
+    !repeatAt0 = findSpec slotNumericRepeat 0 key store
+  lay <- widgetBaseLayout numericBaseLayout (nicLayout cfg)
   -- Its font face, weight and slant ride in the style bits, as on a label.
   resp <- addWidgetStyled wid NodeTextInput "" 0 lay (textInputFlagNumeric .|. packTextNodeStyle lay 0)
-
-  let
-    -- An edit that would leave text no number can start with is dropped.
-    typed = maybe s0 editorTextState mEdited
-    s1 = if acceptsNumberText cfg (tisText typed) then typed else s0
-    current
-      -- Text that still reads as the last value formatted is that value,
-      -- which can hold more precision than the text shows.
-      | isFocus && tisText s1 == formatNumber cfg lastValue = lastValue
-      | isFocus = maybe lastValue (clampNumber cfg) (parseNumber cfg (tisText s1))
-      | otherwise = given
-    held0 = findSpec slotNumericHeld 0 key store
-    repeatAt0 = findSpec slotNumericRepeat 0 key store
-  (dir, held1, repeatAt1) <- liftIO (stepNumericStepper resp isFocus inp held0 repeatAt0)
-  let
-    scale = if modShift (inputModifiers inp) then 10 else 1
-    final
-      | dir /= 0 = clampNumber cfg (roundNumber cfg (current + fromIntegral dir * scale * nicStep cfg))
-      | otherwise = current
-    submitted = isFocus && pressedOnceIn KeyEnter inp
-    -- A step or Enter rewrites the text as the value, caret at its end.
-    s2
-      | dir /= 0 || submitted =
-          let t = formatNumber cfg final
-           in TextInputState t (T.length t) (T.length t)
-      | otherwise = s1
-    dirty =
-      stored /= Just (tisText s2)
-        || s2 /= s0
-        || lookupSlot fieldDouble key store /= Just final
-        || held1 /= held0
-        || repeatAt1 /= repeatAt0
-        || memberSpec slotTextChanged key store
-  when dirty $
-    liftIO $ do
-      -- An accepted edit keeps its undo history; a rejected one or a step
-      -- rewrites the text without it.
-      let save = case mEdited of
-            Just ed | editorTextState ed == s2 -> saveTextEditor key ed
-            _ -> saveTextInputState key s2
-      -- Commands sent between frames read the mode ('runTextCommand'); the
-      -- change pulse an edit of theirs leaves is reported as the value's
-      -- change.
-      modifyStore ctx $
-        (if held1 == 0 then deleteSpec slotNumericHeld key else insertSpec slotNumericHeld key held1)
-          . insertSlot fieldDouble key final
-          . insertSpec slotNumericRepeat key repeatAt1
-          . insertSpec slotTextMode key singleLineMode
-          . deleteSpec slotTextChanged key
-          . save
-  -- A held arrow repeats on a schedule: ask for the frame of its next step
-  -- instead of running frames back to back until then.
-  when (held1 /= 0) $ liftIO (requestWakeAt ctx repeatAt1)
-  pure (setSubmitted submitted (setChanged (final /= value) resp), final)
+  if not isFocus
+    && held0 == 0
+    && repeatAt0 == 0
+    && not (pressedIn MouseLeft inp)
+    && lookupSlot fieldDouble key store == Just given
+    && not (memberSpec slotTextChanged key store)
+    && stored == Just (formatNumber cfg given)
+    then pure (setChanged (given /= value) resp, given)
+    else do
+      let
+        -- A value other than the last one the field returned was set by the
+        -- caller, and replaces the text even while the field is focused.
+        adopted = isFocus && maybe False (/= given) (lookupSlot fieldDouble key store)
+        -- Unfocused, the field shows the caller's value; focused, it keeps the
+        -- text being typed.
+        -- Stored text that fails 'acceptsNumberText' (pasted from the context
+        -- menu, which skips the filter) is replaced so subsequent edits are not
+        -- rejected.
+        text0 = if isFocus && not adopted then fromMaybe (formatNumber cfg given) (mfilter (acceptsNumberText cfg) stored) else formatNumber cfg given
+        s0 = loadTextInputState store key text0
+        lastValue = if adopted then given else findSlot fieldDouble given key store
+      mEdited <- if isFocus then liftIO (editTextInput ctx singleLineMode inp store key s0) else pure Nothing
+      let
+        -- An edit that would leave text no number can start with is dropped.
+        typed = maybe s0 editorTextState mEdited
+        s1 = if acceptsNumberText cfg (tisText typed) then typed else s0
+        current
+          -- Text that still reads as the last value formatted is that value,
+          -- which can hold more precision than the text shows.
+          | isFocus && tisText s1 == formatNumber cfg lastValue = lastValue
+          | isFocus = maybe lastValue (clampNumber cfg) (parseNumber cfg (tisText s1))
+          | otherwise = given
+      (dir, held1, repeatAt1) <- liftIO (stepNumericStepper resp isFocus inp held0 repeatAt0)
+      let
+        scale = if modShift (inputModifiers inp) then 10 else 1
+        final
+          | dir /= 0 = clampNumber cfg (roundNumber cfg (current + fromIntegral dir * scale * nicStep cfg))
+          | otherwise = current
+        submitted = isFocus && pressedOnceIn KeyEnter inp
+        -- A step or Enter rewrites the text as the value, caret at its end.
+        s2
+          | dir /= 0 || submitted =
+              let t = formatNumber cfg final
+               in TextInputState t (T.length t) (T.length t)
+          | otherwise = s1
+        dirty =
+          stored /= Just (tisText s2)
+            || s2 /= s0
+            || lookupSlot fieldDouble key store /= Just final
+            || held1 /= held0
+            || repeatAt1 /= repeatAt0
+            || memberSpec slotTextChanged key store
+      when dirty $
+        liftIO $ do
+          -- An accepted edit keeps its undo history; a rejected one or a step
+          -- rewrites the text without it.
+          let save = case mEdited of
+                Just ed | editorTextState ed == s2 -> saveTextEditor key ed
+                _ -> saveTextInputState key s2
+          -- Commands sent between frames read the mode ('runTextCommand'); the
+          -- change pulse an edit of theirs leaves is reported as the value's
+          -- change.
+          modifyStore ctx $
+            (if held1 == 0 then deleteSpec slotNumericHeld key else insertSpec slotNumericHeld key held1)
+              . insertSlot fieldDouble key final
+              . insertSpec slotNumericRepeat key repeatAt1
+              . insertSpec slotTextMode key singleLineMode
+              . deleteSpec slotTextChanged key
+              . save
+      -- A held arrow repeats on a schedule: ask for the frame of its next step
+      -- instead of running frames back to back until then.
+      when (held1 /= 0) $ liftIO (requestWakeAt ctx repeatAt1)
+      pure (setSubmitted submitted (setChanged (final /= value) resp), final)
 
 -- | Step the stepper arrows' press, auto-repeat timer, and Up/Down keys,
 -- returning @(stepDir, heldDir, nextRepeatAt)@.
@@ -228,7 +246,11 @@ formatNumber cfg v0
   | nicHex cfg =
       let n = round v :: Integer
        in (if n < 0 then "-" else "") <> T.toUpper (T.pack (showHex (abs n) ""))
-  | nicDecimals cfg <= 0 = T.pack (show (round v :: Integer))
+  | nicDecimals cfg <= 0 =
+      let n = round v :: Integer
+       in if n >= 0 && n <= 512
+            then indexSmallArray smallIntTexts (fromInteger n)
+            else T.pack (show n)
   | otherwise = T.pack (showFFloat (Just (nicDecimals cfg)) v "")
   where
     -- Normalize -0.0 to +0.0 so a non-negative field does not format "-0.00"

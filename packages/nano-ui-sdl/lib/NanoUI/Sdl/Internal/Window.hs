@@ -81,7 +81,7 @@ import NanoUI.Sdl.Internal.Pacing
 import NanoUI.Sdl.Internal.Screenshot (captureFrame, captureScreenshot, saveScreenshot)
 import NanoUI.Sdl.Internal.Error (sdlFail)
 import NanoUI.Sdl.Internal.Chrome.Types (clearChromeState, newChromeState)
-import NanoUI.Sdl.Internal.Frame (WindowDecorations (..), applyDecorations, framedWindow)
+import NanoUI.Sdl.Internal.Frame (WindowDecorations (..), applyDecorations, framedWindow, installWin32ResizeHook)
 import NanoUI.Sdl.Internal.Cursor (destroyCursors, initCursors)
 import NanoUI.Sdl.Internal.Font
 import NanoUI.Ttf.Internal.Support (syncSdlFontCache)
@@ -360,10 +360,10 @@ withSdlBench =
 -- | Which SDL render driver a session asks for.
 data RenderDriver
   = RenderDriverAuto
-  -- ^ nano-ui picks: SDL 3.4's @"gpu"@ driver (Vulkan or Metal, enabling
-  -- SPIR-V and MSL shaders with zero setup) when available, falling back to
-  -- GL on Windows and SDL's own order elsewhere if GPU creation fails or on
-  -- SDL 3.2.
+  -- ^ nano-ui picks: @"opengl"@ on Windows (avoiding D3D11 flip-model and
+  -- Vulkan WSI resize stalls/stretching while still running GLSL 150 custom
+  -- shaders), and SDL 3.4's @"gpu"@ driver (Metal or Vulkan) elsewhere when
+  -- available, falling back to SDL's own order if creation fails.
   | RenderDriverGpu
   -- ^ Require SDL 3.4's @"gpu"@ renderer with SPIR-V and MSL shaders enabled.
   | RenderDriverSdlDefault
@@ -379,6 +379,9 @@ foreign import ccall safe "nano_ui_create_window_and_gpu_renderer"
 foreign import ccall unsafe "nano_ui_renderer_has_gpu"
   c_rendererHasGpu :: Ptr SDL_Renderer -> IO CInt
 
+foreign import ccall unsafe "nano_ui_renderer_has_shaders"
+  c_rendererHasShaders :: Ptr SDL_Renderer -> IO CInt
+
 setSdlHint :: BS.ByteString -> BS.ByteString -> IO ()
 setSdlHint name value =
   BS.useAsCString name $ \cname ->
@@ -388,13 +391,13 @@ setSdlHint name value =
 -- | Create a non-GPU renderer under the render driver the options ask for,
 -- unless @SDL_RENDER_DRIVER@ in the environment names one.
 --
--- 'acquireWindowAndRenderer' tries SDL 3.4's @"gpu"@ driver first for
--- 'RenderDriverAuto' (for shader support) and falls back here when no GPU
--- device is available. On Windows, this fallback asks for @"opengl"@ rather
--- than D3D11: Windows' modal size loop hands the app one step at a time, and
--- SDL's D3D11 flip-model swap chain blocks present until a back buffer frees,
--- stalling window resize drags (measured 6.4 ms present p99 at 120 Hz under
--- d3d11 vs. smooth dragging under opengl).
+-- On Windows, 'RenderDriverAuto' asks for @"opengl"@ rather than D3D11 or
+-- SDL 3.4's Vulkan @"gpu"@ driver: Windows' modal size loop hands the app one
+-- step at a time, and DXGI/Vulkan swapchain resize stalls and stretches the
+-- window during border drags, whereas OpenGL drags smoothly and runs
+-- @nano-ui-shader@ GLSL 150 shaders directly. Elsewhere,
+-- 'acquireWindowAndRenderer' tries SDL 3.4's @"gpu"@ driver first and falls
+-- back here when no GPU device is available.
 --
 -- If GL context creation fails (remote desktop, basic display adapter VM),
 -- the hint is cleared and creation is retried with SDL's default driver. A
@@ -450,7 +453,7 @@ acquireWindowAndRenderer ::
 acquireWindowAndRenderer opts flags =
   mkAcquire
     ( do
-        fromEnv <- isJust <$> lookupEnv "SDL_RENDER_DRIVER"
+        envDriver <- lookupEnv "SDL_RENDER_DRIVER"
         TextForeign.withCString (wsTitle settings) $ \titlePtr -> do
           let (rw, rh) = (round w, round h)
               createStandard =
@@ -462,13 +465,17 @@ acquireWindowAndRenderer opts flags =
               tryGpu = do
                 (ok, win, ren) <- outPair (c_createWindowAndGpuRenderer titlePtr (fromIntegral rw) (fromIntegral rh) (fromIntegral flags))
                 pure (if ok /= 0 then Just (win, ren) else Nothing)
-          case sdlRenderDriver opts of
-            _ | fromEnv -> createStandard
-            RenderDriverGpu ->
+          case envDriver of
+            Just "gpu" ->
               tryGpu >>= maybe (sdlFail "SDL 3.4 GPU renderer creation failed") pure
-            RenderDriverAuto ->
-              tryGpu >>= maybe createStandard pure
-            _ -> createStandard
+            Just _ -> createStandard
+            Nothing -> case sdlRenderDriver opts of
+              RenderDriverGpu ->
+                tryGpu >>= maybe (sdlFail "SDL 3.4 GPU renderer creation failed") pure
+              RenderDriverAuto
+                | os == "mingw32" -> createStandard
+                | otherwise -> tryGpu >>= maybe createStandard pure
+              _ -> createStandard
     )
     ( \(win, ren) -> do
         void $ setRenderScale ren 1 1
@@ -502,6 +509,9 @@ startSdlWindow opts flags ctx fontSource monoSource first = do
   -- window holds the hit test this frees.
   sdlChromeState <- mkAcquire (newChromeState (sdlWindowDecorations opts) (framedWindow flags)) clearChromeState
   (sdlWindow, sdlRenderer) <- acquireWindowAndRenderer opts flags
+  -- Install the Win32 resize subclass on every window so size changes never
+  -- BitBlt stale client pixels or flash GDI backgrounds during border drags.
+  liftIO $ installWin32ResizeHook sdlWindow
   density <- liftIO $ queryWindowPixelDensity sdlWindow
   zoom <- liftIO $ resolveZoom sdlWindow (sdlAppUiScale opts)
   -- The requested size is logical, so the window grows with the zoom.
@@ -513,9 +523,9 @@ startSdlWindow opts flags ctx fontSource monoSource first = do
   let
     scale = density * zoom
   liftIO $ setDrawSnapScale ctx scale
-  liftIO $ do
-    hasGpu <- (/= 0) <$> c_rendererHasGpu sdlRenderer
-    setShaderCapabilities ctx (ShaderCapabilities hasGpu hasGpu)
+  sdlHasGpu <- liftIO $ (/= 0) <$> c_rendererHasGpu sdlRenderer
+  hasShaders <- liftIO $ (/= 0) <$> c_rendererHasShaders sdlRenderer
+  liftIO $ setShaderCapabilities ctx (ShaderCapabilities hasShaders hasShaders)
   sdlRefreshPeriod <- liftIO $ refreshPeriodOf sdlWindow
   sdlRefreshPeriodRef <- liftIO $ newIORef sdlRefreshPeriod
   sdlPresentProbe <- liftIO $ newIORef (PresentProbe 0 0)

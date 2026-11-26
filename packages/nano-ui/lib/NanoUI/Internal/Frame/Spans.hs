@@ -4,6 +4,7 @@ module NanoUI.Internal.Frame.Spans
   , collectOverlayTextSpans
   , collectRasterSpans
   , widgetNodeCount
+  , cachedWidgetLabel
   , forWidgetTextPlacements_
   , selectableTextGeometry
   , textNodeSpanEntry
@@ -360,14 +361,16 @@ labelBox ctx nt idx x w
 -- | A widget's label placed across @w@, a button's aligned by @labelAlign@.
 cachedWidgetLabel :: Context -> NodeType -> NodeIdx -> AlignX -> Float -> Float -> IO (Maybe WidgetTextPlacement)
 cachedWidgetLabel ctx nt idx labelAlign w h = do
-  fontSizeVal <- getNodeFontSize (ctxNodeArena ctx) idx
-  si <- getStyleIdx (ctxNodeArena ctx) idx
-  txt <- displayText ctx nt idx
+  let na = ctxNodeArena ctx
+  a <- arenaArrays na
+  fontSizeVal <- readStyle a idx StyleFontSize
+  si <- readStyleIdx a idx
+  txt <- if nt == NodeButton then getText na idx else displayText ctx nt idx
   ax <-
     if nt == NodeButton && buttonKindOf si == ButtonTable
-      then getAlignX (ctxNodeArena ctx) idx
+      then readAlignX a idx
       else pure labelAlign
-  let ntTag = fromEnum nt
+  let !ntTag = fromEnum nt
   cache <- readIORef (ctxWidgetTextCache ctx)
   case IM.lookup idx cache of
     Just e

@@ -13,11 +13,13 @@ module NanoUI.Internal.Font
   , truncateTextPure
   ) where
 
-import Control.Monad (forM_, unless)
+import Control.Monad (unless)
 import Data.Functor.Identity (Identity (..))
-import Data.IORef (modifyIORef', newIORef, readIORef)
+import Data.Primitive.PrimVar (newPrimVar, readPrimVar, writePrimVar)
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Unsafe (Iter (..), iter)
+import Data.Text.Foreign (lengthWord8)
 import NanoUI.Internal.Font.Types
 import NanoUI.Internal.Metrics
 import NanoUI.Internal.Style (TextEllipsis (..))
@@ -54,18 +56,25 @@ wrapTextLinesIO lineW txt maxW = wrLines <$> wrapTextIO lineW txt maxW
 -- | 'wrapTextLinesIO' with the widths its result holds for.
 wrapTextIO :: (Text -> IO Float) -> Text -> Float -> IO WrapResult
 wrapTextIO lineW txt maxW = do
-  widestRef <- newIORef 0
-  fitRef <- newIORef 0
-  breakRef <- newIORef (1 / 0)
-  let lineOf w = do
-        modifyIORef' widestRef (max w)
-        if w <= maxW then modifyIORef' fitRef (max w) else breakAt w
-      breakAt w = modifyIORef' breakRef (min w)
+  widestVar <- newPrimVar (0 :: Float)
+  fitVar <- newPrimVar (0 :: Float)
+  breakVar <- newPrimVar (1 / 0 :: Float)
+  let lineOf !w = do
+        curW <- readPrimVar widestVar
+        if w > curW then writePrimVar widestVar w else pure ()
+        if w <= maxW
+          then do
+            curF <- readPrimVar fitVar
+            if w > curF then writePrimVar fitVar w else pure ()
+          else breakAt w
+      breakAt !w = do
+        curB <- readPrimVar breakVar
+        if w < curB then writePrimVar breakVar w else pure ()
       wrapParagraph para
         | T.null para = pure [""]
         | otherwise = do
             w <- lineW para
-            let perLine = charsPerWidth w para maxW
+            let !perLine = charsPerWidth w para maxW
             if w <= maxW
               then [para] <$ lineOf w
               else do
@@ -73,44 +82,61 @@ wrapTextIO lineW txt maxW = do
                 if T.any (== ' ') para
                   then wrapWords perLine para []
                   else reverse <$> charLines perLine para []
-      wrapWords perLine = startLine
+      wrapWords !perLine = startLine
         where
           startLine rest acc
             | T.null rest = pure (reverse acc)
             | otherwise = do
-                let word = T.take (wordEnd rest) rest
+                let !wEnd = wordEnd rest
+                    word = T.take wEnd rest
                 width <- lineW word
                 if width <= maxW
-                  then extend rest (T.length word) acc
+                  then extend rest wEnd width acc
                   else do
                     breakAt width
                     pieces <- charLines perLine word []
                     case pieces of
-                      piece : done -> extend (T.drop (T.length word - T.length piece) rest) (T.length piece) (done ++ acc)
-                      [] -> startLine (T.dropWhile (== ' ') (T.drop (T.length word) rest)) acc
-          extend fromLine lineLen acc = do
-            let fits end = (<= maxW) <$> lineW (T.take end fromLine)
-                guess
-                  | T.compareLength fromLine perLine /= GT = T.length (T.dropWhileEnd (== ' ') fromLine)
-                  | otherwise = max lineLen (prevWordEnd fromLine (perLine + 1))
-                up end = case nextWordEnd fromLine end of
-                  Just end' -> fits end' >>= \ok -> if ok then up end' else pure end
-                  Nothing -> pure end
-                down end
-                  | end' <= lineLen = pure lineLen
-                  | otherwise = fits end' >>= \ok -> if ok then pure end' else down end'
+                      piece : done -> do
+                        let !pLen = T.length piece
+                            rest' = T.drop (wEnd - pLen) rest
+                        pw <- lineW piece
+                        extend rest' pLen pw (done ++ acc)
+                      [] -> startLine (T.dropWhile (== ' ') (T.drop wEnd rest)) acc
+          extend fromLine !lineLen !lineWidth0 acc = do
+            let !guess =
+                  if T.compareLength fromLine perLine /= GT
+                    then T.length (T.dropWhileEnd (== ' ') fromLine)
+                    else max lineLen (prevWordEnd fromLine (perLine + 1))
+                -- Carry both the last fitting (end, width) and the first
+                -- overflowing width so neither is measured a second time.
+                up !end !endW = case nextWordEnd fromLine end of
+                  Nothing -> pure (end, endW, 1 / 0)
+                  Just end' -> do
+                    w' <- lineW (T.take end' fromLine)
+                    if w' <= maxW then up end' w' else pure (end, endW, w')
+                down !end !overW
+                  | end' <= lineLen = pure (lineLen, lineWidth0, overW)
+                  | otherwise = do
+                      w' <- lineW (T.take end' fromLine)
+                      if w' <= maxW then pure (end', w', overW) else down end' w'
                   where
-                    end' = prevWordEnd fromLine end
-            end <-
+                    !end' = prevWordEnd fromLine end
+            (!end, !endW, !overW) <-
               if guess <= lineLen
-                then up lineLen
-                else fits guess >>= \ok -> if ok then up guess else down guess
+                then up lineLen lineWidth0
+                else do
+                  gw <- lineW (T.take guess fromLine)
+                  if gw <= maxW
+                    then up guess gw
+                    else down guess gw
             let line = T.take end fromLine
                 rest = T.dropWhile (== ' ') (T.drop end fromLine)
-            lineW line >>= lineOf
-            forM_ (nextWordEnd fromLine end) $ \end' -> lineW (T.take end' fromLine) >>= breakAt
+            lineOf endW
+            if overW < 1 / 0
+              then breakAt overW
+              else pure ()
             if T.null rest then pure (reverse (line : acc)) else startLine rest (line : acc)
-      charLines perLine chunk acc
+      charLines !perLine chunk acc
         | T.null chunk = pure acc
         | otherwise = do
             (line, rest) <- takeWidth perLine lineW maxW chunk
@@ -125,19 +151,42 @@ wrapTextIO lineW txt maxW = do
     then pure (WrapResult [] 0 1 0)
     else do
       textLines <- concat <$> mapM wrapParagraph (T.lines txt)
-      WrapResult textLines <$> readIORef widestRef <*> readIORef fitRef <*> readIORef breakRef
+      WrapResult textLines <$> readPrimVar widestVar <*> readPrimVar fitVar <*> readPrimVar breakVar
 
 wordEnd :: Text -> Int
-wordEnd t =
-  let (spaces, rest) = T.span (== ' ') t
-   in T.length spaces + T.length (T.takeWhile (/= ' ') rest)
+wordEnd t = goSpaces 0 0
+  where
+    !lenB = lengthWord8 t
+    goSpaces !b !chars
+      | b >= lenB = chars
+      | otherwise = case iter t b of
+          Iter c d
+            | c == ' ' -> goSpaces (b + d) (chars + 1)
+            | otherwise -> goWord (b + d) (chars + 1)
+    goWord !b !chars
+      | b >= lenB = chars
+      | otherwise = case iter t b of
+          Iter c d
+            | c == ' ' -> chars
+            | otherwise -> goWord (b + d) (chars + 1)
 
 nextWordEnd :: Text -> Int -> Maybe Int
-nextWordEnd fromLine end
-  | T.null (T.dropWhile (== ' ') after) = Nothing
-  | otherwise = Just (end + wordEnd after)
+nextWordEnd fromLine !end = skipSpaces after 0 0
   where
     after = T.drop end fromLine
+    !lenB = lengthWord8 after
+    skipSpaces !t !b !chars
+      | b >= lenB = Nothing
+      | otherwise = case iter t b of
+          Iter c d
+            | c == ' ' -> skipSpaces t (b + d) (chars + 1)
+            | otherwise -> Just (end + scanWord t (b + d) (chars + 1))
+    scanWord !t !b !chars
+      | b >= lenB = chars
+      | otherwise = case iter t b of
+          Iter c d
+            | c == ' ' -> chars
+            | otherwise -> scanWord t (b + d) (chars + 1)
 
 prevWordEnd :: Text -> Int -> Int
 prevWordEnd fromLine end =

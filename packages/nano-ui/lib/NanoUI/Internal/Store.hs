@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# OPTIONS_HADDOCK not-home #-}
 
 -- | The widget store: per-widget state in maps by value type, keyed by widget
@@ -71,7 +72,11 @@ import Data.IntSet (IntSet)
 import Data.Text (Text)
 import Data.Word (Word64)
 import GHC.Float (castFloatToWord32, castWord32ToFloat)
+import qualified Data.IntMap.Internal as IMI
 import qualified Data.IntMap.Strict as IM
+#if MIN_VERSION_containers(0,8,0)
+import qualified Data.IntSet.Internal.IntTreeCommons as ITC
+#endif
 import qualified Data.Text as T
 import NanoUI.Internal.Id (mix64)
 import NanoUI.Internal.Equality (eqByPtr, ptrEq, sameDouble, sameFloat)
@@ -83,21 +88,75 @@ import NanoUI.Internal.Widgets.TextDocument (TextDocument)
 import NanoUI.Widgets.TextBuffer (TextBuffer)
 
 -- | Keys whose values differ between two maps, a key that left or joined
--- included.
+-- included. Exploits structural sharing via 'ptrEq' at every internal 'Bin'
+-- node so single-key store updates diff in O(log n) without building an
+-- intermediate map.
 diffKeysBy :: (a -> a -> Bool) -> IntMap a -> IntMap a -> [Int]
-diffKeysBy eq !old !new
-  -- Unchanged maps keep their identity through a record update; skip the
-  -- whole merge when the caller only rebuilt a different field.
-  | ptrEq old new = []
-  | otherwise =
-      IM.keys
-        ( IM.mergeWithKey
-            (\_ a b -> if eq a b then Nothing else Just ())
-            (IM.map (const ()))
-            (IM.map (const ()))
-            old
-            new
-        )
+diffKeysBy eq !old !new = go old new []
+  where
+    allKeys IMI.Nil acc = acc
+    allKeys (IMI.Tip k _) acc = k : acc
+#if MIN_VERSION_containers(0,8,0)
+    allKeys (IMI.Bin _ l r) acc = allKeys l (allKeys r acc)
+#else
+    allKeys (IMI.Bin _ _ l r) acc = allKeys l (allKeys r acc)
+#endif
+
+    go !t1 !t2 acc
+      | ptrEq t1 t2 = acc
+      | otherwise = case (t1, t2) of
+          (IMI.Nil, _) -> allKeys t2 acc
+          (_, IMI.Nil) -> allKeys t1 acc
+          (IMI.Tip k1 v1, IMI.Tip k2 v2)
+            | k1 == k2 -> if eq v1 v2 then acc else k1 : acc
+            | k1 < k2 -> k1 : k2 : acc
+            | otherwise -> k2 : k1 : acc
+          (IMI.Tip k1 v1, IMI.Bin {}) -> diffTip True k1 v1 t2 acc
+          (IMI.Bin {}, IMI.Tip k2 v2) -> diffTip False k2 v2 t1 acc
+#if MIN_VERSION_containers(0,8,0)
+          (IMI.Bin p1 l1 r1, IMI.Bin p2 l2 r2) -> case ITC.treeTreeBranch p1 p2 of
+            ITC.ABL -> go l1 t2 (allKeys r1 acc)
+            ITC.ABR -> allKeys l1 (go r1 t2 acc)
+            ITC.BAL -> go t1 l2 (allKeys r2 acc)
+            ITC.BAR -> allKeys l2 (go t1 r2 acc)
+            ITC.EQL -> go l1 l2 (go r1 r2 acc)
+            ITC.NOM -> allKeys t1 (allKeys t2 acc)
+#else
+          (IMI.Bin p1 m1 l1 r1, IMI.Bin p2 m2 l2 r2)
+            | IMI.shorter m1 m2 -> merge1 p1 m1 l1 r1 p2 t2 acc
+            | IMI.shorter m2 m1 -> merge2 p2 m2 l2 r2 p1 t1 acc
+            | p1 == p2 -> go l1 l2 (go r1 r2 acc)
+            | otherwise -> allKeys t1 (allKeys t2 acc)
+
+    merge1 p1 m1 l1 r1 p2 t2 acc
+      | IMI.nomatch p2 p1 m1 = allKeys (IMI.Bin p1 m1 l1 r1) (allKeys t2 acc)
+      | IMI.zero p2 m1 = go l1 t2 (allKeys r1 acc)
+      | otherwise = allKeys l1 (go r1 t2 acc)
+
+    merge2 p2 m2 l2 r2 p1 t1 acc
+      | IMI.nomatch p1 p2 m2 = allKeys t1 (allKeys (IMI.Bin p2 m2 l2 r2) acc)
+      | IMI.zero p1 m2 = go t1 l2 (allKeys r2 acc)
+      | otherwise = allKeys l2 (go t1 r2 acc)
+#endif
+
+    diffTip !fromOld !k !v !t acc = case t of
+      IMI.Nil -> k : acc
+      IMI.Tip k' v'
+        | k == k' ->
+            let same = if fromOld then eq v v' else eq v' v
+             in if same then acc else k : acc
+        | otherwise -> k : k' : acc
+#if MIN_VERSION_containers(0,8,0)
+      IMI.Bin p l r
+        | ITC.nomatch k p -> k : allKeys t acc
+        | ITC.left k p -> diffTip fromOld k v l (allKeys r acc)
+        | otherwise -> allKeys l (diffTip fromOld k v r acc)
+#else
+      IMI.Bin p m l r
+        | IMI.nomatch k p m -> k : allKeys t acc
+        | IMI.zero k m -> diffTip fromOld k v l (allKeys r acc)
+        | otherwise -> allKeys l (diffTip fromOld k v r acc)
+#endif
 
 -- | 'diffKeysBy' with '==' behind a pointer check: an entry a map update left
 -- alone keeps its object, so it compares without touching its value.

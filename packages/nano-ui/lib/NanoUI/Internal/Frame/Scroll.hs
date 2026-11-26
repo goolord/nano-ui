@@ -17,19 +17,21 @@ import Data.Foldable (find)
 import Data.Functor ((<&>))
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Maybe (fromMaybe, isJust)
+import Data.Primitive.PrimArray (readPrimArray)
 import NanoUI.Internal.Context
 import NanoUI.Internal.Frame.Hit (overlayHitAllowed, overlayHitRoot, passesPointer)
 import NanoUI.Internal.Frame.Node (childPaintClip, readScrollNode)
 import NanoUI.Internal.Layout.ScrollGeometry
 import NanoUI.Internal.Frame.TextArea (TextAreaBars (..), textAreaBarLayouts, textAreaScrollGeom)
-import NanoUI.Internal.Id (WidgetId)
+import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Font (ScrollBarSlot (..))
 import NanoUI.Internal.Monad (ifM, (<&&>))
 import NanoUI.Internal.Input
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Internal.Style (Flow (..), Padding (..), PointerMode (..))
-import NanoUI.Internal.Types (Rect (..), Size (..), V2 (..), rectContains, rectInflate, rectIntersect, rectUnion)
+import NanoUI.Internal.Types (Rect (..), Size (..), V2 (..), rectContains, rectInflate, rectIntersect, rectUnion, writeRectAt)
+import NanoUI.Internal.WidgetText (containerFlagClip, hasFlag)
 
 -- | Offset every node by its enclosing scrollers and set its clip. The root
 -- clips to the window, as in paint, so a root smaller than its content still
@@ -39,76 +41,138 @@ applyScrollOffsets ctx (Size w h) = do
   beginScrollMetrics ctx
   -- A frame that added no widgets has no root to walk.
   count <- arenaCount (ctxNodeArena ctx)
-  when (count > 0) $ transformSubtree ctx 0 0 0 (Rect 0 0 w h)
+  when (count > 0) $ do
+    a <- arenaArrays (ctxNodeArena ctx)
+    transformSubtree ctx a 0 0 0 0 0 w h
 
-transformSubtree :: Context -> NodeIdx -> Float -> Float -> Rect -> IO ()
-transformSubtree ctx@Context {ctxNodeArena = na} idx scrollX scrollY parentClip = do
-  nt <- getNodeType na idx
-  Rect lx ly vw vh <- getNodeRect na idx
-  let
-    floating = isFloatingNode nt
-    (sx, sy) = if floating then (0, 0) else (scrollX, scrollY)
-    !vx = lx + sx
-    !vy = ly + sy
-    rect = Rect vx vy vw vh
-    -- A floating node is painted in its own rect, wherever it was declared.
-    outer = if floating then rect else parentClip
-    -- A rect entirely outside the parent clip gets an empty clip, not the
-    -- parent's.
-    within r = fromMaybe (Rect (rectX r) (rectY r) 0 0) (rectIntersect parentClip r)
-    -- A scroller or panel records the clip it gives its content; any other
-    -- node the clip it is painted in.
-    records = isScrollNode nt || nt == NodePanel
+-- | Walk a subtree applying accumulated scroll offsets and writing each node's
+-- clip rect. Kept unboxed over coordinates and clip bounds so non-scrolling
+-- leaves and plain containers allocate nothing.
+transformSubtree :: Context -> NodeArenaArrays -> NodeIdx -> Float -> Float -> Float -> Float -> Float -> Float -> IO ()
+transformSubtree ctx a !idx !scrollX !scrollY !pcx !pcy !pcw !pch = do
+  nt <- readTagEnum a idx TagNodeType
+  let !geom = naArrGeom a
+      !gOff = idx * geomStride
+  !lx <- readPrimArray geom gOff
+  !ly <- readPrimArray geom (gOff + 1)
+  !vw <- readPrimArray geom (gOff + 2)
+  !vh <- readPrimArray geom (gOff + 3)
+  let !floating = isFloatingNode nt
+      !sx = if floating then 0 else scrollX
+      !sy = if floating then 0 else scrollY
+      !vx = lx + sx
+      !vy = ly + sy
   -- With no offset on either axis the placed rect equals the laid-out one, so
   -- the write is a no-op; a floating node always takes that path.
-  unless (sx == 0 && sy == 0) $ setRect na idx vx vy vw vh
-  -- The children are clipped as paint clips them ('childPaintClip'): a
-  -- widget's children, its adornments or content, to the widget, so none
-  -- takes the pointer outside it; a floating node's to the node. Most nodes
-  -- have no children and record the clip they are painted in, so that lookup
-  -- is skipped.
-  kids <- getFirstChild na idx
-  !inner <-
-    if floating || (kids < 0 && not records)
-      then pure outer
-      else maybe parentClip within <$> childPaintClip ctx idx nt rect
-  setClipRect na idx (if records then inner else outer)
-  -- Recursing from inside each branch keeps the child transform in registers;
-  -- returning it as a tuple allocated one box per node per frame.
-  let descend !cx !cy = forChildNodes_ na idx $ \ci -> transformSubtree ctx ci cx cy inner
-  if isScrollNode nt
+  unless (sx == 0 && sy == 0) $ writeRectAt geom gOff vx vy vw vh
+  kids <- readTree a idx TreeFirstChild
+  if floating
     then do
-      (axes, viewport, range) <- scrollNodeGeometry ctx idx rect
-      wid <- getWidgetId na idx
-      -- The only pass that sees a scroller's placed geometry. Everything
-      -- that scrolls one between frames reads it back from here.
-      owner <- cacheScrollMetrics ctx wid axes viewport range
-      when owner $ applyPendingScrollOffset ctx wid axes
-      -- An offset set outright before this layout, or left over from
-      -- content that has since shrunk, is held to the range the content
-      -- has now, on the axes this scroller owns. Only the node that owns the
-      -- id this frame holds it: another with the same id (a table's frozen
-      -- pane, whose range lacks the body's bar lane) would hold the body short
-      -- of its end.
-      cur@(V2 cx cy) <- getScrollOffsetIn ctx wid axes
-      let
-        V2 hx hy = clampScrollOffset range cur
-        held = case axes of
-          ScrollAxisY -> V2 cx hy
-          ScrollAxisX -> V2 hx cy
-          ScrollAxisXY -> V2 hx hy
-        V2 ox oy = if owner then held else cur
-        -- A 1D scroller moves its content on its own axis only: the other
-        -- slot can hold an offset for one sharing its id (a frozen pane
-        -- follows its table's body down, not across).
-        (dx, dy) = case axes of
-          ScrollAxisY -> (0, oy)
-          ScrollAxisX -> (ox, 0)
-          ScrollAxisXY -> (ox, oy)
-      when (owner && held /= cur) $ setScrollOffsetIn ctx wid axes held
-      when owner $ placeScrollContent ctx wid dx dy
-      descend (sx - dx) (sy - dy)
-    else descend sx sy
+      -- A floating node is painted in its own rect, wherever it was declared.
+      writeClipRectRaw a idx vx vy vw vh
+      unless (kids < 0) $ descendSubtree ctx a kids 0 0 vx vy vw vh
+    else if kids < 0 && not (isScrollNode nt || nt == NodePanel)
+      then writeClipRectRaw a idx pcx pcy pcw pch
+      else case nt of
+        NodeContainer -> do
+          writeClipRectRaw a idx pcx pcy pcw pch
+          si <- readStyleIdx a idx
+          if hasFlag containerFlagClip si
+            then do
+              let !x0 = max pcx vx
+                  !y0 = max pcy vy
+                  !x1 = min (pcx + pcw) (vx + vw)
+                  !y1 = min (pcy + pch) (vy + vh)
+              if x1 > x0 && y1 > y0
+                then descendSubtree ctx a kids sx sy x0 y0 (x1 - x0) (y1 - y0)
+                else descendSubtree ctx a kids sx sy vx vy 0 0
+            else descendSubtree ctx a kids sx sy pcx pcy pcw pch
+        _ -> transformSpecialNode ctx a idx nt kids sx sy vx vy vw vh pcx pcy pcw pch
+
+descendSubtree :: Context -> NodeArenaArrays -> NodeIdx -> Float -> Float -> Float -> Float -> Float -> Float -> IO ()
+descendSubtree ctx a !first !sx !sy !ccx !ccy !ccw !cch = go first
+  where
+    go !ci
+      | ci < 0 = pure ()
+      | otherwise = do
+          transformSubtree ctx a ci sx sy ccx ccy ccw cch
+          ns <- readTree a ci TreeNextSibling
+          go ns
+
+-- | Scroll containers, panels, and widgets with children: compute their inner
+-- clip via 'childPaintClip' and update scroll offsets out of line from the
+-- zero-allocation container/leaf fast path.
+{-# NOINLINE transformSpecialNode #-}
+transformSpecialNode ::
+  Context -> NodeArenaArrays -> NodeIdx -> NodeType -> NodeIdx ->
+  Float -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> IO ()
+transformSpecialNode ctx a !idx nt !kids !sx !sy !vx !vy !vw !vh !pcx !pcy !pcw !pch = do
+  let !rect = Rect vx vy vw vh
+      !records = isScrollNode nt || nt == NodePanel
+  mClip <- childPaintClip ctx idx nt rect
+  case mClip of
+    Nothing -> do
+      writeClipRectRaw a idx pcx pcy pcw pch
+      if isScrollNode nt
+        then do
+          (dx, dy) <- updateScrollNodeOffset ctx a idx rect
+          unless (kids < 0) $ descendSubtree ctx a kids (sx - dx) (sy - dy) pcx pcy pcw pch
+        else unless (kids < 0) $ descendSubtree ctx a kids sx sy pcx pcy pcw pch
+    Just (Rect rx ry rw rh) -> do
+      let !x0 = max pcx rx
+          !y0 = max pcy ry
+          !x1 = min (pcx + pcw) (rx + rw)
+          !y1 = min (pcy + pch) (ry + rh)
+          !hit = x1 > x0 && y1 > y0
+          !icx = if hit then x0 else rx
+          !icy = if hit then y0 else ry
+          !icw = if hit then x1 - x0 else 0
+          !ich = if hit then y1 - y0 else 0
+      if records
+        then writeClipRectRaw a idx icx icy icw ich
+        else writeClipRectRaw a idx pcx pcy pcw pch
+      if isScrollNode nt
+        then do
+          (dx, dy) <- updateScrollNodeOffset ctx a idx rect
+          unless (kids < 0) $ descendSubtree ctx a kids (sx - dx) (sy - dy) icx icy icw ich
+        else unless (kids < 0) $ descendSubtree ctx a kids sx sy icx icy icw ich
+
+-- | Record a scroll container's solved geometry and clamp its offset, returning
+-- the effective @(dx, dy)@ offset to subtract from its children. Kept out of
+-- line from 'transformSubtree' so non-scrolling nodes keep a tiny loop body.
+{-# NOINLINE updateScrollNodeOffset #-}
+updateScrollNodeOffset :: Context -> NodeArenaArrays -> NodeIdx -> Rect -> IO (Float, Float)
+updateScrollNodeOffset ctx a idx rect = do
+  (axes, viewport, range) <- scrollNodeGeometry ctx idx rect
+  wid <- WidgetId . fromIntegral <$> readTree a idx TreeWidgetId
+  -- The only pass that sees a scroller's placed geometry. Everything
+  -- that scrolls one between frames reads it back from here.
+  owner <- cacheScrollMetrics ctx wid axes viewport range
+  when owner $ applyPendingScrollOffset ctx wid axes
+  -- An offset set outright before this layout, or left over from
+  -- content that has since shrunk, is held to the range the content
+  -- has now, on the axes this scroller owns. Only the node that owns the
+  -- id this frame holds it: another with the same id (a table's frozen
+  -- pane, whose range lacks the body's bar lane) would hold the body short
+  -- of its end.
+  cur@(V2 cx cy) <- getScrollOffsetIn ctx wid axes
+  let
+    V2 hx hy = clampScrollOffset range cur
+    held = case axes of
+      ScrollAxisY -> V2 cx hy
+      ScrollAxisX -> V2 hx cy
+      ScrollAxisXY -> V2 hx hy
+    V2 ox oy = if owner then held else cur
+    -- A 1D scroller moves its content on its own axis only: the other
+    -- slot can hold an offset for one sharing its id (a frozen pane
+    -- follows its table's body down, not across).
+    (dx, dy) = case axes of
+      ScrollAxisY -> (0, oy)
+      ScrollAxisX -> (ox, 0)
+      ScrollAxisXY -> (ox, oy)
+  when (owner && held /= cur) $ setScrollOffsetIn ctx wid axes held
+  when owner $ placeScrollContent ctx wid dx dy
+  pure (dx, dy)
 
 -- | Axes, content viewport and reachable offset range of the scroll container
 -- at @idx@ placed at @rect@, in window axes. Shared by the mouse wheel and
@@ -194,10 +258,9 @@ scrollOwnerNode ::
   -> WidgetId
   -> IO (Maybe NodeIdx)
 scrollOwnerNode suppressed Context {ctxNodeArena = na} wid =
-  findClassNodeM na PointerNodes $ \idx -> do
+  findClassNodeM na ScrollableNodes $ \idx -> do
     nt <- getNodeType na idx
-    pure (nt == NodeTextArea || isScrollNode nt)
-      <&&> ((== wid) <$> getWidgetId na idx)
+    ((== wid) <$> getWidgetId na idx)
       <&&> if nt == NodeTextArea
         then pure True
         else (\sn -> not (suppressed (snConfig sn) (sn2D sn) (snDir sn))) <$> readScrollNode na idx
@@ -426,42 +489,44 @@ probeScrollBarHover ctx@Context {ctxNodeArena = na} inp = do
     Nothing
       | heldIn MouseLeft inp || not (rectContains (Rect 0 0 winW winH) mouse) -> pure Nothing
       | otherwise -> do
-          top <- overlayHitRoot ctx mouse
-          hitRef <- newIORef Nothing
-          let candidate idx = do
-                nt <- getNodeType na idx
-                let isScroll = isScrollNode nt
-                pure (nt == NodeTextArea || isScroll)
-                  <&&> do
+          scCount <- scrollableNodeCount na
+          if scCount <= 0
+            then pure Nothing
+            else do
+              top <- overlayHitRoot ctx mouse
+              hitRef <- newIORef Nothing
+              let candidate idx = do
+                    nt <- getNodeType na idx
+                    let isScroll = isScrollNode nt
                     Rect rx ry rw rh <- getNodeRect na idx
                     -- A ScrollBarWindow bar sits outside the scroller's rect in
                     -- the enclosing window's padding, so expand its hit bounds.
                     pad <- if isScroll then (\s -> if s == ScrollBarWindow then 10 else 0) <$> scrollBarSlotOf na idx else pure 0
                     pure (rectContains (Rect rx ry (rw + pad) (rh + pad)) mouse)
-                  <&&> do
-                    -- A scroller's own clip is its viewport, short of its
-                    -- bars; the clip around it is its parent's, cut to what
-                    -- the parent gives its children (a clip container's
-                    -- rect), which only a scroller or panel parent records.
-                    owner <- if isScroll then getParent na idx else pure idx
-                    let inside = maybe True (`rectContains` mouse)
-                    if owner < 0
-                      then pure True
-                      else
-                        (inside <$> getClipBounds na owner)
-                          <&&> if owner == idx
-                            then pure True
-                            else do
-                              ont <- getNodeType na owner
-                              inside <$> (childPaintClip ctx owner ont =<< getNodeRect na owner)
-                  <&&> overlayHitAllowed ctx top idx
-                  <&&> do
-                    wid <- getWidgetId na idx
-                    hit <- barWhere wid (\(_, l, _) -> onScrollBar mouse l) <$> scrollBarsFor ctx idx wid
-                    writeIORef hitRef hit
-                    pure (isJust hit)
-          _ <- findClassNodeM na PointerNodes candidate
-          readIORef hitRef
+                      <&&> do
+                        -- A scroller's own clip is its viewport, short of its
+                        -- bars; the clip around it is its parent's, cut to what
+                        -- the parent gives its children (a clip container's
+                        -- rect), which only a scroller or panel parent records.
+                        owner <- if isScroll then getParent na idx else pure idx
+                        let inside = maybe True (`rectContains` mouse)
+                        if owner < 0
+                          then pure True
+                          else
+                            (inside <$> getClipBounds na owner)
+                              <&&> if owner == idx
+                                then pure True
+                                else do
+                                  ont <- getNodeType na owner
+                                  inside <$> (childPaintClip ctx owner ont =<< getNodeRect na owner)
+                      <&&> overlayHitAllowed ctx top idx
+                      <&&> do
+                        wid <- getWidgetId na idx
+                        hit <- barWhere wid (\(_, l, _) -> onScrollBar mouse l) <$> scrollBarsFor ctx idx wid
+                        writeIORef hitRef hit
+                        pure (isJust hit)
+              _ <- findClassNodeM na ScrollableNodes candidate
+              readIORef hitRef
   where
     mouse = inputMousePos inp
     Size winW winH = inputWindowSize inp

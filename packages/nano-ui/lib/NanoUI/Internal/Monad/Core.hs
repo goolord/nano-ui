@@ -79,7 +79,6 @@ import Control.Monad.IO.Unlift (MonadUnliftIO)
 import Control.Monad.Trans.Control (MonadBaseControl)
 import Data.Bits ((.&.), (.|.))
 import Data.Hashable (Hashable, hash)
-import Data.IORef (readIORef, writeIORef)
 import Data.Monoid (Ap (..))
 import Data.Text (Text)
 import Data.Word (Word64)
@@ -89,11 +88,12 @@ import GHC.Clock (getMonotonicTime)
 import NanoUI.Internal.BackendSession (BackendSession, SBackend)
 import NanoUI.Internal.Context (askHostIO, Host, Context (ctxNodeArena, ctxContainerStack, ctxIdCursor, ctxFontMetrics, ctxFontSize), currentTheme, damageFull, damageKey, damagePeers, damageRect, damageWidget, pushThemeScope, scopeRawTheme, routedInput, backendSession, getSystemAppearance, setThemeInView)
 import NanoUI.Internal.Context qualified as Ctx
+import NanoUI.Internal.Context.Types (readContainerStack, writeContainerStack)
 import NanoUI.Internal.Draw.Types (TextFont (..))
 import NanoUI.Internal.Font (FontMetrics, lineWidthIO, truncateTextIO, truncateTextWithIO)
 import NanoUI.Internal.Frame.Node (resolveTextFont)
-import NanoUI.Internal.Id (enterKeyed, enterScope, scopeTag, IdContext, WidgetId)
-import NanoUI.Internal.Id.Cursor (peekWidgetId, readIdCursor, skipSiblingIds, takeWidgetId, writeIdCursor)
+import NanoUI.Internal.Id (scopeTag, IdContext, WidgetId)
+import NanoUI.Internal.Id.Cursor (peekWidgetId, popIdScope, pushIdScope, pushKeyedIdScope, readIdCursor, readIdDepth, skipSiblingIds, takeWidgetId, writeIdCursor, writeIdDepth)
 import NanoUI.Internal.Input (noButtons, stripInteractionInput, withoutPointer, Input (inputComposition, inputMousePos, inputWindowSize, inputButtonsHeld, inputKeysHeld), MouseButton, Pressable (heldIn, pressedIn, releasedIn))
 import NanoUI.Internal.Layout.Arena (getArenaScope, setArenaScope)
 import NanoUI.Internal.Style (Appearance, FontStyle, FontVariant, FontWeight, Layout, TextDecoration (DecorationNone), TextEllipsis, Theme, defaultLayout)
@@ -228,12 +228,14 @@ catchView :: Exception e => NanoUI a -> (e -> NanoUI a) -> NanoUI a
 catchView m handler = do
   ctx <- askContext
   let na = ctxNodeArena ctx
-  saved <- liftIO $ (,,) <$> readIORef (ctxContainerStack ctx) <*> readIdCursor (ctxIdCursor ctx) <*> getArenaScope na
+      ic = ctxIdCursor ctx
+  saved <- liftIO $ (,,,) <$> readContainerStack (ctxContainerStack ctx) <*> readIdCursor ic <*> readIdDepth ic <*> getArenaScope na
   m `Catch.catch` \e -> do
     liftIO $ case saved of
-      (stack, ids, sc) -> do
-        writeIORef (ctxContainerStack ctx) stack
-        writeIdCursor (ctxIdCursor ctx) ids
+      (stack, ids, depth, sc) -> do
+        writeContainerStack (ctxContainerStack ctx) stack
+        writeIdCursor ic ids
+        writeIdDepth ic depth
         setArenaScope na sc
     handler e
 
@@ -285,7 +287,13 @@ withIdFrame enter m = do
 -- Put conditional content inside this scope to keep later siblings stable.
 {-# INLINE scope #-}
 scope :: NanoUI a -> NanoUI a
-scope = withIdFrame (enterScope scopeTag)
+scope m = do
+  ctx <- askContext
+  let ic = ctxIdCursor ctx
+  liftIO $ pushIdScope ic scopeTag
+  r <- m
+  liftIO $ popIdScope ic
+  pure r
 
 -- | Run the action under a key so its widgets keep their ids and state when
 -- earlier siblings change. Keys must be unique among siblings in the same
@@ -304,7 +312,13 @@ withKey k = keyedTag (fromIntegral (hash k))
 -- among siblings; use 'withKey' to hash an application key.
 {-# INLINE keyedTag #-}
 keyedTag :: Word64 -> NanoUI a -> NanoUI a
-keyedTag tag = withIdFrame (enterKeyed tag)
+keyedTag tag m = do
+  ctx <- askContext
+  let ic = ctxIdCursor ctx
+  liftIO $ pushKeyedIdScope ic tag
+  r <- m
+  liftIO $ popIdScope ic
+  pure r
 
 -- | The mutable context for this view. It belongs to the current UI session.
 {-# INLINE askContext #-}

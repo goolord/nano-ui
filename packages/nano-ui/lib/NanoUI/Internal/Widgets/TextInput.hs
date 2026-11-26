@@ -220,6 +220,7 @@ textInputConfigured :: TextInputConfig -> Var Text -> NanoUI ()
 textInputConfigured cfg v = void (textInputConfigured' cfg v)
 
 -- | 'textInputConfigured' returning its 'Response'.
+{-# INLINE textInputConfigured' #-}
 textInputConfigured' :: TextInputConfig -> Var Text -> NanoUI Response
 textInputConfigured' (TextInputConfig placeholder password f adorns) v = do
   lay <- widgetBaseLayout textInputLayout f
@@ -247,6 +248,9 @@ focusAndIme ctx wid acceptIme purpose = do
     liftIO (requestInputMethod ctx wid Nothing purpose)
   pure isFocus
 
+singleLinePasswordMode :: EditorMode
+singleLinePasswordMode = singleLineMode {modeCopyable = False}
+
 -- | One frame of a single-line field's text state: load the text (seeding
 -- @initial@ on first use) with its cursor and anchor, run the editor while
 -- focused, and save any change. While unfocused, @unfocusedText@ (when given)
@@ -256,14 +260,14 @@ focusAndIme ctx wid acceptIme purpose = do
 editTextField :: WidgetId -> EditorMode -> Text -> Maybe Text -> NanoUI (Text, Text, Bool, Bool)
 editTextField wid mode initial unfocusedText = do
   ctx <- askContext
-  inp <- askInput
   store <- liftIO (getStore ctx)
-  let
-    key = intKey wid
-    stored = lookupSlot fieldText key store
-    s0 = loadTextInputState store key (fromMaybe initial stored)
-    pulse = memberSpec slotTextChanged key store
-  when (isNothing stored || lookupSpec slotTextMode key store /= Just mode || pulse) $
+  let !key = intKey wid
+      stored = lookupSlot fieldText key store
+      !pulse = memberSpec slotTextChanged key store
+      !modeMatches = case lookupSpec slotTextMode key store of
+        Just m -> m == mode
+        Nothing -> False
+  when (isNothing stored || not modeMatches || pulse) $
     liftIO . modifyStore ctx $
       (if isNothing stored then insertSlot fieldText key initial else id)
         . deleteSpec slotTextChanged key
@@ -271,17 +275,23 @@ editTextField wid mode initial unfocusedText = do
   -- Password fields request 'InputSecure' so the IME does not display or
   -- record their text.
   isFocus <- focusAndIme ctx wid (modeEditable mode) (if modeCopyable mode then InputNormal else InputSecure)
-  mEdited <- if isFocus then liftIO (editTextInput ctx mode inp store key s0) else pure Nothing
-  let s1 = case mEdited of
-        Just ed -> editorTextState ed
-        Nothing
-          -- A focused field keeps what the user typed, or a command run
-          -- between frames stored, until it loses focus.
-          | isFocus -> s0
-          | otherwise -> maybe s0 (\t -> s0 {tisText = t}) unfocusedText
-  when (s1 /= s0) $
-    liftIO $ modifyStore ctx (maybe (saveTextInputState key s1) (saveTextEditor key) mEdited)
-  pure (tisText s0, tisText s1, isFocus, pulse)
+  let !curText = fromMaybe initial stored
+  if not isFocus && maybe True (eqByPtr curText) unfocusedText
+    then pure (curText, curText, False, pulse)
+    else do
+      inp <- askInput
+      let s0 = loadTextInputState store key curText
+      mEdited <- if isFocus then liftIO (editTextInput ctx mode inp store key s0) else pure Nothing
+      let s1 = case mEdited of
+            Just ed -> editorTextState ed
+            Nothing
+              -- A focused field keeps what the user typed, or a command run
+              -- between frames stored, until it loses focus.
+              | isFocus -> s0
+              | otherwise -> maybe s0 (\t -> s0 {tisText = t}) unfocusedText
+      when (s1 /= s0) $
+        liftIO $ modifyStore ctx (maybe (saveTextInputState key s1) (saveTextEditor key) mEdited)
+      pure (tisText s0, tisText s1, isFocus, pulse)
 
 -- | Shared single-line field builder. The caller's @value@ is adopted as by
 -- 'adoptSlot'. @styleIdx@ may carry the search or password
@@ -297,15 +307,15 @@ buildTextInput ::
   NanoUI (Response, Text)
 buildTextInput styleIdx layout placeholder value mDebounceMs = do
   (wid, ctx) <- freshWidget
-  let key = intKey wid
+  let !key = intKey wid
   _ <- liftIO $ adoptSlot fieldText ctx wid value
   -- Both modes are constants, so an idle field allocates no mode record.
-  let mode = if hasFlag textInputFlagPassword styleIdx then singleLineMode {modeCopyable = False} else singleLineMode
+  let mode = if hasFlag textInputFlagPassword styleIdx then singleLinePasswordMode else singleLineMode
   (oldText, newText, isFocus, pulse) <- editTextField wid mode value Nothing
   liftIO $ recordSlot fieldText ctx key newText
   inp <- askInput
-  let submitted = isFocus && pressedOnceIn KeyEnter inp
-      edited = pulse || newText /= oldText
+  let !submitted = isFocus && pressedOnceIn KeyEnter inp
+      !edited = pulse || not (eqByPtr newText oldText)
   changed <- maybe (pure edited) (liftIO . debounceSearchChanged ctx key isFocus edited) mDebounceMs
   -- The layout's font face, weight and slant ride in the style bits, as on
   -- a label; the flags sit above them.

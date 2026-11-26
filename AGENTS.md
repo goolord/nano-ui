@@ -123,6 +123,14 @@ These are decisions already made; do not re-propose the alternatives.
   checkbox, radio and tree). To fold one widget into another, add a style flag
   on the existing node type, as tabs, menus and table headers do, and
   benchmark still frames against `main`.
+- **OpenGL is the default SDL render driver on Windows.** `RenderDriverAuto`
+  picks `"opengl"` on Windows (with native GLSL 150 support in
+  `packages/nano-ui-sdl/cbits/nano_ui_render.c` for `nano-ui-shader`). SDL's
+  D3D11 flip-model swap chain stalls Win32's modal resize loop, and SDL 3.4's
+  Vulkan `"gpu"` driver cuts frame rate roughly in half and stretches/shifts
+  during live resize (per-step `vkDeviceWaitIdle` swapchain recreation,
+  Windows Vulkan WSI `DXGI_SCALING_STRETCH`, and SDL 3.4's stale backbuffer).
+  Do not switch Windows `RenderDriverAuto` back to `"gpu"` or `"d3d11"`.
 - **Views never take a backend handle.** Component setup returns a plain state
   record (`newDemo :: IO DemoState`) and `main` runs `runSdlApp opts (demoUi state)`.
   SDL view-side operations find the session on the `Context`; `askSdlEnv` is

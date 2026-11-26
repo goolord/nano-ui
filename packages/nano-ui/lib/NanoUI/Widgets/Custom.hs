@@ -256,13 +256,15 @@ customWidgetWithId wid spec = do
   ctx <- askContext
   inp <- askInput
   lay <- widgetBaseLayout defaultLayout (widgetLayout spec)
-  liftIO (when (widgetFocusable spec) $ registerFocusable ctx wid)
+  when (widgetFocusable spec) $ liftIO (registerFocusable ctx wid)
   resp0 <- addWidget wid NodeDrawing T.empty 0 lay
   -- Registered on the node just added ('NanoUI.Internal.Context.ctxNodeCustom').
-  liftIO $ do
-    mapM_ (registerCustomMeasure ctx wid) (widgetMeasure spec)
+  cdc <- liftIO $ do
+    case widgetMeasure spec of
+      Just fn -> registerCustomMeasure ctx wid fn
+      Nothing -> pure ()
     registerCustomEntry ctx wid (specEntry spec)
-  cdc <- liftIO (customDrawContext ctx (ctxFontMetrics ctx) wid (respHovered resp0) (respPressed resp0))
+    customDrawContext ctx (ctxFontMetrics ctx) wid (respHovered resp0) (respPressed resp0)
   pure (widgetInteract spec resp0 cdc inp)
 
 -- | Instantiates a custom widget from a 'CustomWidgetSpec'.

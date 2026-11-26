@@ -14,6 +14,7 @@ import Data.Text qualified as T
 import Data.Text.IO.Utf8 qualified as TIO
 import GHC.Generics (Generic)
 import NanoUI.Internal.Context (Context (..), ExplainState (..), InputMethodRequest (..))
+import NanoUI.Internal.Context.Types (readContainerStack, writeContainerStack)
 import NanoUI.Internal.Id.Cursor (readIdCursor)
 import NanoUI.Internal.Layout.Arena (arenaCount)
 import System.Directory (doesDirectoryExist)
@@ -53,7 +54,7 @@ perBuild ctx =
     , ("ctxInputMethod", show <$> readIORef (ctxInputMethod ctx))
     , ("ctxIdCursor", show <$> readIdCursor (ctxIdCursor ctx))
     , ("ctxExplain", show . esScopes <$> readIORef (ctxExplain ctx))
-    , ("ctxContainerStack", show <$> readIORef (ctxContainerStack ctx))
+    , ("ctxContainerStack", show <$> readContainerStack (ctxContainerStack ctx))
     , ("ctxFocusablesCount", show <$> readPrimVar (ctxFocusablesCount ctx))
     , ("ctxCursorZones", show <$> readIORef (ctxCursorZones ctx))
     , ("ctxCursorRegions", show <$> readIORef (ctxCursorRegions ctx))
@@ -79,7 +80,7 @@ runPerBuildResetTest ctx failed = do
           focus <- readIORef (ctxFocusId c)
           writeIORef (ctxInputMethod c) (Just (InputMethodRequest focus Nothing InputNormal))
           modifyIORef' (ctxExplain c) (\es -> es {esScopes = [(0, 1)]})
-          writeIORef (ctxContainerStack c) [0]
+          writeContainerStack (ctxContainerStack c) [0]
           writeIORef (ctxCursorZones c) [(Rect 0 0 1 1, UiCursorMove)]
           writeIORef (ctxCursorRegions c) [(0, 1, UiCursorMove)]
       inp = withInput 400 300

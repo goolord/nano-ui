@@ -12,22 +12,22 @@ module NanoUI.Internal.Frame.Paint.Widgets
   ) where
 
 import Control.Monad (unless, void, when)
+import Data.Bits ((.&.))
 import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe)
-import Data.Primitive.PrimArray (PrimArray)
+import Data.Primitive.PrimArray (PrimArray, readPrimArray)
 import qualified Data.Text as T
 import Data.Word (Word64)
-import NanoUI.Internal.Context (Context (..), activeEffectNodes, getAnimationValue, getStore)
+import NanoUI.Internal.Context (Context (..), WidgetTextPlacement (..), activeEffectNodes, getAnimationValue, getStore)
 import NanoUI.Internal.Draw
 import NanoUI.Internal.Font
 import NanoUI.Internal.Frame.Chrome
-import NanoUI.Internal.Frame.Node (resolveFontFor)
-import NanoUI.Internal.Frame.Spans (forWidgetTextPlacements_, selectableTextGeometry)
+import NanoUI.Internal.Frame.Node (nodeAdornmentInsets, resolveFontFor)
+import NanoUI.Internal.Frame.Spans (cachedWidgetLabel, forWidgetTextPlacements_, selectableTextGeometry)
 import NanoUI.Internal.Frame.TextArea (drawTextAreaContentWith, resolveTextAreaFont)
 import NanoUI.Internal.Frame.TextInput
 import NanoUI.Internal.Id (WidgetId (..))
 import NanoUI.Internal.Layout.Arena
-import NanoUI.Internal.Monad ((<&&>))
 import NanoUI.Internal.Style (AlignX (..), Style, Theme, fadeAlpha, fieldIconColor, styleBg, styleBorder, styleFg, themeAccent, themeButton, themeInput, themeOnAccent)
 import NanoUI.Internal.Types (Color (..), Rect (..), clamp, clamp01, colorA, lerpColor, onGrid, rectInflate, rectNonEmpty)
 import NanoUI.Internal.WidgetText
@@ -96,7 +96,7 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
   let ctx = peContext env
       da = peDrawArena env
       fm = peFontMetrics env
-  style <- widgetVisualStyleWith ctx (peHotId env) (peActiveId env) (peFocusId env) NodeTextInput idx
+  style <- widgetVisualStyleWithTheme ctx (peTheme env) (peHotId env) (peActiveId env) (peFocusId env) NodeTextInput idx
   focus <- (== peFocusId env) <$> getWidgetId (peNodeArena env) idx
   si <- getStyleIdx (peNodeArena env) idx
   if hasFlag textInputFlagNumeric si
@@ -136,7 +136,7 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
 {-# NOINLINE paintTextAreaNode #-}
 paintTextAreaNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintTextAreaNode env@PaintEnv {peContext = ctx, peDrawArena = da} idx (Rect x y w h) = do
-  style <- widgetVisualStyleWith ctx (peHotId env) (peActiveId env) (peFocusId env) NodeTextArea idx
+  style <- widgetVisualStyleWithTheme ctx (peTheme env) (peHotId env) (peActiveId env) (peFocusId env) NodeTextArea idx
   areaFm <- resolveTextAreaFont ctx idx
   paintStyledRect da style (Rect x y w h)
   drawTextAreaContentWith da ctx areaFm idx x y w h style
@@ -147,9 +147,10 @@ paintTextAreaNode env@PaintEnv {peContext = ctx, peDrawArena = da} idx (Rect x y
 {-# NOINLINE paintWidget #-}
 paintWidget :: PaintEnv -> NodeIdx -> NodeType -> Rect -> IO ()
 paintWidget env@PaintEnv {peContext = ctx} idx nt rect@(Rect _ ry _ rh) = do
-  style <- widgetVisualStyleWith ctx (peHotId env) (peActiveId env) (peFocusId env) nt idx
-  value <- getNodeValue (peNodeArena env) idx
-  si <- getStyleIdx (peNodeArena env) idx
+  style <- widgetVisualStyleWithTheme ctx (peTheme env) (peHotId env) (peActiveId env) (peFocusId env) nt idx
+  a <- arenaArrays (peNodeArena env)
+  value <- readStyle a idx StyleNodeValue
+  si <- readStyleIdx a idx
   -- Menu rows paint edge-to-edge across the popup panel, exactly like the
   -- text-field context menu painter: the hover fill and the accent marker
   -- span the panel width instead of the (padded) node rect.
@@ -169,7 +170,7 @@ paintWidget env@PaintEnv {peContext = ctx} idx nt rect@(Rect _ ry _ rh) = do
 -- for every widget on every painted frame.
 {-# NOINLINE paintWidgetBackground #-}
 paintWidgetBackground :: PaintEnv -> NodeIdx -> NodeType -> Style -> Word64 -> Rect -> Float -> Rect -> IO ()
-paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
+paintWidgetBackground env idx nt style si menuRowRect value rect@(Rect x y w h) = do
   let ctx = peContext env
       da = peDrawArena env
       fm = peFontMetrics env
@@ -192,23 +193,32 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
         ButtonMenuBar -> False
         ButtonRow -> False
         _ -> opaqueBg
-  let canGroup =
+      !canGroup =
         opaqueBg
           && drawStroke
           && (nt == NodeSelect || (nt == NodeButton && (bkind == ButtonPlain || bkind == ButtonContent)))
-  let na = peNodeArena env
-  p <- if canGroup then getParent na idx else pure (-1)
+      na = peNodeArena env
   grouped <-
-    pure (p >= 0)
-      <&&> ((== NodeContainer) <$> getNodeType na p)
-      <&&> (hasFlag containerFlagButtonGroup <$> getStyleIdx na p)
-  when grouped $ do
-    (firstC, lastC) <- flowChildEnds na p
-    dir <- getDirection na p
-    paintGroupedButton da style dir (idx == firstC) (idx == lastC) (Rect x y w h)
-  unless grouped $ do
-    when opaqueBg $ fillStyledRect da style menuRowRect
-    when drawStroke $ strokeStyledRect da style (Rect x y w h)
+    if canGroup
+      then do
+        a <- arenaArrays na
+        p <- readTree a idx TreeParent
+        if p >= 0
+          then do
+            pt <- readTagEnum a p TagNodeType
+            if pt == NodeContainer
+              then hasFlag containerFlagButtonGroup <$> readStyleIdx a p
+              else pure False
+          else pure False
+      else pure False
+  if grouped
+    then do
+      (firstC, lastC) <- flowChildEnds na =<< getParent na idx
+      dir <- getDirection na =<< getParent na idx
+      paintGroupedButton da style dir (idx == firstC) (idx == lastC) rect
+    else do
+      when opaqueBg $ fillStyledRect da style menuRowRect
+      when drawStroke $ strokeStyledRect da style rect
   case nt of
     NodeSlider -> paintSliderBody env x y w h value
     NodeSelect -> drawSelectChevron da False x y w h (styleFg style)
@@ -313,27 +323,81 @@ paintSliderBody PaintEnv {peDrawArena = da, peTheme = theme} x y w h value = do
 paintWidgetForeground :: PaintEnv -> NodeIdx -> NodeType -> Style -> Word64 -> Rect -> IO ()
 paintWidgetForeground env idx nt style si (Rect x y w h) = do
   let ctx = peContext env
+      na = peNodeArena env
       da = peDrawArena env
-  mFontColor <- getNodeFontColor (peNodeArena env) idx
-  fontSize <- getNodeFontSize (peNodeArena env) idx
-  (fm, native, _) <- resolveFontFor ctx nt fontSize si
+  a <- arenaArrays na
+  fcWord <- readPrimArray (naArrFontColor a) idx
+  fontSize <- readStyle a idx StyleFontSize
   let !font = nodeFontBits nt si
-      !widgetFg = labelColor (peTheme env) style font mFontColor
-      sortMark = if nt == NodeButton && buttonKindOf si == ButtonTable then tableSortMarkOf si else 0
-  -- Table sort arrow: pinned inside the cell inset to the edge the label
-  -- does not align to, the right edge for a left-aligned label and the left
-  -- for a right-aligned one, in the lane the header keeps there
-  -- ('tableSortLane').
-  sortAlign <- if sortMark /= 0 then getAlignX (peNodeArena env) idx else pure AlignStart
-  let sortArrowX
-        | sortAlign == AlignEnd = x + tableCellInset + 5
-        | otherwise = x + w - tableCellInset - 5
-      drawPlacement lastLine txt px py _ th =
-        unless (T.null txt) $ do
+      !widgetFg =
+        if (fcWord .&. 0x100000000) /= 0
+          then Color (fromIntegral (fcWord .&. 0xFFFFFFFF))
+          else labelColor (peTheme env) style font Nothing
+  if hasCenteredLabel nt
+    then do
+      -- Fast path for plain buttons and selects: skip resolveFontFor when
+      -- using the default font and avoid boxing labelBox tuples or
+      -- drawPlacement closures.
+      (fm, native) <-
+        if fontSize == 0 && font == 0
+          then pure (peFontMetrics env, True)
+          else (\(f, nat, _) -> (f, nat)) <$> resolveFontFor ctx nt fontSize si
+      kids <- if nt == NodeButton then readTree a idx TreeFirstChild else pure (-1)
+      placement <-
+        if kids < 0 && not (nt == NodeButton && tabLabelAtStart si)
+          then cachedWidgetLabel ctx nt idx AlignCenter w h
+          else paintCenteredBoxed ctx na idx nt si x w h
+      case placement of
+        Nothing -> pure ()
+        Just (WidgetTextPlacement txt px py _ th) ->
+          unless (T.null txt) $ do
+            (!lx, _) <-
+              if kids < 0 && not (nt == NodeButton && tabLabelAtStart si)
+                then pure (x, w)
+                else buttonLabelOrigin na idx nt si x w
+            if font == 0
+              then pushText da fm (lx + px) (y + py) txt widgetFg
+              else pushStyledLabel da fm native font (lx + px) (y + py) txt widgetFg
+            when (nt == NodeButton && buttonKindOf si == ButtonTable) $ do
+              let !sortMark = tableSortMarkOf si
+              when (sortMark /= 0) $ do
+                sortAlign <- readAlignX a idx
+                let !sortArrowX =
+                      if sortAlign == AlignEnd
+                        then x + tableCellInset + 5
+                        else x + w - tableCellInset - 5
+                drawSortTriangle da sortArrowX (y + py + th / 2) (sortMark == 2) widgetFg
+    else do
+      (fm, native, _) <- resolveFontFor ctx nt fontSize si
+      forWidgetTextPlacements_ ctx nt idx x y w h $ \_ txt px py _ _ ->
+        unless (T.null txt) $
           if font == 0 then pushText da fm px py txt widgetFg else pushStyledLabel da fm native font px py txt widgetFg
-          when (sortMark /= 0 && lastLine) $
-            drawSortTriangle da sortArrowX (py + th / 2) (sortMark == 2) widgetFg
-  forWidgetTextPlacements_ ctx nt idx x y w h drawPlacement
+
+{-# NOINLINE paintCenteredBoxed #-}
+paintCenteredBoxed :: Context -> NodeArena -> NodeIdx -> NodeType -> Word64 -> Float -> Float -> Float -> IO (Maybe WidgetTextPlacement)
+paintCenteredBoxed ctx na idx nt si x w h = do
+  (lead, trail) <- if nt == NodeButton then nodeAdornmentInsets na idx x w else pure (0, 0)
+  let !start = if nt == NodeButton && tabLabelAtStart si then tabHeaderPadX else 0
+      (!lw, !ax)
+        | lead > 0 = (max 0 (w - lead - trail), AlignStart)
+        | trail > 0 = (max 0 (w - trail), AlignEnd)
+        | start > 0 = (max 0 (w - start), AlignStart)
+        | otherwise = (w, AlignCenter)
+  cachedWidgetLabel ctx nt idx ax lw h
+
+{-# NOINLINE buttonLabelOrigin #-}
+buttonLabelOrigin :: NodeArena -> NodeIdx -> NodeType -> Word64 -> Float -> Float -> IO (Float, Float)
+buttonLabelOrigin na idx nt si x w = do
+  (lead, trail) <- if nt == NodeButton then nodeAdornmentInsets na idx x w else pure (0, 0)
+  let !start = if nt == NodeButton && tabLabelAtStart si then tabHeaderPadX else 0
+  pure $!
+    if lead > 0
+      then (x + lead, max 0 (w - lead - trail))
+      else if trail > 0
+        then (x, max 0 (w - trail))
+        else if start > 0
+          then (x + start, max 0 (w - start))
+          else (x, w)
 
 -- | A label in the weight, slant and decoration of font bits @font@
 -- ('pushFieldText'). Out of line: inlined, it costs every plain label

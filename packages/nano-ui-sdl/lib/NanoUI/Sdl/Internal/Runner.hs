@@ -1,6 +1,7 @@
 -- | SDL3 draw path: retained damage updates or direct continuous presentation.
 module NanoUI.Sdl.Internal.Runner
   ( sdlDrawFrame
+  , sdlDrawFrameSettling
   , drawFrameWith
   , askSdlDebug
   , sdlDebugSnapshot
@@ -28,9 +29,10 @@ import NanoUI.Sdl.Internal.Input (syncTextInput)
 import NanoUI.Sdl.Internal.NanoUIFont (NanoUIFont)
 import NanoUI.Sdl.Internal.Env (dropRetainRef)
 import NanoUI.Sdl.Internal.Error (sdlFail)
-import NanoUI.Sdl.Internal.Render (glyphPageTexture, renderDrawDataPass)
+import NanoUI.Sdl.Internal.Frame (windowInSizeMove)
+import NanoUI.Sdl.Internal.Render (glyphPageTexture, presentGpuRetain, renderDrawDataPass)
 import NanoUI.Sdl.Internal.Target (setRetainTarget)
-import NanoUI.Ttf.Internal.Font (beginTtfFrame, ttfFrameDropped)
+import NanoUI.Ttf.Internal.Font (beginTtfFrame, glyphAtlasFull, ttfFrameDropped)
 import NanoUI.Sdl.Internal.Window (PresentProbe (..), Retain (..), SdlEnv (..), captureFrame, notePresent, windowZoom, withSdlEnv)
 import Foreign.Marshal.Utils (with)
 import Foreign.Ptr (Ptr, nullPtr)
@@ -60,15 +62,24 @@ import SDL3.Sys.Render
 -- 'NanoUI.Backend.getWakeAt'. Use the context/input returned by
 -- @syncDisplay@.
 sdlDrawFrame :: Context -> NanoUI () -> SdlEnv -> Input -> Bool -> IO Bool
-sdlDrawFrame ctx ui env inp forceFull =
-  drawFrameWith ctx env inp forceFull ((\(_, drawData, dirty) -> (drawData, dirty)) <$> runFrame ctx inp ui)
+sdlDrawFrame ctx ui env inp forceFull = sdlDrawFrameSettling ctx ui env inp forceFull False
+
+-- | Like 'sdlDrawFrame', with an optional settle pass before rasterising when
+-- @settleDirty@ is 'True' (used during live resize so layout-reading widgets
+-- never flash an unsettled width).
+sdlDrawFrameSettling :: Context -> NanoUI () -> SdlEnv -> Input -> Bool -> Bool -> IO Bool
+sdlDrawFrameSettling ctx ui env inp forceFull settleDirty =
+  drawFrameWith ctx env inp forceFull settleDirty (\i -> (\(_, drawData, dirty) -> (drawData, dirty)) <$> runFrame ctx i ui)
 
 -- | Draw and present a frame whose UI pass is the given action, which answers
 -- the draw data and whether the context needs another frame. Both
 -- application styles share atlas maintenance, retain preparation, timing,
--- and presentation; only evaluation of the UI differs.
-drawFrameWith :: Context -> SdlEnv -> Input -> Bool -> IO (DrawData, Bool) -> IO Bool
-drawFrameWith ctx env inp forceFull evaluateUi = do
+-- and presentation; only evaluation of the UI differs. When @settleDirty@ is
+-- 'True' (during live resize) and the first UI pass marks the context dirty
+-- without exhausting the glyph atlas, one settle pass runs before rasterising
+-- so widgets that read the previous frame's layout do not jitter a frame behind.
+drawFrameWith :: Context -> SdlEnv -> Input -> Bool -> Bool -> (Input -> IO (DrawData, Bool)) -> IO Bool
+drawFrameWith ctx env inp forceFull settleDirty evaluateUi = do
   SdlImage.syncImageAtlas ren (sdlImages env) ctx
   -- Glyph-atlas maintenance before any quad is recorded: if the atlas ran
   -- out of space during the previous frame, reset it now (re-warming the
@@ -115,7 +126,20 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
   t0 <- getMonotonicTime
   -- A full present ignores the frame's damage (below), so the frame need not
   -- work it out beyond what reusing its last draw takes.
-  (drawData, dirtyAfterUi) <- withFramePaint ctx (presentFull || transparent) presentFull evaluateUi
+  (drawData0, dirty0) <- withFramePaint ctx (presentFull || transparent) presentFull (evaluateUi inp)
+  (drawData, dirtyAfterUi) <-
+    if settleDirty && dirty0
+      then do
+        tMid <- getMonotonicTime
+        atlasFull0 <- glyphAtlasFull (sdlFontCache env)
+        if (atlasFull0 && not freshAtlas) || (tMid - t0 >= 0.004)
+          then pure (drawData0, True)
+          else do
+            SdlImage.syncImageAtlas ren (sdlImages env) ctx
+            _ <- takeDamage ctx
+            writeIORef (chromeFromView chrome) False
+            withFramePaint ctx (presentFull || transparent) presentFull (evaluateUi (clearEphemeral inp) {inputDeltaTime = 0})
+      else pure (drawData0, dirty0)
   when viewChrome $
     unlessM (readIORef (chromeFromView chrome)) (writeIORef (chromeRegions chrome) defaultWindowChrome)
   -- Images registered during the view (an icon rasterized the first time it
@@ -155,7 +179,7 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
         answerScreenshots ctx (captureFrame env tex)
       pure (atlasReset || dirtyAfterUi)
     else do
-      presentDamagedFrame ctx env tex direct scale damage drawData t0 t1
+      presentDamagedFrame ctx env tex direct scale damage drawData settleDirty t0 t1
       pure dirtyAfterUi
   where
     ren = sdlRenderer env
@@ -170,10 +194,11 @@ presentDamagedFrame ::
   Float ->
   Damage ->
   DrawData ->
+  Bool ->
   Double ->
   Double ->
   IO ()
-presentDamagedFrame ctx env tex direct scale damage drawData t0 t1 = do
+presentDamagedFrame ctx env tex direct scale damage drawData inResizePass t0 t1 = do
   -- A null texture draws full-repaint sessions straight to the window. The
   -- pass scales positions itself, so the renderer stays at scale 1.
   unlessM ((&&) <$> setRetainTarget env tex <*> setRenderScale ren 1 1) $
@@ -190,15 +215,25 @@ presentDamagedFrame ctx env tex direct scale damage drawData t0 t1 = do
   -- next frame.
   renderDrawDataPass (sdlBatch env) ren scale drawData (sdlImages env) glyphs damage
   t2 <- getMonotonicTime
-  unless direct $
-    unlessM (copyRetained env tex) $
-      sdlFail "SDL window presentation preparation failed"
-  sendSizeLimits env
-  -- Read the direct backbuffer before present, but invoke view callbacks
-  -- only afterwards, just as for retained frames.
   if direct
-    then answerScreenshotsAfter ctx (captureFrame env tex) (void (renderPresentSafe ren))
-    else void (renderPresentSafe ren)
+    then do
+      sendSizeLimits env
+      -- Read the direct backbuffer before present, but invoke view callbacks
+      -- only afterwards, just as for retained frames.
+      answerScreenshotsAfter ctx (captureFrame env tex) (void (renderPresentSafe ren))
+    else do
+      sendSizeLimits env
+      presentedDirect <-
+        if sdlHasGpu env && isNothing (sdlTransparent env) && isNothing (sdlForcedScale env)
+          then do
+            r <- readIORef (sdlRetain env)
+            inDrag <- if inResizePass then pure True else windowInSizeMove (sdlWindow env)
+            presentGpuRetain (sdlBatch env) (sdlWindow env) tex (retainW r) (retainH r) inDrag (drawClear drawData)
+          else pure False
+      unless presentedDirect $ do
+        unlessM (copyRetained env tex) $
+          sdlFail "SDL window presentation preparation failed"
+        void (renderPresentSafe ren)
   t3 <- getMonotonicTime
   notePresent env t3
   noteDebugFrame (sdlDebug env) t0 t1 t2 t3 drawData
@@ -210,7 +245,9 @@ presentDamagedFrame ctx env tex direct scale damage drawData t0 t1 = do
 -- | Copy the used area of the retained texture to the window, back in the
 -- window's pixel coordinates for the events polled next. Damage limits
 -- updates to the retained texture, not to this copy: SDL leaves the window
--- backbuffer undefined after each present.
+-- backbuffer undefined after each present. Passes an explicit 1:1 destination
+-- rect unless @NANO_FORCE_SCALE@ is active so SDL never stretches the frame
+-- onto a momentarily mismatched backbuffer.
 copyRetained :: SdlEnv -> Ptr SDL_Texture -> IO Bool
 copyRetained env tex = do
   okTarget <- setRenderTarget ren nullPtr
@@ -219,7 +256,8 @@ copyRetained env tex = do
   -- The texture is larger than the window: copy only the used area.
   r <- readIORef (sdlRetain env)
   okCopy <- with (SDL_FRect 0 0 (fromIntegral (retainW r)) (fromIntegral (retainH r))) $ \src ->
-    renderTexture ren tex (PtrConst.unsafeFromPtr src) (PtrConst.unsafeFromPtr nullPtr)
+    let dst = if isJust (sdlForcedScale env) then nullPtr else src
+     in renderTexture ren tex (PtrConst.unsafeFromPtr src) (PtrConst.unsafeFromPtr dst)
   pure (okTarget && okClip && okCopy)
   where
     ren = sdlRenderer env
@@ -242,11 +280,13 @@ retainBlock = 256
 ensureRetain :: SdlEnv -> Int -> Int -> Float -> IO (Ptr SDL_Texture, Bool)
 ensureRetain env w h scale = do
   r <- readIORef (sdlRetain env)
+  inDrag <- windowInSizeMove (sdlWindow env)
   let tex = retainTexture r
       fits = w <= retainCapW r && h <= retainCapH r
-      -- Give memory back once the window is well inside the texture, but not
-      -- for a shrink of a block or so, which a drag back out would undo.
-      roomy = retainCapW r - w > 2 * retainBlock || retainCapH r - h > 2 * retainBlock
+      -- Give memory back once the window is well inside the texture, but never
+      -- mid-drag (which would allocate a fresh GPU render target during live
+      -- resize) and not for a shrink of a block or so.
+      roomy = not inDrag && (retainCapW r - w > 2 * retainBlock || retainCapH r - h > 2 * retainBlock)
       -- A new used size or density holds none of the frame to be drawn.
       stale = w /= retainW r || h /= retainH r || scaleMoved (retainScale r) scale
   if tex /= nullPtr && fits && not roomy

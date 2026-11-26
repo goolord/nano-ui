@@ -844,10 +844,16 @@ foldChildDimsFromParent env@SolveEnv {seArena = na} idx dir gap = do
     DirRow -> do
       -- A row's baseline-aligned children stand on one line, so together they
       -- are as tall as the most room any takes above it plus the most any takes
-      -- below.
-      pItems <- readItemsAlign (seArrays env) idx
-      FlowAcc _ above below <- foldFlowChildrenM na idx (baselineStep pItems) (FlowAcc 0 0 0)
-      pure (along + gaps, max across (above + below))
+      -- below. Skip the second pass when neither the row nor any child uses
+      -- baseline alignment.
+      let !a = seArrays env
+      pItems <- readItemsAlign a idx
+      hasBase <- if pItems == ItemsBaseline then pure True else hasBaselineChild a idx
+      if not hasBase
+        then pure (along + gaps, across)
+        else do
+          FlowAcc _ above below <- foldFlowChildrenM na idx (baselineStep pItems) (FlowAcc 0 0 0)
+          pure (along + gaps, max across (above + below))
   where
     step (FlowAcc count along across) ci = do
       Rect _ _ w h <- getNodeRect na ci

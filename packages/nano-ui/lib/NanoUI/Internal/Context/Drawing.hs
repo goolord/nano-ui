@@ -42,6 +42,7 @@ import Data.IntMap.Strict qualified as IM
 import Data.Maybe (isJust)
 import Data.Primitive.Array (readArray, sizeofMutableArray, writeArray)
 import Data.Primitive.PrimArray (readPrimArray, setPrimArray, writePrimArray)
+import Data.Primitive.PrimVar (readPrimVar)
 import Data.Primitive.SmallArray (SmallArray, mapSmallArray')
 import Data.Word (Word64)
 
@@ -123,7 +124,7 @@ nodeCustomAt ctx idx = do
     then pure noNodeCustom
     else do
       nc <- readArray arr idx
-      ep <- readIORef (naEpoch (ctxNodeArena ctx))
+      ep <- readPrimVar (naEpoch (ctxNodeArena ctx))
       pure (if ncEpoch nc == ep then nc else noNodeCustom)
 
 -- | The registrations of the node widget @wid@ was declared as.
@@ -143,7 +144,7 @@ registerAtIdx ctx idx f = do
       else do
         grown <- growBoxedStoreCopy noNodeCustom arr0 size (max (idx + 1) (2 * size))
         grown <$ writeIORef (ctxNodeCustom ctx) grown
-  ep <- readIORef (naEpoch (ctxNodeArena ctx))
+  ep <- readPrimVar (naEpoch (ctxNodeArena ctx))
   old <- readArray arr idx
   new <- f (if ncEpoch old == ep then old else noNodeCustom {ncEpoch = ep})
   writeArray arr idx $! new
@@ -172,7 +173,7 @@ lookupNodeShaderAt ctx idx = ncShader <$> nodeCustomAt ctx idx
 registerShaderEffectAt :: Context -> NodeIdx -> ShaderEffectEntry -> IO ()
 registerShaderEffectAt ctx idx entry = do
   registerAtIdx ctx idx (\nc -> pure nc {ncEffect = Just entry})
-  ep <- readIORef (naEpoch (ctxNodeArena ctx))
+  ep <- readPrimVar (naEpoch (ctxNodeArena ctx))
   (curEp, ns) <- readIORef (ctxEffectNodes ctx)
   writeIORef (ctxEffectNodes ctx) $! if curEp == ep then (ep, idx : ns) else (ep, [idx])
 
@@ -186,7 +187,7 @@ lookupShaderEffectAt ctx idx = ncEffect <$> nodeCustomAt ctx idx
 {-# INLINE activeEffectNodes #-}
 activeEffectNodes :: Context -> IO [NodeIdx]
 activeEffectNodes ctx = do
-  ep <- readIORef (naEpoch (ctxNodeArena ctx))
+  ep <- readPrimVar (naEpoch (ctxNodeArena ctx))
   (curEp, ns) <- readIORef (ctxEffectNodes ctx)
   pure (if curEp == ep then ns else [])
 

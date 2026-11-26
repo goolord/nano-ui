@@ -18,9 +18,7 @@ module NanoUI.Internal.Layout.Solve.Flex
 
 import Control.Monad (when)
 import Data.IORef (readIORef)
-import Data.List (sortOn)
-import Data.Ord (Down (..))
-import Data.Primitive.PrimArray (copyMutablePrimArray, readPrimArray, writePrimArray)
+import Data.Primitive.PrimArray (copyMutablePrimArray, newPrimArray, readPrimArray, writePrimArray)
 import NanoUI.Internal.Layout.ScrollGeometry (isScrollStyle2D)
 import NanoUI.Internal.Layout.Arena
 import NanoUI.Internal.Style (AlignX (..), AlignY (..), Padding (..), alignXFraction, alignYFraction)
@@ -188,31 +186,117 @@ shrinkScratch mainArr factorArr minAt n = pass 0
                         else stop (i + 1) given stopped
         stop 0 0 0
 
+-- | Sort @(keys, vals)@ of length @len@ in place by @keys@, ascending when
+-- @ascending@ is 'True' and descending otherwise. Uses insertion sort for small
+-- slices and heapsort above, allocating nothing.
+sortPairsByKey :: Bool -> IOArr Float -> IOArr Int -> Int -> IO ()
+sortPairsByKey ascending keys vals len
+  | len <= 1 = pure ()
+  | len <= 16 = insertLoop 1
+  | otherwise = buildHeap ((len `quot` 2) - 1) >> extractLoop (len - 1)
+  where
+    {-# INLINE precedes #-}
+    precedes :: Float -> Float -> Bool
+    precedes a b = if ascending then a < b else a > b
+
+    insertLoop !i = when (i < len) $ do
+      k <- readPrimArray keys i
+      v <- readPrimArray vals i
+      let shift !j
+            | j <= 0 = writePrimArray keys 0 k >> writePrimArray vals 0 v
+            | otherwise = do
+                kj <- readPrimArray keys (j - 1)
+                if precedes k kj
+                  then do
+                    writePrimArray keys j kj
+                    readPrimArray vals (j - 1) >>= writePrimArray vals j
+                    shift (j - 1)
+                  else writePrimArray keys j k >> writePrimArray vals j v
+      shift i
+      insertLoop (i + 1)
+
+    -- Max-heap under 'precedes' puts the last-in-order element at the root so
+    -- extracting to the tail leaves the array sorted.
+    siftDown !root !end = do
+      rk <- readPrimArray keys root
+      rv <- readPrimArray vals root
+      let go !cur = do
+            let !l = cur * 2 + 1
+            if l >= end
+              then writePrimArray keys cur rk >> writePrimArray vals cur rv
+              else do
+                lk <- readPrimArray keys l
+                let !r = l + 1
+                (bestIdx, bestK) <-
+                  if r < end
+                    then do
+                      rk' <- readPrimArray keys r
+                      pure (if precedes lk rk' then (r, rk') else (l, lk))
+                    else pure (l, lk)
+                if precedes rk bestK
+                  then do
+                    writePrimArray keys cur bestK
+                    readPrimArray vals bestIdx >>= writePrimArray vals cur
+                    go bestIdx
+                  else writePrimArray keys cur rk >> writePrimArray vals cur rv
+      go root
+
+    buildHeap !i = when (i >= 0) $ siftDown i len >> buildHeap (i - 1)
+
+    extractLoop !end = when (end > 0) $ do
+      k0 <- readPrimArray keys 0
+      v0 <- readPrimArray vals 0
+      ke <- readPrimArray keys end
+      ve <- readPrimArray vals end
+      writePrimArray keys 0 ke
+      writePrimArray vals 0 ve
+      writePrimArray keys end k0
+      writePrimArray vals end v0
+      siftDown 0 end
+      extractLoop (end - 1)
+
 -- | Lock every remaining shrinkable child whose headroom per unit of factor is
 -- less than the shortfall per unit left once the tighter children before it
--- hit their floors. Runs in O(n log n) after 'waterFillAfter' sweeps.
+-- hit their floors. Runs in O(n log n) after 'waterFillAfter' sweeps using
+-- unboxed scratch arrays.
 waterFillShrink :: IOArr Float -> IOArr Float -> (Int -> IO Float) -> Float -> Int -> IO Float
 waterFillShrink mainArr factorArr minAt need0 n
   | need0 <= 0 = pure need0
   | otherwise = do
-      total0 <- foldUpTo n (\acc i -> (acc +) <$> readPrimArray factorArr i) 0
-      let collect acc i = do
-            f <- readPrimArray factorArr i
-            if f <= 0
-              then pure acc
-              else do
-                lo <- minAt i
-                main <- readPrimArray mainArr i
-                let !slack = main - lo
-                pure ((slack / f, slack, lo, f, i) : acc)
-          stopFrom !remNeed !total ((_, slack, lo, f, i) : rest)
-            | remNeed > 0 && total > 0 && slack * total < remNeed * f = do
-                writePrimArray mainArr i lo
-                writePrimArray factorArr i 0
-                stopFrom (remNeed - slack) (total - f) rest
-          stopFrom !remNeed _ _ = pure remNeed
-      items <- foldUpTo n collect []
-      stopFrom need0 total0 (sortOn (\(perUnit, _, _, _, _) -> perUnit) items)
+      keys <- newPrimArray n
+      idxs <- newPrimArray n
+      slacks <- newPrimArray n
+      floors <- newPrimArray n
+      let collect !i !m !total
+            | i >= n = pure (m, total)
+            | otherwise = do
+                f <- readPrimArray factorArr i
+                if f <= 0
+                  then collect (i + 1) m total
+                  else do
+                    lo <- minAt i
+                    main <- readPrimArray mainArr i
+                    let !slack = main - lo
+                    writePrimArray keys m (slack / f)
+                    writePrimArray idxs m i
+                    writePrimArray slacks i slack
+                    writePrimArray floors i lo
+                    collect (i + 1) (m + 1) (total + f)
+      (m, total0) <- collect 0 0 0
+      sortPairsByKey True keys idxs m
+      let stopFrom !j !remNeed !total
+            | j >= m || remNeed <= 0 || total <= 0 = pure remNeed
+            | otherwise = do
+                i <- readPrimArray idxs j
+                slack <- readPrimArray slacks i
+                f <- readPrimArray factorArr i
+                if slack * total < remNeed * f
+                  then do
+                    readPrimArray floors i >>= writePrimArray mainArr i
+                    writePrimArray factorArr i 0
+                    stopFrom (j + 1) (remNeed - slack) (total - f)
+                  else pure remNeed
+      stopFrom 0 need0 total0
 
 {-# INLINE shrinkFactor #-}
 shrinkFactor :: AxisSizing -> Float
@@ -320,18 +404,29 @@ waterFillAfter = 8
 -- same set.
 waterFillGrow :: IOArr Float -> IOArr Float -> Float -> Int -> IO ()
 waterFillGrow mainArr crossArr room n = do
-  (occupied, gfSum) <- scanGrow mainArr crossArr 0 n 0 0
-  let collect acc i = do
-        gf <- readPrimArray crossArr i
+  keys <- newPrimArray n
+  idxs <- newPrimArray n
+  let collect !i !m !occupied !gfSum
+        | i >= n = pure (m, occupied, gfSum)
+        | otherwise = do
+            gf <- readPrimArray crossArr i
+            need <- readPrimArray mainArr i
+            if gf > 0
+              then do
+                writePrimArray keys m (need / gf)
+                writePrimArray idxs m i
+                collect (i + 1) (m + 1) occupied (gfSum + gf)
+              else collect (i + 1) m (occupied + need) gfSum
+  (m, occupied, gfSum) <- collect 0 0 0 0
+  sortPairsByKey False keys idxs m
+  let lockFrom !j !free !g = when (j < m) $ do
+        i <- readPrimArray idxs j
         need <- readPrimArray mainArr i
-        pure (if gf > 0 then (need / gf, need, gf, i) : acc else acc)
-      lockFrom !free !g ((_, need, gf, i) : rest)
-        | need * g > gf * free = do
-            writePrimArray crossArr i 0
-            lockFrom (free - need) (g - gf) rest
-      lockFrom _ _ _ = pure ()
-  growing <- foldUpTo n collect []
-  lockFrom (room - occupied) gfSum (sortOn (\(perUnit, _, _, _) -> Down perUnit) growing)
+        gf <- readPrimArray crossArr i
+        when (need * g > gf * free) $ do
+          writePrimArray crossArr i 0
+          lockFrom (j + 1) (free - need) (g - gf)
+  lockFrom 0 (room - occupied) gfSum
 
 -- | The size a node takes along an axis where @avail@ is offered, from its
 -- sizing, its measured size @intrinsic@ and its limits.

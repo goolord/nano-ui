@@ -186,8 +186,10 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
       (m0, om, hm0, foundContainers, foundOuter, droppedContainer) <-
         scanBackdropPrevRects na (Rect 0 0 winW winH) oldRects oldOuters oldHashes
       (walk, known) <- prevWalkFor ctx count oldRects
-      hashes <- naArrPaintHash <$> arenaArrays na
-      let go !i !m !cm !hm !foundOld !dropped
+      a <- arenaArrays na
+      let !geom = naArrGeom a
+          !hashes = naArrPaintHash a
+          go !i !m !cm !hm !foundOld !dropped
             | i >= count =
                 if dropped || foundOld /= IM.size oldRects || foundOuter /= IM.size oldOuters
                   then setPrev emptyPrevFrame >> updatePrevRects ctx size
@@ -205,44 +207,58 @@ updatePrevRects ctx@Context {ctxNodeArena = na} size@(Size winW winH) = do
                       (setPrev (PrevFrame m cm om hm effRects))
                     pure m
             | otherwise = do
-                wid <- getWidgetId na i
-                superseded <- if hashWidgetId wid == 0 then pure True else getIdSuperseded na i
+                !k <- readTree a i TreeWidgetId
+                superseded <- if k == 0 then pure True else readTagEnum a i TagIdSuperseded
                 if superseded
                   then forgetAt walk i >> go (i + 1) m cm hm foundOld dropped
                   else do
-                    let !k = intKey wid
-                    r <- getNodeRect na i
-                    if not (rectNonEmpty r)
+                    let !gOff = i * geomStride
+                    !rx <- readPrimArray geom gOff
+                    !ry <- readPrimArray geom (gOff + 1)
+                    !rw <- readPrimArray geom (gOff + 2)
+                    !rh <- readPrimArray geom (gOff + 3)
+                    if not (rw > 0 && rh > 0)
                       then do
                         forgetAt walk i
                         let !isOld = IM.member k oldRects
                         go (i + 1) (if isOld then IM.delete k m else m) (dropKey k cm) (dropKey k hm) foundOld (dropped || isOld)
                       else do
-                        mClip <- getClipBounds na i
-                        same <- keepKeyAt walk known i k (maybe 0 (const 1) mClip)
+                        !cx <- readPrimArray geom (gOff + 4)
+                        !cy <- readPrimArray geom (gOff + 5)
+                        !cwRaw <- readPrimArray geom (gOff + 6)
+                        !chRaw <- readPrimArray geom (gOff + 7)
+                        let !posClip = cwRaw > 0 && chRaw > 0
+                            !hasClip = posClip || cwRaw < 0
+                            !cw = if posClip then cwRaw else 0
+                            !ch = if posClip then chRaw else 0
+                        same <- keepKeyAt walk known i k (if hasClip then 1 else 0)
                         -- An unchanged rect keeps the object already
                         -- stored, so a still frame allocates nothing; a new
-                        -- one is read back so it is boxed only here, and the
-                        -- map gets that same object.
-                        was <- readArray (pwRects walk) i
-                        now <- if was == r then pure was else writeArray (pwRects walk) i r >> readArray (pwRects walk) i
-                        clipMoved <- maybe (pure False) (\(Rect cx cy cw ch) -> swapClip (pwClips walk) i cx cy cw ch) mClip
-                        h <- readPrimArray hashes i
-                        h0 <- readPrimArray (pwHashes walk) i
+                        -- one is boxed only when coordinates changed.
+                        was@(Rect wx wy ww wh) <- readArray (pwRects walk) i
+                        let !rectMoved = rx /= wx || ry /= wy || rw /= ww || rh /= wh
+                        now <-
+                          if not rectMoved
+                            then pure was
+                            else do
+                              let !r = Rect rx ry rw rh
+                              writeArray (pwRects walk) i r
+                              pure r
+                        clipMoved <- if hasClip then swapClip (pwClips walk) i cx cy cw ch else pure False
+                        !h <- readPrimArray hashes i
+                        !h0 <- readPrimArray (pwHashes walk) i
                         unless (h == h0) (writePrimArray (pwHashes walk) i h)
-                        let put :: Bool -> a -> IM.IntMap a -> IM.IntMap a
-                            put changed v mp = if changed then IM.insert k v mp else mp
-                            (m', cm', fOld')
-                              | not same =
-                                  ( putNew k now m
-                                  , maybe (dropKey k cm) (\c -> putNew k c cm) mClip
-                                  , foundOld + if IM.member k oldRects then 1 else 0
-                                  )
-                              | otherwise =
-                                  ( put (not (ptrEq now was)) now m
-                                  , maybe cm (\c -> put clipMoved c cm) mClip
-                                  , foundOld + 1
-                                  )
+                        let !m'
+                              | not same = putNew k now m
+                              | rectMoved = IM.insert k now m
+                              | otherwise = m
+                            !cm'
+                              | not same = if hasClip then putNew k (Rect cx cy cw ch) cm else dropKey k cm
+                              | clipMoved = IM.insert k (Rect cx cy cw ch) cm
+                              | otherwise = cm
+                            !fOld'
+                              | not same = foundOld + if IM.member k oldRects then 1 else 0
+                              | otherwise = foundOld + 1
                             !hm'
                               | not same || h /= h0 = putHash k h hm
                               | otherwise = hm
@@ -343,8 +359,11 @@ dropKey k m = if IM.member k m then IM.delete k m else m
 -- every modal, then every popup): key, solved rect, and whether the panel
 -- intercepts pointer events (excluding 'PointerPass' panels such as tooltips).
 floatingPanels :: Context -> IO [(Int, Rect, Bool)]
-floatingPanels Context {ctxNodeArena = na} =
-  catMaybes <$> (mapM step =<< floatingNodesInPaintOrder na)
+floatingPanels Context {ctxNodeArena = na} = do
+  n <- floatingNodeCount na
+  if n == 0
+    then pure []
+    else catMaybes <$> (mapM step =<< floatingNodesInPaintOrder na)
   where
     step idx = do
       wid <- getWidgetId na idx
@@ -437,10 +456,10 @@ writeDamage ctx inp snap mayReuse layoutFloats = do
   redrawn <- refreshCustomDrawings ctx
   wanted <- readIORef (ctxDamageWanted ctx)
   let oldStore = fsStore snap
-      newFloatingRects = IM.fromList [(k, r) | (k, r, _) <- panels]
-      floatingChanged = fsFloatingRects snap /= newFloatingRects
+      newFloatingRects = if null panels then IM.empty else IM.fromList [(k, r) | (k, r, _) <- panels]
+      floatingChanged = not (IM.null (fsFloatingRects snap) && IM.null newFloatingRects) && fsFloatingRects snap /= newFloatingRects
       changes = do
-        (settledMoved, churn) <- rectDeltas [r | (_, r, _) <- panels] (fsPrev snap) new
+        (settledMoved, churn) <- rectDeltas (if null panels then [] else [r | (_, r, _) <- panels]) (fsPrev snap) new
         let scrollChanged = not (eqByPtr (storeFloat oldStore) (storeFloat newStore))
             pointsChanged = not (eqByPtr (storePoint oldStore) (storePoint newStore))
         let delta =
@@ -809,6 +828,8 @@ pieceMergeGap = 16
 -- pieces when one or none remain, or when they cover most of their bounding
 -- box, since painting the box costs about the same.
 damagePieces :: [Rect] -> [Rect]
+damagePieces [] = []
+damagePieces [_] = []
 damagePieces rects =
   case shrink (settle (filter rectNonEmpty rects)) of
     ps@(_ : _ : _)

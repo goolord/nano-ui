@@ -21,6 +21,7 @@ import Data.Primitive.PrimArray
   , emptyPrimArray
   , indexPrimArray
   , newPrimArray
+  , readPrimArray
   , shrinkMutablePrimArray
   , sizeofPrimArray
   , unsafeFreezePrimArray
@@ -95,23 +96,53 @@ collectFloatingOccluders ctx@Context {ctxNodeArena = na} = do
 {-# NOINLINE paintNodeWithEnv #-}
 paintNodeWithEnv :: PaintEnv -> NodeIdx -> IO ()
 paintNodeWithEnv env idx = do
-  Rect x y w h <- getNodeRect (peNodeArena env) idx
-  Rect cx cy cw ch <- currentClip (peDrawArena env)
+  a <- arenaArrays (peNodeArena env)
+  let !geom = naArrGeom a
+      !gOff = idx * geomStride
+      !clip = daCurrentClip (peDrawArena env)
+  !x <- readPrimArray geom gOff
+  !y <- readPrimArray geom (gOff + 1)
+  !w <- readPrimArray geom (gOff + 2)
+  !h <- readPrimArray geom (gOff + 3)
+  !cx <- readPrimArray clip 0
+  !cy <- readPrimArray clip 1
+  !cw <- readPrimArray clip 2
+  !ch <- readPrimArray clip 3
   if w <= 0 || h <= 0 || not (rectVisible env x y w h paintOverhang paintOverhang cx cy cw ch)
     then
       if peHasEffects env && w > 0 && h > 0
         then paintSkippedWithEffects env idx x y w h cx cy cw ch
         else do
-          pinnedBelow <- hasPinnedBelow (peNodeArena env) idx
+          pinnedBelow <- readTagEnum a idx TagPinnedBelow
           when pinnedBelow $ do
-            nt <- getNodeType (peNodeArena env) idx
+            nt <- readTagEnum a idx TagNodeType
             when (nt == NodeContainer) $ do
-              si <- getStyleIdx (peNodeArena env) idx
+              si <- readStyleIdx a idx
               unless (hasFlag containerFlagClip si) $
                 walkChildrenWithOccluders env idx
     else do
-      nt <- getNodeType (peNodeArena env) idx
-      lowerScoped env idx nt (Rect x y w h)
+      nt <- readTagEnum a idx TagNodeType
+      case nt of
+        NodeSpacer
+          | hashWidgetId (peFocusRing env) == 0 -> pure ()
+        NodeModal
+          | hashWidgetId (peFocusRing env) == 0 -> pure ()
+        NodeWindow
+          | hashWidgetId (peFocusRing env) == 0 -> pure ()
+        NodePopup
+          | hashWidgetId (peFocusRing env) == 0 -> pure ()
+        NodeContainer
+          | hashWidgetId (peFocusRing env) == 0 -> do
+              scope <- (.&. complement 2) <$> readPrimArray (naArrScope a) idx
+              si <- readStyleIdx a idx
+              if scope == peScope env && si == 0
+                then do
+                  mBuild <- lookupCustomDrawingAt (peContext env) idx
+                  case mBuild of
+                    Nothing -> walkChildrenWithOccluders env idx
+                    Just _ -> lowerNodeVisible env idx nt (Rect x y w h)
+                else lowerScoped env idx nt (Rect x y w h)
+        _ -> lowerScoped env idx nt (Rect x y w h)
 
 -- | Handle a culled node on frames that contain Tier 2 shader effect
 -- containers: re-check effect containers using their bleed margin

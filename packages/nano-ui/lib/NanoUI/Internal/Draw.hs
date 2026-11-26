@@ -85,6 +85,8 @@ import Data.Char (isSpace)
 import Data.IORef (modifyIORef', readIORef)
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
+import qualified Data.Text.Foreign as TF
+import qualified Data.Text.Unsafe as TU
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray)
 import Data.Primitive.PrimArray (indexPrimArray, readPrimArray, sizeofPrimArray)
 import Data.Word (Word32, Word8)
@@ -235,7 +237,13 @@ pushShapedQuads da fm slant px py (ShapedGlyphs quads) col = do
                           pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a m gx gy gw gh (u0 - pageU) v0 (u1 - pageU) v1
                           go (q + 1) (m + 1)
             go q0 0
-    drawPage start 0
+    when (start < end) $ do
+      let !uFirst = at (start * 8 + 4)
+          !startPage =
+            if uFirst >= 0 && uFirst < fromIntegral glyphAtlasPages
+              then truncate uFirst
+              else 0
+      drawPage start startPage
 
 -- | Glyph quad @q@ of a text reservation whose vertices start at @base@ and
 -- indices at @baseIdx@. A non-zero @slant@ shears the quad around
@@ -284,10 +292,17 @@ pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a q gx gy gw gh u0 v0 u1 
 -- nothing, and the walk stops once the pen is well past it.
 pushGlyphQuads :: DrawArena -> FontMetrics -> Float -> Float -> Float -> T.Text -> Color -> IO ()
 pushGlyphQuads da fm slant px py txt col = do
-  let !cap = T.length txt
-  when (cap > 0) $ do
+  let !byteLen = TF.lengthWord8 txt
+  when (byteLen > 0) $ do
+    let !cap = T.length txt
     scale <- readIORef (daSnapScale da)
-    (!left, !right, !slack) <- glyphClipBounds da fm slant
+    cx <- readPrimArray (daCurrentClip da) 0
+    cw <- readPrimArray (daCurrentClip da) 2
+    let !lh = fmLineHeight fm
+        !lean = abs slant * (lh + abs (fmAscent fm))
+        !left = cx - lean
+        !right = cx + cw + lean
+        !slack = glyphSlackLines * lh
     setTexture da glyphAtlasTextureId
     withVertsReserve da (cap * 4) (cap * 6) $ \vp ip base baseIdx commit -> do
       let !(r, g, b, a) = unpackColorF col
@@ -295,31 +310,33 @@ pushGlyphQuads da fm slant px py txt col = do
           !stop = right + slack
           -- A pen this far left of the clip draws nothing, whatever its glyph.
           !before = left - slack
-          outside gx gw = gx + gw < left || gx > right
-          -- @first@ marks the line's first character, which has nothing
-          -- before it to kern against.
-          walk !q !ox !first !prev !t =
-            case T.uncons t of
-              Nothing -> pure q
-              Just (c, rest)
-                | ox > stop -> pure q
-                | otherwise -> do
-                    -- Kerning against the character before moves this one.
-                    let !gx = if first then ox else ox + fmKerning fm prev c
-                        !adv = fmAdvance fm c
-                        next !q' = walk q' (gx + adv) False c rest
-                    if gx < before then next q else case fmGlyph fm c of
-                      Nothing
-                        | adv > 0 && not (isSpace c) && not (outside gx adv) -> do
-                            pokeGlyphQuad vp ip base baseIdx 0 baselineY r g b a q (onGrid scale gx) (onGrid scale py) adv (fmLineHeight fm) whitePixel whitePixel whitePixel whitePixel
-                            next (q + 1)
-                        | otherwise -> next q
-                      Just gq
-                        | outside (gx + gqX gq) (gqW gq) -> next q
-                        | otherwise -> do
-                            pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a q (gx + gqX gq) (py + gqY gq) (gqW gq) (gqH gq) (gqU0 gq) (gqV0 gq) (gqU1 gq) (gqV1 gq)
-                            next (q + 1)
-      !k <- walk 0 px True ' ' txt
+          -- Walk UTF-8 byte offsets with 'TU.iter' to avoid per-character
+          -- 'T.uncons' Text slicing and Maybe/tuple allocation.
+          walk !q !ox !first !prev !off
+            | off >= byteLen || ox > stop = pure q
+            | otherwise = do
+                let !(TU.Iter c step) = TU.iter txt off
+                    !gx = if first then ox else ox + fmKerning fm prev c
+                    !adv = fmAdvance fm c
+                    !ox' = gx + adv
+                    !off' = off + step
+                if gx < before
+                  then walk q ox' False c off'
+                  else case fmGlyph fm c of
+                    Nothing
+                      | adv > 0 && not (isSpace c) && not (gx + adv < left || gx > right) -> do
+                          pokeGlyphQuad vp ip base baseIdx 0 baselineY r g b a q (onGrid scale gx) (onGrid scale py) adv lh whitePixel whitePixel whitePixel whitePixel
+                          walk (q + 1) ox' False c off'
+                      | otherwise -> walk q ox' False c off'
+                    Just gq ->
+                      let !qx = gx + gqX gq
+                          !qw = gqW gq
+                       in if qx + qw < left || qx > right
+                            then walk q ox' False c off'
+                            else do
+                              pokeGlyphQuad vp ip base baseIdx slant baselineY r g b a q qx (py + gqY gq) qw (gqH gq) (gqU0 gq) (gqV0 gq) (gqU1 gq) (gqV1 gq)
+                              walk (q + 1) ox' False c off'
+      !k <- walk 0 px True ' ' 0
       commit (k * 4) (k * 6)
 
 -- | Synthetic weight, slant and decoration over the plain text path. Upright

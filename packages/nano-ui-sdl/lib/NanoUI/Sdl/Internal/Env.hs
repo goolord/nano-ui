@@ -38,6 +38,8 @@ data SdlEnv = SdlEnv
   { sdlWindow :: Ptr SDL_Window
   , sdlRenderer :: Ptr SDL_Renderer
   , sdlRendererName :: !Text
+  , sdlHasGpu :: !Bool
+  -- ^ Whether 'sdlRenderer' is backed by SDL 3.4's @"gpu"@ device.
   , sdlBatch :: RenderBatch
   , sdlFontRequestRef :: !(IORef NanoUIFont)
   , sdlFontAppliedRef :: !(IORef NanoUIFont)

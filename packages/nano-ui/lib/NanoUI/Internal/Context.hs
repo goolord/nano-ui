@@ -818,7 +818,7 @@ newContext = do
   ctxIdCursor <- newIdCursor initialIdContext
   ctxVarFrame <- newStamps frameSlots
   ctxVarSlots <- newIORef IM.empty
-  ctxContainerStack <- newIORef []
+  ctxContainerStack <- newContainerStack
   ctxFocusables <- newIORef =<< newPrimArray 64
   ctxFocusablesCount <- newPrimVar 0
   ctxSpanBase <- newSpanArena

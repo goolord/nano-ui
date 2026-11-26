@@ -394,7 +394,7 @@ finalizeScrollFocus ctx@Context {ctxNodeArena = na} inp targets =
                   <&&> widgetUnderMouse ctx top mouse NodeScrollContainer idx
                   <&&> isFocusable ctx wid
                   <&&> (not <$> isDisabled ctx wid)
-      findClassNodeRevM na PointerNodes hit >>= mapM_ (\idx -> getWidgetId na idx >>= focusWidget ctx)
+      findClassNodeRevM na ScrollableNodes hit >>= mapM_ (\idx -> getWidgetId na idx >>= focusWidget ctx)
 
 -- | Apply the view's last focus request this frame
 -- ('NanoUI.Internal.Monad.requestFocus', 'NanoUI.Internal.Monad.focusNext',

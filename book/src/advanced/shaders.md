@@ -1,6 +1,6 @@
 # Shaders
 
-`nano-ui` supports typed, composable GPU fragment shaders on layout nodes across all three GPU backends: SDL 3.4+ (Vulkan/Metal via SPIR-V and MSL), RGFW (OpenGL 3.2 via GLSL 150), and the browser backend (WebGL2 via GLSL ES 300).
+`nano-ui` supports typed, composable GPU fragment shaders on layout nodes across all three GPU backends: SDL (OpenGL 3.2+ via GLSL 150 on Windows, and SDL 3.4+ Metal/Vulkan via MSL and SPIR-V elsewhere), RGFW (OpenGL 3.2 via GLSL 150), and the browser backend (WebGL2 via GLSL ES 300).
 
 The core `nano-ui` package defines the shader types, std140 uniform packing (`Uniforms`), and the two widget entry points (`shaderBox` and `withShader`). The companion `nano-ui-shader` package adds a pure-Haskell typed fragment EDSL, compilers for all four GPU formats plus a CPU reference evaluator, algebraic pass fusion, and 21 standard effects.
 
@@ -85,7 +85,7 @@ The first argument to `layerEffectM` reports the maximum sample offset in logica
 
 ## Capabilities, fallbacks, and SVG export
 
-On SDL 3.4+, `RenderDriverAuto` selects SDL's `"gpu"` render driver when available (falling back to standard drivers or software rendering when unavailable). Inspect live GPU support inside a view with `askShaderCapabilities`:
+Under `RenderDriverAuto`, Windows uses SDL's `"opengl"` driver (which runs GLSL 150 shaders directly with higher frame rates and smooth live window resizing), while macOS and Linux prefer SDL 3.4's `"gpu"` driver (falling back to standard drivers or software rendering when unavailable). Inspect live GPU support inside a view with `askShaderCapabilities`:
 
 ```haskell
 {{#include ../../../packages/nano-ui-demo/book/Book/Shaders.hs:capabilities}}

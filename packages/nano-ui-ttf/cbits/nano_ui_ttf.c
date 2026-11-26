@@ -113,6 +113,12 @@ static void force_white_rgb(SDL_Surface *surf)
     Uint8 *base = (Uint8 *)surf->pixels;
     int pitch = surf->pitch;
     for (int y = 0; y < surf->h; y++) {
+#if SDL_BYTEORDER == SDL_LIL_ENDIAN
+        Uint32 *row = (Uint32 *)(base + y * pitch);
+        for (int x = 0; x < surf->w; x++) {
+            row[x] |= 0x00FFFFFFu;
+        }
+#else
         Uint8 *row = base + y * pitch;
         for (int x = 0; x < surf->w; x++) {
             Uint8 *px = row + x * 4;
@@ -120,6 +126,7 @@ static void force_white_rgb(SDL_Surface *surf)
             px[1] = 255;
             px[2] = 255;
         }
+#endif
     }
 }
 
@@ -180,9 +187,9 @@ static bool SDLCALL nano_ui_capture_text(void *userdata, TTF_Text *text)
     size_t cluster_cap = d->num_clusters > 0 ? (size_t)d->num_clusters : 1;
     out->w = d->w;
     out->h = d->h;
-    out->glyphs = (int *)SDL_calloc(op_cap, NANO_UI_SHAPED_GLYPH_INTS * sizeof(int));
-    out->glyph_fonts = (TTF_Font **)SDL_calloc(op_cap, sizeof(TTF_Font *));
-    out->clusters = (int *)SDL_calloc(cluster_cap, NANO_UI_SHAPED_CLUSTER_INTS * sizeof(int));
+    out->glyphs = (int *)SDL_malloc(op_cap * NANO_UI_SHAPED_GLYPH_INTS * sizeof(int));
+    out->glyph_fonts = (TTF_Font **)SDL_malloc(op_cap * sizeof(TTF_Font *));
+    out->clusters = (int *)SDL_malloc(cluster_cap * NANO_UI_SHAPED_CLUSTER_INTS * sizeof(int));
     if (!out->glyphs || !out->glyph_fonts || !out->clusters) {
         return false;
     }
@@ -267,14 +274,18 @@ static bool shape_with_sentinel(TTF_Font *font, const char *text, size_t len, co
     engine.DestroyText = nano_ui_release_text;
     out->text_len = (int)len;
     out->sentinel_advance_cp = advance_cp;
-    char *padded = SDL_malloc(len + sentinel_len);
+    char stack_buf[256];
+    const size_t padded_len = len + sentinel_len;
+    char *padded = padded_len <= sizeof(stack_buf) ? stack_buf : (char *)SDL_malloc(padded_len);
     if (!padded) {
         return false;
     }
     SDL_memcpy(padded, text, len);
     SDL_memcpy(padded + len, sentinel, sentinel_len);
-    TTF_Text *t = TTF_CreateText(&engine, font, padded, len + sentinel_len);
-    SDL_free(padded);
+    TTF_Text *t = TTF_CreateText(&engine, font, padded, padded_len);
+    if (padded != stack_buf) {
+        SDL_free(padded);
+    }
     if (!t) {
         return false;
     }

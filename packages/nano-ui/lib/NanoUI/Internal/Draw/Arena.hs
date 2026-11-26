@@ -70,7 +70,7 @@ import Data.Primitive.PrimArray
   , unsafeFreezePrimArray
   , writePrimArray
   )
-import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
+import Data.Primitive.SmallArray (SmallArray, indexSmallArray, smallArrayFromList)
 import Data.Word (Word32, Word8)
 import Data.Vector.Unboxed qualified as U
 import Data.Vector.Unboxed.Mutable qualified as UM
@@ -86,7 +86,6 @@ import NanoUI.Internal.Types
   ( Color (..)
   , Rect (..)
   , V2 (..)
-  , bucketOffsets
   , foldUpTo
   , forUpTo_
   , newZeroedPrimArray
@@ -656,26 +655,59 @@ cutCmdsToPieces pieces src n = do
   pure (dest, m)
 
 -- | Stable counting sort by layer, with cumulative offsets into the sorted
--- array. Counts become write cursors after the prefix sum.
+-- array. Single-command frames reuse precomputed layer-offset tables, and
+-- frames whose commands are already in layer order freeze a slice directly.
 groupCmdsByLayer ::
   U.MVector RealWorld DrawCmd -> Int -> IO (U.Vector DrawCmd, PrimArray Int)
 groupCmdsByLayer _ 0 = pure (U.empty, emptyLayerOffsets)
+groupCmdsByLayer src 1 = do
+  cmd <- UM.unsafeRead src 0
+  pure (U.singleton cmd, indexSmallArray singleLayerOffsets (fromEnum (cmdLayer cmd)))
 groupCmdsByLayer src n = do
   let layers = fromEnum (maxBound :: Layer) + 1
-  (offsets, cursors) <- bucketOffsets layers $ \visit ->
-    forUpTo_ n $ \i -> UM.unsafeRead src i >>= visit . fromEnum . cmdLayer
-  dest <- UM.unsafeNew n
-  forUpTo_ n $ \i -> do
-    cmd <- UM.unsafeRead src i
-    let l = fromEnum (cmdLayer cmd)
-    j <- readPrimArray cursors l
-    UM.unsafeWrite dest j cmd
-    writePrimArray cursors l (j + 1)
-  (,) <$> U.unsafeFreeze dest <*> unsafeFreezePrimArray offsets
+  -- Check if already in non-decreasing layer order while counting per layer.
+  counts <- newZeroedPrimArray layers
+  let scan !i !prevL !sorted
+        | i >= n = pure sorted
+        | otherwise = do
+            l <- fromEnum . cmdLayer <$> UM.unsafeRead src i
+            readPrimArray counts l >>= writePrimArray counts l . (+ 1)
+            scan (i + 1) l (sorted && l >= prevL)
+  sorted <- scan 0 0 True
+  offsets <- newPrimArray (layers + 1)
+  let prefix !l !acc
+        | l >= layers = writePrimArray offsets layers acc
+        | otherwise = do
+            c <- readPrimArray counts l
+            writePrimArray offsets l acc
+            prefix (l + 1) (acc + c)
+  prefix 0 0
+  if sorted
+    then (,) <$> U.freeze (UM.unsafeSlice 0 n src) <*> unsafeFreezePrimArray offsets
+    else do
+      -- Reuse 'counts' as write cursors by copying the prefix offsets into it.
+      copyMutablePrimArray counts 0 offsets 0 layers
+      dest <- UM.unsafeNew n
+      forUpTo_ n $ \i -> do
+        cmd <- UM.unsafeRead src i
+        let l = fromEnum (cmdLayer cmd)
+        j <- readPrimArray counts l
+        UM.unsafeWrite dest j cmd
+        writePrimArray counts l (j + 1)
+      (,) <$> U.unsafeFreeze dest <*> unsafeFreezePrimArray offsets
 
 -- Empty damage frames share their immutable command index.
 emptyLayerOffsets :: PrimArray Int
 emptyLayerOffsets = primArrayFromList (replicate (fromEnum (maxBound :: Layer) + 2) 0)
+
+-- Single-command frames share their immutable layer-offset table per layer.
+singleLayerOffsets :: SmallArray (PrimArray Int)
+singleLayerOffsets =
+  let layers = fromEnum (maxBound :: Layer) + 1
+   in smallArrayFromList
+        [ primArrayFromList [if k <= l then 0 else 1 | k <- [0 .. layers]]
+        | l <- [0 .. layers - 1]
+        ]
 
 -- Allocate room for a primitive, hand the derived offsets to the body, and
 -- commit the vertex/index counts afterwards. INLINE: erased at -O.

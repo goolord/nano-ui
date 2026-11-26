@@ -319,20 +319,21 @@ positionRowFromParent ::
 positionRowFromParent env@SolveEnv {seArena = na, seArrays = a} depth parent gap (Rect cx cy cw ch) = do
   pItems <- readItemsAlign a parent
   pJustify <- readTagEnum a parent TagJustify
+  pHasBase <- if pItems == ItemsBaseline then pure True else hasBaselineChild a parent
   n <- loadChildrenScratch na parent (flowChildSize env False cw ch)
   let baseGaps = gap * fromIntegral (max 0 (n - 1))
   distributeScratch na n cw baseGaps True
   withSnapshot na depth n fsOut $ \idxSnap outSnap -> do
     (startOff, stepGap) <- resolveJustify pJustify n cw baseGaps gap outSnap
-    placeRowLine env depth pItems idxSnap outSnap n stepGap (cx + startOff) cy ch
+    placeRowLine env depth pItems pHasBase idxSnap outSnap n stepGap (cx + startOff) cy ch
 
 -- | Place the first @k@ snapshot children left to right from @x0@, each as
 -- wide as its @outSnap@ share, in a line @cross@ tall at @top@.
 -- Baseline-aligned children share the lowest of their baselines, so the
 -- child with the tallest ascent touches the top.
-placeRowLine :: SolveEnv -> Int -> ItemsAlign -> IOArr Int -> IOArr Float -> Int -> Float -> Float -> Float -> Float -> IO ()
-placeRowLine env@SolveEnv {seArena = na, seArrays = a} !depth pItems idxSnap outSnap !k !gap !x0 !top !cross = do
-  hasBaseline <- anyBaseline 0
+placeRowLine :: SolveEnv -> Int -> ItemsAlign -> Bool -> IOArr Int -> IOArr Float -> Int -> Float -> Float -> Float -> Float -> IO ()
+placeRowLine env@SolveEnv {seArena = na, seArrays = a} !depth pItems !mayHaveBaseline idxSnap outSnap !k !gap !x0 !top !cross = do
+  hasBaseline <- if mayHaveBaseline then anyBaseline 0 else pure False
   if not hasBaseline
     then goPlain 0 x0
     else do
@@ -453,6 +454,7 @@ positionWrap env@SolveEnv {seArena = na, seArrays = a} depth parent dir gap (Rec
   lineGap <- readStyle a parent StyleLineGap
   align <- lineAlignFraction <$> readTagEnum a parent TagLineAlign
   pItems <- readItemsAlign a parent
+  pHasBase <- if pItems == ItemsBaseline then pure True else hasBaselineChild a parent
   let row = dir == DirRow
       limit = if row then cw else ch
       along (_, (w, h)) = if row then w else h
@@ -471,7 +473,7 @@ positionWrap env@SolveEnv {seArena = na, seArrays = a} depth parent dir gap (Rec
             else (\used -> max 0 (limit - used) * align) <$> foldUpTo k (\t i -> (t +) <$> readPrimArray outArr i) (gaps k)
         withSnapshot na depth k fsOut $ \idxSnap outSnap ->
           if row
-            then placeRowLine env depth pItems idxSnap outSnap k gap (cx + shift) lineAt lineCross
+            then placeRowLine env depth pItems pHasBase idxSnap outSnap k gap (cx + shift) lineAt lineCross
             else placeColumnLine env depth pItems idxSnap outSnap k gap False Nothing 0 0 (Rect lineAt (cy + shift) lineCross ch)
         -- The next line starts past this one, or past any child that grew.
         let reach m (ci, _) = do

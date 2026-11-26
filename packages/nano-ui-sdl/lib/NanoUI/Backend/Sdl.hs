@@ -109,7 +109,7 @@ module NanoUI.Backend.Sdl
 
 import NanoUI (NanoUI, WindowMode (..), WindowPosition (..), WindowSettings (..), defaultWindowSettings)
 import NanoUI.Internal.Debug (CoreDebugSnapshot (..), formatDrawRows, formatExplainRows, formatFpsRows)
-import NanoUI.Sdl.Internal.Runner (askSdlDebug, drawFrameWith, resetRenderTextures, sdlDebugSnapshot, sdlDrawFrame, setSdlUiFont, setSdlUiScale)
+import NanoUI.Sdl.Internal.Runner (askSdlDebug, drawFrameWith, resetRenderTextures, sdlDebugSnapshot, sdlDrawFrame, sdlDrawFrameSettling, setSdlUiFont, setSdlUiScale)
 import NanoUI.Sdl.Internal.Session (runSdlSession)
 import NanoUI.Sdl.Internal.Debug (SdlDebugSnapshot (..))
 import NanoUI.Sdl.Internal.Window (RenderDriver (..), RgbaImage (..), SdlEnv, SdlOptions (..), askSdlEnv, captureScreenshot, defaultSdlOptions, saveScreenshot, syncDisplay, windowZoom, withSdl, withSdlBench)
@@ -132,7 +132,7 @@ import NanoUI.Emit (NanoUIE, newReducer, reduceFrame)
 -- SDL-specific view operations (file dialogs, fonts, window chrome, debug
 -- data) act on this session without taking it as an explicit argument.
 runSdlApp :: SdlOptions -> NanoUI () -> IO ()
-runSdlApp options ui = runSdlSession options (`sdlDrawFrame` ui)
+runSdlApp options ui = runSdlSession options (`sdlDrawFrameSettling` ui)
 
 -- | Run a model-driven view, folding emitted messages through the update
 -- function in emission order. Use the adapters in "NanoUI.Emit" to emit
@@ -146,6 +146,6 @@ runSdlAppReduce ::
   -> IO ()
 runSdlAppReduce options update model view = do
   reducer <- newReducer update model
-  runSdlSession options $ \ctx env inp forceFull ->
-    drawFrameWith ctx env inp forceFull $
-      (\(_, drawData, dirty) -> (drawData, dirty)) <$> reduceFrame reducer ctx inp view
+  runSdlSession options $ \ctx env inp forceFull settleResize ->
+    drawFrameWith ctx env inp forceFull settleResize $ \i ->
+      (\(_, drawData, dirty) -> (drawData, dirty)) <$> reduceFrame reducer ctx i view
