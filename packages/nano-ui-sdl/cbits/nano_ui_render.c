@@ -917,8 +917,11 @@ void nano_ui_batch_flush(NanoUiBatch *batch)
         }
         return;
     }
-    /* The interleaved SDL_Vertex buffer read in place through strides; an
-     * untextured batch passes no UVs. */
+    /* The interleaved SDL_Vertex buffer read in place through strides. An
+     * untextured batch passes its UVs too (every vertex has one, the white
+     * texel's for solid fills): SDL 3.4.0's software renderer reads UVs while
+     * merging triangles into rects without checking for NULL, and segfaults.
+     * The other renderers ignore UVs without a texture. */
     const SDL_Vertex *v = (const SDL_Vertex *)batch->verts;
     const int *idx = (const int *)batch->indices + batch->pending_start;
     int nv = batch->vert_count;
@@ -938,7 +941,7 @@ void nano_ui_batch_flush(NanoUiBatch *batch)
     }
     SDL_RenderGeometryRaw(batch->renderer, batch->pending_texture,
                           xy, xy_stride, &v->color, stride,
-                          batch->pending_texture ? &v->tex_coord.x : NULL, stride,
+                          &v->tex_coord.x, stride,
                           nv, idx, batch->pending_n, (int)sizeof(int));
     batch->pending_n = 0;
     batch->pending_start = 0;

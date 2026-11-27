@@ -289,7 +289,9 @@ runImeDamageTest ctx failed = do
 
 -- | IME keys fire no shortcuts. While composing, presses, releases and held
 -- keys are dropped. On the commit frame, passed-on keys reach the field but
--- fire nothing, and the commit is inserted even with Ctrl held.
+-- fire nothing, and the commit is inserted even with Ctrl held. Ctrl+G is
+-- free in a text field on every platform; on macOS Ctrl+D is the Emacs
+-- delete-forward key, which the field takes.
 runImeShortcutsTest :: Context -> IORef Int -> IO ()
 runImeShortcutsTest ctx failed = do
   fired <- newIORef ([] :: [T.Text])
@@ -297,7 +299,7 @@ runImeShortcutsTest ctx failed = do
   let note r c = liftIO (modifyIORef' r (c :))
       widget v = do
         r <- textInput' v
-        forM_ [ctrl <> key 's', key KeyEscape, ctrl <> key KeyEnter, ctrl <> key 'd'] $ \c ->
+        forM_ [ctrl <> key 's', key KeyEscape, ctrl <> key KeyEnter, ctrl <> key 'g'] $ \c ->
           whenM (shortcut c) (note fired (shortcutLabel c))
         forM_ [("pressed", keyPressed), ("released", keyReleased), ("held", keyHeld)] $ \(n, on) ->
           whenM (on (KeyChar 's')) (note seen n)
@@ -310,19 +312,19 @@ runImeShortcutsTest ctx failed = do
         liftIO ((,,) value <$> readIORef fired <*> readIORef seen)
       valueFired f = (\(v, fs, _) -> (v, fs)) <$> step f
       composingKeys =
-        map chordInp [ctrl <> key 's', ctrl <> key 'd', key KeyEscape, ctrl <> key KeyEnter]
+        map chordInp [ctrl <> key 's', ctrl <> key 'g', key KeyEscape, ctrl <> key KeyEnter]
           ++ [keyUpInp (KeyChar 's'), \i -> i {inputKeysHeld = inputKeysFromList [KeyChar 's']}]
   field ctx failed "ab" 0 widget $ do
     _ <- compose "かな" 2
     forM_ composingKeys $ \f -> checkEq ("ab", [], []) =<< step f
     checkEq ("ab漢字", [], []) =<< step (chordInp (ctrl <> key 's') . commit "漢字")
     _ <- compose "かな" 2
-    checkEq ("ab漢字かな", []) =<< valueFired (chordInp (ctrl <> key 'd') . commit "かな")
+    checkEq ("ab漢字かな", []) =<< valueFired (chordInp (ctrl <> key 'g') . commit "かな")
     -- A key passed on with the commit still reaches the field.
     _ <- compose "かな" 2
     checkEq ("ab漢字かなx", []) =<< valueFired (keyInp KeyLeft . commit "x")
     checkEq ("ab漢字かなyx", []) =<< valueFired (\i -> i {inputChars = "y"})
-    forM_ [ctrl <> key 's', ctrl <> key 'd'] $ \c ->
+    forM_ [ctrl <> key 's', ctrl <> key 'g'] $ \c ->
       checkEq ("ab漢字かなyx", [shortcutLabel c]) =<< valueFired (chordInp c)
 
 -- | A custom widget takes text with 'useInputMethod' while focused: it gets

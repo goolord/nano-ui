@@ -68,7 +68,7 @@ runPreciseClaimsTest ctx failed = do
   check exact (key KeyDelete) False
   check KeysAll (ctrl <> key 'k') False
   check KeysNone (ctrl <> key 'k') True
-  check KeysReadOnly (ctrl <> key 'c') False
+  check KeysReadOnly (cmdOrCtrl <> key 'c') False
   check KeysReadOnly (key KeyDelete) True
 
 -- | Build the view @mk note@ and a frame runner returning what @note@

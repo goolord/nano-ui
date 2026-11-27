@@ -67,12 +67,12 @@ editCases =
       , typeText "X", is "aé世X界z"
       ]
     )
-  , -- Word-wise keys, as in the text area.
+  , -- Word-wise keys, as in the text area: Option on macOS, Ctrl elsewhere.
     ( textInput'
     , "hello world"
-    , [ tabKey, chord (ctrl <> key KeyBackspace), is "hello ", chord (ctrl <> key KeyDelete), is "hello "
-      , chord (ctrl <> key KeyLeft), typeText "X", is "Xhello "
-      , chord (ctrl <> key KeyDelete), is "X "
+    , [ tabKey, chord (jump <> key KeyBackspace), is "hello ", chord (jump <> key KeyDelete), is "hello "
+      , chord (jump <> key KeyLeft), typeText "X", is "Xhello "
+      , chord (jump <> key KeyDelete), is "X "
       ]
     )
   , -- A value holding a line break keeps its caret as an offset into the
@@ -139,6 +139,7 @@ editCases =
     tabKey = pressKey KeyTab
     shiftLeft = chord (shift <> key KeyLeft)
     commandMods = if onMac then super <> alt else alt
+    jump = if onMac then alt else ctrl
 
 runEditsTest :: Context -> IORef Int -> IO ()
 runEditsTest _ failed = forM_ editCases $ \(widget, initial, steps) -> do
